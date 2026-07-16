@@ -1,0 +1,7 @@
+node_modules/
+.pnpm-store/
+data/*.db
+data/*.db-*
+.DS_Store
+.env
+npm-debug.log*

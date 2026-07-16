@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:;" />
+    <title>NexusData</title>
+    <link rel="stylesheet" href="css/styles.css" />
+  </head>
+  <body>
+    <div id="auth-screen" class="auth-screen"></div>
+    <div class="app-shell app-hidden" aria-hidden="true">
+      <aside class="sidebar">
+        <div class="sidebar-pane">
+          <div class="brand">
+            <div><strong>NexusData</strong></div>
+          </div>
+          <div class="sidebar-label">EXPLORER</div>
+          <nav class="main-nav" aria-label="Navegación principal">
+            <button class="nav-item active" data-view="dashboard"><span class="nav-icon">⌂</span>Inicio</button>
+            <button class="nav-item" data-view="search"><span class="nav-icon">⌕</span>Buscar</button>
+            <button class="nav-item" data-view="sources"><span class="nav-icon">◈</span>Fuentes</button>
+            <button class="nav-item" data-view="collections"><span class="nav-icon">▱</span>Colecciones</button>
+            <button class="nav-item" data-view="settings"><span class="nav-icon">⚙</span>Configuración</button>
+          </nav>
+          <div class="sidebar-footer">
+            <div class="status-dot"></div>
+            <div><span>SQLite local</span></div>
+          </div>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div class="window-tabs">
+            <div class="window-tab active"><span class="tab-icon">◈</span><span>NexusData</span></div>
+            <div class="breadcrumb"><span>workspace</span><b>/</b><strong id="page-title">Inicio</strong></div>
+          </div>
+          <div class="topbar-actions"><span id="api-status" class="connection-status"><i></i>Conectando…</span><span id="active-user" class="active-user"></span><button id="logout-button" class="btn btn-secondary btn-small">Cerrar sesión</button></div>
+        </header>
+        <div id="toast-region" class="toast-region" aria-live="polite"></div>
+        <section id="view-dashboard" class="view active"></section>
+        <section id="view-search" class="view"></section>
+        <section id="view-sources" class="view"></section>
+        <section id="view-collections" class="view"></section>
+        <section id="view-settings" class="view"></section>
+      </main>
+    </div>
+
+    <div id="modal-root"></div>
+    <script src="js/app.js"></script>
+  </body>
+</html>

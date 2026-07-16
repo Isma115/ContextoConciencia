@@ -1,0 +1,32 @@
+{
+  "name": "nexusdata",
+  "version": "1.0.0",
+  "description": "Centro de información técnica para desarrollo de software",
+  "main": "desktop/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "server": "node server/app.js",
+    "db:up": "docker compose up -d mysql",
+    "db:down": "docker compose down",
+    "db:logs": "docker compose logs -f mysql",
+    "test": "node --test",
+    "check": "node --check server/app.js && node --check server/auth.js && node --check server/database/mysql.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/js/app.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cookie-parser": "^1.4.7",
+    "dotenv": "^17.4.2",
+    "express": "^5.1.0",
+    "express-rate-limit": "^8.5.2",
+    "fuse.js": "^7.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "mysql2": "^3.22.6"
+  },
+  "devDependencies": {
+    "electron": "^37.0.0"
+  }
+}
