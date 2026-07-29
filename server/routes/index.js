@@ -6,6 +6,7 @@ const { now, parseJson, sourceForResponse, withDocumentShape, documentSelect } =
 const { importLocalSource } = require('../importers/local');
 const { syncRestSource, testRestSource } = require('../services/rest');
 const { inspectHtmlProject } = require('../services/html-viewer');
+const { createHtmlPreview, getHtmlPreview } = require('../services/html-viewer-preview');
 const { installAuthRoutes, requireAuth } = require('../auth');
 
 const ID = (prefix) => `${prefix}_${crypto.randomUUID()}`;
@@ -122,6 +123,19 @@ function sourceResponse(db, source) {
   return sourceForResponse(sourceRow(db, source.id));
 }
 
+function samePathList(first, second) {
+  return Array.isArray(first) && Array.isArray(second)
+    && first.length === second.length
+    && first.every((value, index) => value === second[index]);
+}
+
+function findHtmlViewerSource(db, paths) {
+  return db.all("SELECT * FROM sources WHERE type = 'local' ORDER BY created_at DESC").find((row) => {
+    const config = parseJson(row.config_json);
+    return config.role === 'html-viewer' && samePathList(config.paths, paths);
+  }) || null;
+}
+
 function setSourceStatus(db, id, status, lastError = null) {
   db.run('UPDATE sources SET status = ?, last_error = ? WHERE id = ?', status, lastError, id);
 }
@@ -169,7 +183,7 @@ function documentRows(db, query = {}, { localOnly = false } = {}) {
   }
   const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
   const limit = Math.min(Math.max(Number(query.limit) || 200, 1), 500);
-  const rows = db.all(`${documentSelect()}${where} ORDER BY d.updated_at DESC LIMIT ${limit}`, ...params);
+  const rows = db.all(`${documentSelect()}${where} ORDER BY LOWER(COALESCE(d.path, d.title)) ASC, LOWER(d.title) ASC, d.id ASC LIMIT ${limit}`, ...params);
   return rows.map((row) => withDocumentShape(db, row));
 }
 
@@ -182,6 +196,12 @@ function snippet(content, query) {
   const start = Math.max(0, index - 75);
   const end = Math.min(clean.length, index + query.length + 145);
   return `${start ? '…' : ''}${clean.slice(start, end)}${end < clean.length ? '…' : ''}`;
+}
+
+function compareStableDocuments(first, second) {
+  const firstKey = `${first.path || first.title}\u0000${first.title}\u0000${first.id}`.toLocaleLowerCase();
+  const secondKey = `${second.path || second.title}\u0000${second.title}\u0000${second.id}`.toLocaleLowerCase();
+  return firstKey.localeCompare(secondKey);
 }
 
 function searchDocuments(db, query, filters, options = {}) {
@@ -214,7 +234,7 @@ function searchDocuments(db, query, filters, options = {}) {
       snippet: snippet(item.content, query),
       _rank: titleHit ? 3 : contentHit ? 2 : 1
     };
-  }).sort((a, b) => b._rank - a._rank || b.score - a.score || b.updatedAt.localeCompare(a.updatedAt));
+  }).sort((a, b) => b._rank - a._rank || b.score - a.score || compareStableDocuments(a, b));
   return results.map(({ _rank, tagsText, metadataText, ...result }) => result).slice(0, 100);
 }
 
@@ -229,6 +249,61 @@ function installRoutes(app, db, authDb, environment = process.env) {
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
+  });
+
+  app.post('/api/html-viewer/sources', async (req, res) => {
+    try {
+      const project = inspectHtmlProject(req.body?.paths);
+      const paths = project.paths;
+      const existing = findHtmlViewerSource(db, paths);
+      const id = existing?.id || ID('source');
+      const name = asText(req.body?.name, project.name).slice(0, 120) || project.name;
+      const config = { role: 'html-viewer', paths };
+      if (existing) {
+        db.run('UPDATE sources SET name = ?, config_json = ?, status = ?, last_error = NULL WHERE id = ?', name, JSON.stringify(config), 'pending', id);
+      } else {
+        db.run('INSERT INTO sources (id, name, type, config_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?)', id, name, 'local', JSON.stringify(config), 'pending', now());
+      }
+      const synced = await syncSource(db, sourceRow(db, id));
+      res.status(existing ? 200 : 201).json({
+        project,
+        source: synced.source,
+        sync: { total: synced.total, syncedAt: synced.syncedAt }
+      });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/html-viewer/sources/:id/project', (req, res) => {
+    const source = sourceRow(db, req.params.id, { localOnly: isOffline(req) });
+    const config = parseJson(source?.config_json);
+    if (!source || source.type !== 'local' || config.role !== 'html-viewer') {
+      return res.status(404).json({ error: 'Fuente HTML no encontrada' });
+    }
+    try {
+      const project = inspectHtmlProject(config.paths);
+      return res.json({ project, source: sourceResponse(db, source) });
+    } catch (error) {
+      setSourceStatus(db, source.id, 'error', error.message);
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/html-viewer/preview', (req, res) => {
+    try {
+      const token = createHtmlPreview(req.body?.html);
+      res.json({ path: `/api/html-viewer/preview/${token}` });
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/html-viewer/preview/:token', (req, res) => {
+    const content = getHtmlPreview(req.params.token);
+    if (!content) return res.status(404).send('Previsualización no encontrada o caducada');
+    res.set('Content-Security-Policy', "default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; script-src 'unsafe-inline' https: blob:; style-src 'unsafe-inline' https: data:; img-src data: https: blob:; font-src data: https: blob:; media-src data: https: blob:; worker-src blob:; connect-src 'none'; frame-src 'none'");
+    return res.type('html').send(content);
   });
 
   app.get('/api/global-project', (req, res) => {

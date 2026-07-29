@@ -6,9 +6,28 @@ import { state } from '../core/state.js';
 import { typeLabel, shortDate } from '../core/format.js';
 
 let refreshData = async () => {};
+let openHtmlViewer = null;
 
-export function configureDocuments({ onRefresh } = {}) {
+export function configureDocuments({ onRefresh, onOpenHtmlViewer } = {}) {
   refreshData = onRefresh || refreshData;
+  openHtmlViewer = onOpenHtmlViewer || openHtmlViewer;
+}
+
+function bindHtmlSourceOpeners(container) {
+  container.querySelectorAll('[data-view-html-source]').forEach((card) => {
+    const open = (event) => {
+      if (event.target.closest('button, select, input, textarea, a')) return;
+      const source = state.sources.find((item) => item.id === card.dataset.viewHtmlSource);
+      if (source && openHtmlViewer) openHtmlViewer(source);
+    };
+    card.addEventListener('click', open);
+    card.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        open(event);
+      }
+    });
+  });
 }
 
 export function bindDocumentOpeners(container) {
@@ -25,6 +44,7 @@ export function bindDocumentOpeners(container) {
       }
     });
   });
+  bindHtmlSourceOpeners(container);
 }
 
 function documentContent(doc) {
@@ -37,6 +57,12 @@ function documentContent(doc) {
 export async function openDocument(id) {
   try {
     const doc = await api(`/documents/${encodeURIComponent(id)}`);
+    const source = state.sources.find((item) => item.id === doc.sourceId);
+    const htmlTypes = new Set(['html', 'css', 'javascript']);
+    if (source?.config?.role === 'html-viewer' && htmlTypes.has(doc.type) && openHtmlViewer) {
+      await openHtmlViewer(source, doc.path);
+      return;
+    }
     const isMarkdown = doc.type === 'markdown';
     const content = documentContent(doc);
     const canRevealPath = Boolean(doc.path) && doc.type !== 'rest';

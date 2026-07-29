@@ -98,8 +98,14 @@ function inspectHtmlProject(inputPaths) {
   projectFiles.sort((a, b) => a.relativePath.localeCompare(b.relativePath, 'es'));
   const htmlFiles = projectFiles.filter((file) => file.type === 'html');
   const entry = htmlFiles.find((file) => /(^|\/)index\.html?$/i.test(file.relativePath)) || htmlFiles[0] || null;
+  let name = path.basename(root) || 'Proyecto HTML';
+  if (paths.length === 1) {
+    try {
+      if (fs.statSync(paths[0]).isFile()) name = path.basename(paths[0]);
+    } catch { /* La lectura del archivo ya queda reflejada en errors. */ }
+  }
   return {
-    name: path.basename(root) || 'Proyecto HTML',
+    name,
     root,
     paths,
     entry: entry?.relativePath || null,

@@ -11,11 +11,13 @@ const SUPPORTED = new Map([
   ['.markdown', 'markdown'],
   ['.html', 'html'],
   ['.htm', 'html'],
+  // Estos tipos se conservan para el visor HTML, pero no se importan como documentación.
   ['.css', 'css'],
   ['.js', 'javascript'],
   ['.mjs', 'javascript'],
   ['.cjs', 'javascript']
 ]);
+const DOCUMENT_SUPPORTED = new Map([...SUPPORTED].filter(([, type]) => !['css', 'javascript'].includes(type)));
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 2000;
 
@@ -24,7 +26,7 @@ function collectFiles(inputPath, files = []) {
   const absolute = path.resolve(inputPath);
   const stats = fs.statSync(absolute);
   if (stats.isFile()) {
-    if (SUPPORTED.has(path.extname(absolute).toLowerCase())) files.push(absolute);
+    if (DOCUMENT_SUPPORTED.has(path.extname(absolute).toLowerCase())) files.push(absolute);
     return files;
   }
   if (!stats.isDirectory()) return files;
@@ -113,4 +115,4 @@ function importLocalSource(db, source, { prune = false } = {}) {
   return { created, updated, total: created + updated, errors, files: uniqueFiles.length };
 }
 
-module.exports = { SUPPORTED, MAX_FILE_BYTES, MAX_FILES, collectFiles, readFileDocument, importLocalSource };
+module.exports = { SUPPORTED, DOCUMENT_SUPPORTED, MAX_FILE_BYTES, MAX_FILES, collectFiles, readFileDocument, importLocalSource };

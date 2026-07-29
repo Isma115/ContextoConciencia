@@ -5,6 +5,7 @@ export const state = {
   sources: [],
   collections: [],
   tags: [],
+  stats: { documents: 0, sources: 0, collections: 0, lastSyncAt: null },
   searchQuery: '',
   filters: { ...DEFAULT_FILTERS },
   globalSearchQuery: '',
@@ -12,10 +13,12 @@ export const state = {
   globalProject: null,
   htmlViewer: {
     paths: [],
+    sourceId: null,
     project: null,
     selectedFile: null,
     mode: 'preview',
-    loading: false
+    loading: false,
+    error: ''
   },
   user: null
 };

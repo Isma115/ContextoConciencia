@@ -1,10 +1,9 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { DEFAULT_FILTERS, state, resetFilters } from '../core/state.js';
-import { shortDate, sourceIcon, statusLabel, typeLabel } from '../core/format.js';
+import { statusLabel, typeLabel } from '../core/format.js';
 import { showToast } from '../ui/notifications.js';
 import { bindDocumentOpeners } from './documents.js';
-import { deleteSource, syncSource, testSource } from './sources.js';
 import { openSourceModal } from './source-modal.js';
 
 const SEARCH_DEBOUNCE_MS = 500;
@@ -82,7 +81,7 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
 }
 
 export function renderSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
-  $('#view-search').innerHTML = `<div class="search-sticky"><div class="section-top"><h1>Buscar</h1></div><div class="panel search-controls"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div><div class="panel search-results-panel"><div class="panel-header"><h2>${state.searchQuery ? `${(results || []).length} resultados` : 'Documentos'}</h2></div><div class="result-list">${resultMarkup(results)}</div></div>`;
+  $('#view-search').innerHTML = `<div class="search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div></div><div class="panel search-results-panel"><div class="panel-header"><h2>${state.searchQuery ? `${(results || []).length} resultados` : 'Documentos'}</h2></div><div class="result-list">${resultMarkup(results)}</div></div>`;
   bindSearchControls({ perform: performSearch, cancel: cancelSearchDebounce, clear: () => { searchRequestId += 1; state.searchQuery = ''; state.filters = resetFilters(); renderSearch([]); } });
   const surface = $('#view-search');
   bindCollectionAndTagActions(surface);
@@ -130,46 +129,53 @@ export async function performSearch() {
 
 function projectFolderName(value) { return String(value || '').split(/[\\/]/).filter(Boolean).pop() || 'Proyecto global'; }
 
-function isGlobalProjectSource(source) { return source?.id === state.globalProject?.source?.id || source?.config?.role === 'global-project'; }
-
 export function renderGlobalSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
   const project = state.globalProject;
   const offline = state.user?.offline === true;
-  const sourceCards = state.sources.filter((source) => !isGlobalProjectSource(source)).map((source) => {
-    const config = source.config || {};
-    const detail = source.type === 'rest' ? config.url : (config.paths || []).join(' · ');
-    return `<article class="source-card global-source-card"><div class="source-card-top"><div class="source-logo">${sourceIcon(source.type)}</div><div class="source-details"><h3>${escapeHtml(source.name)}</h3><div class="source-url">${escapeHtml(detail || 'Sin configuración')}</div></div><span class="pill ${escapeHtml(source.status)}">${escapeHtml(statusLabel(source.status))}</span></div><div class="source-actions"><button class="btn btn-secondary btn-small" data-global-source-test="${escapeHtml(source.id)}">Probar</button><button class="btn btn-secondary btn-small" data-global-source-sync="${escapeHtml(source.id)}">↻ Sync</button><button class="btn btn-secondary btn-small" data-global-source-edit="${escapeHtml(source.id)}">Editar</button><button class="btn btn-danger btn-small" data-global-source-delete="${escapeHtml(source.id)}">Eliminar</button><span class="source-info">${source.documentCount} docs · ${escapeHtml(shortDate(source.lastSyncAt))}</span></div>${source.lastError ? `<p class="form-note source-error">${escapeHtml(source.lastError)}</p>` : ''}</article>`;
-  }).join('');
-  const projectPanel = project
-    ? `<div class="global-project-loaded"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>${escapeHtml(project.name)}</strong><span title="${escapeHtml(project.path || '')}">${escapeHtml(project.path || 'Sin ruta')}</span><small>${project.source.documentCount} recursos indexados · ${escapeHtml(statusLabel(project.source.status))}</small></div></div><div class="global-project-actions"><button class="btn btn-secondary btn-small" data-global-project-action="sync">↻ Actualizar recursos</button><button class="btn btn-danger btn-small" data-global-project-action="close">Cerrar proyecto</button></div>`
-    : `<div class="global-project-loaded is-empty"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>Ningún proyecto cargado</strong></div><div class="global-project-actions"><button class="btn btn-secondary" data-global-project-action="new">＋ Nuevo proyecto</button><button class="btn btn-primary" data-global-project-action="load">Cargar proyecto</button></div>`;
   const sourceActions = offline ? '<button class="btn btn-primary btn-small" data-global-source-action="new-local">＋ Carpeta local</button>' : '<button class="btn btn-secondary btn-small" data-global-source-action="new-rest">＋ API REST</button><button class="btn btn-primary btn-small" data-global-source-action="new-local">＋ Carpeta local</button>';
-  $('#view-global-search').innerHTML = `<div class="global-search-header"><h1>Buscador Global</h1></div><div class="panel global-project-panel"><div class="global-project-row">${projectPanel}</div></div><div class="panel global-sources-panel"><div class="panel-header"><h2>Fuentes extra</h2><div class="hero-action">${sourceActions}</div></div><div class="source-list global-source-list">${sourceCards || '<div class="empty">Sin fuentes extra</div>'}</div></div>${project ? '<div id="global-search-surface"></div>' : ''}`;
+  const projectPanel = project
+    ? `<div class="global-project-loaded"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>${escapeHtml(project.name)}</strong><span title="${escapeHtml(project.path || '')}">${escapeHtml(project.path || 'Sin ruta')}</span><small>${project.source.documentCount} recursos indexados · ${escapeHtml(statusLabel(project.source.status))}</small></div></div><div class="global-project-actions">${sourceActions}<button class="btn btn-secondary btn-small" data-global-project-action="sync">↻ Actualizar recursos</button><button class="btn btn-danger btn-small" data-global-project-action="close">Cerrar proyecto</button></div>`
+    : `<div class="global-project-loaded is-empty"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>Ningún proyecto cargado</strong></div><div class="global-project-actions"><button class="btn btn-secondary" data-global-project-action="new">＋ Nuevo proyecto</button><button class="btn btn-primary" data-global-project-action="load">Cargar proyecto</button></div>`;
+  $('#view-global-search').innerHTML = `${project ? '<div id="global-search-controls"></div>' : ''}<div class="panel global-project-panel"><div class="global-project-row">${projectPanel}</div></div>${project ? '<div id="global-search-surface"></div>' : ''}`;
   bindGlobalProjectActions();
   bindGlobalSourceActions();
-  if (project) renderGlobalSearchSurface(results, { restoreFocus, selectionStart, selectionEnd });
+  bindDocumentOpeners($('#view-global-search'));
+  if (project) {
+    renderGlobalSearchControls({ restoreFocus, selectionStart, selectionEnd });
+    renderGlobalSearchSurface(results);
+  }
 }
 
-function renderGlobalSearchSurface(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
-  $('#global-search-surface').innerHTML = `<div class="search-sticky global-search-sticky"><div class="section-top"><h2 class="global-results-title">Índice global</h2></div><div class="panel search-controls"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="global-search-input" class="search-input" value="${escapeHtml(state.globalSearchQuery)}" placeholder="Buscar en todos los recursos…" autocomplete="off" /></div><button id="global-search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup('global', state.globalFilters)}</div></div><div class="panel search-results-panel"><div class="panel-header"><h2>${state.globalSearchQuery ? `${(results || []).length} resultados` : 'Documentos'}</h2></div><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
+function renderGlobalSearchControls({ restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
+  const controls = $('#global-search-controls');
+  if (!controls) return;
+  controls.innerHTML = `<div class="search-sticky global-search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="global-search-input" class="search-input" value="${escapeHtml(state.globalSearchQuery)}" placeholder="Buscar en todos los recursos…" autocomplete="off" /></div><button id="global-search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup('global', state.globalFilters)}</div></div></div>`;
+  bindSearchControls({ prefix: 'global', perform: performGlobalSearch, cancel: cancelGlobalSearchDebounce, clear: () => {
+    globalSearchRequestId += 1;
+    state.globalSearchQuery = '';
+    state.globalFilters = resetFilters();
+    renderGlobalSearchControls();
+    renderGlobalSearchSurface([]);
+  } });
+  if (restoreFocus) restoreSearchFocus($('#global-search-input'), selectionStart, selectionEnd);
+}
+
+function renderGlobalSearchSurface(results = null) {
   const surface = $('#global-search-surface');
-  bindSearchControls({ prefix: 'global', perform: performGlobalSearch, cancel: cancelGlobalSearchDebounce, clear: () => { globalSearchRequestId += 1; state.globalSearchQuery = ''; state.globalFilters = resetFilters(); renderGlobalSearchSurface([]); } });
+  if (!surface) return;
+  surface.innerHTML = `<div class="panel search-results-panel"><div class="panel-header"><h2>${state.globalSearchQuery ? `${(results || []).length} resultados` : 'Documentos'}</h2></div><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
   bindCollectionAndTagActions(surface, 'global');
   bindDocumentOpeners(surface);
-  if (restoreFocus) restoreSearchFocus($('#global-search-input'), selectionStart, selectionEnd);
 }
 
 export async function performGlobalSearch() {
   const input = $('#global-search-input');
   if (!input || !state.globalProject) return;
-  const restoreFocus = document.activeElement === input;
-  const selectionStart = input.selectionStart;
-  const selectionEnd = input.selectionEnd;
   state.globalSearchQuery = input.value.trim();
   const requestId = ++globalSearchRequestId;
   const params = new URLSearchParams({ q: state.globalSearchQuery });
   [['global-filter-source', 'source'], ['global-filter-type', 'type'], ['global-filter-tag', 'tag'], ['global-filter-collection', 'collection'], ['global-filter-date', 'updatedFrom']].forEach(([id, key]) => { const stateKey = key === 'updatedFrom' ? 'date' : key; const value = $(`#${id}`)?.value || ''; state.globalFilters[stateKey] = value; if (value) params.set(key, value); });
-  try { const response = await api(`/search?${params}`); if (requestId === globalSearchRequestId && state.view === 'global-search') renderGlobalSearchSurface(response.results, { restoreFocus, selectionStart, selectionEnd }); } catch (error) { if (requestId === globalSearchRequestId && state.view === 'global-search') showToast(error.message, true); }
+  try { const response = await api(`/search?${params}`); if (requestId === globalSearchRequestId && state.view === 'global-search') renderGlobalSearchSurface(response.results); } catch (error) { if (requestId === globalSearchRequestId && state.view === 'global-search') showToast(error.message, true); }
 }
 
 function bindGlobalProjectActions() {
@@ -181,10 +187,6 @@ function bindGlobalProjectActions() {
 function bindGlobalSourceActions() {
   document.querySelectorAll('[data-global-source-action="new-local"]').forEach((button) => button.addEventListener('click', () => openSourceModal(null, 'local', [], '', 'global-search')));
   document.querySelectorAll('[data-global-source-action="new-rest"]').forEach((button) => button.addEventListener('click', () => openSourceModal(null, 'rest', [], '', 'global-search')));
-  document.querySelectorAll('[data-global-source-test]').forEach((button) => button.addEventListener('click', () => testSource(button.dataset.globalSourceTest)));
-  document.querySelectorAll('[data-global-source-sync]').forEach((button) => button.addEventListener('click', () => syncSource(button.dataset.globalSourceSync)));
-  document.querySelectorAll('[data-global-source-edit]').forEach((button) => button.addEventListener('click', () => openSourceModal(state.sources.find((source) => source.id === button.dataset.globalSourceEdit), null, [], '', 'global-search')));
-  document.querySelectorAll('[data-global-source-delete]').forEach((button) => button.addEventListener('click', () => deleteSource(button.dataset.globalSourceDelete)));
 }
 
 async function chooseGlobalProject(mode) {

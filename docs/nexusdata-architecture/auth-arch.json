@@ -1,0 +1,160 @@
+{
+  "nodes": [
+    { "id": "electron",   "label": "Electron\nApp",          "x": 40,  "y": 30,  "w": 150, "h": 64, "layer": "frontend" },
+    { "id": "authForm",   "label": "Auth\nForm UI",          "x": 40,  "y": 124, "w": 150, "h": 64, "layer": "frontend" },
+    { "id": "apiClient",  "label": "HTTP\nClient",           "x": 40,  "y": 218, "w": 150, "h": 64, "layer": "frontend" },
+    { "id": "state",      "label": "Session\nState",         "x": 40,  "y": 312, "w": 150, "h": 64, "layer": "frontend" },
+    { "id": "express",    "label": "Express\nServer",        "x": 240, "y": 30,  "w": 150, "h": 64, "layer": "server" },
+    { "id": "middleware", "label": "Middleware\nStack",      "x": 240, "y": 124, "w": 150, "h": 64, "layer": "server" },
+    { "id": "rateLimiter","label": "Rate\nLimiter",          "x": 240, "y": 218, "w": 150, "h": 64, "layer": "server" },
+    { "id": "authRoutes", "label": "Auth\nRoute Handlers",   "x": 440, "y": 30,  "w": 150, "h": 84, "layer": "auth" },
+    { "id": "requireAuth","label": "requireAuth\nGuard",     "x": 440, "y": 144, "w": 150, "h": 64, "layer": "auth" },
+    { "id": "jwtService", "label": "JWT\nSign/Verify",       "x": 440, "y": 238, "w": 150, "h": 64, "layer": "auth" },
+    { "id": "bcrypt",     "label": "bcrypt\nPassword",       "x": 640, "y": 30,  "w": 150, "h": 64, "layer": "services" },
+    { "id": "mysql",      "label": "MySQL\nusuarios",        "x": 640, "y": 124, "w": 150, "h": 64, "layer": "services" },
+    { "id": "offline",    "label": "Offline\nHandler",       "x": 640, "y": 218, "w": 150, "h": 64, "layer": "services" },
+    { "id": "logout",     "label": "Logout\nHandler",        "x": 640, "y": 312, "w": 150, "h": 64, "layer": "services" },
+    { "id": "protectedApis","label": "Protected\nAPI Routes", "x": 840, "y": 124, "w": 150, "h": 80, "layer": "protected" }
+  ],
+  "edges": [
+    { "id": "e0",  "from": "electron",    "to": "authForm" },
+    { "id": "e1",  "from": "authForm",    "to": "apiClient" },
+    { "id": "e2",  "from": "apiClient",   "to": "express" },
+    { "id": "e3",  "from": "apiClient",   "to": "state" },
+    { "id": "e4",  "from": "express",     "to": "middleware" },
+    { "id": "e5",  "from": "middleware",  "to": "rateLimiter" },
+    { "id": "e6",  "from": "middleware",  "to": "authRoutes" },
+    { "id": "e7",  "from": "rateLimiter", "to": "authRoutes" },
+    { "id": "e8",  "from": "authRoutes",  "to": "bcrypt" },
+    { "id": "e9",  "from": "authRoutes",  "to": "mysql" },
+    { "id": "e10", "from": "authRoutes",  "to": "jwtService" },
+    { "id": "e11", "from": "authRoutes",  "to": "offline" },
+    { "id": "e12", "from": "authRoutes",  "to": "logout" },
+    { "id": "e13", "from": "authRoutes",  "to": "requireAuth" },
+    { "id": "e14", "from": "requireAuth", "to": "protectedApis" },
+    { "id": "e15", "from": "jwtService",  "to": "requireAuth" },
+    { "id": "e16", "from": "mysql",       "to": "requireAuth" },
+    { "id": "e17", "from": "electron",    "to": "apiClient" },
+    { "id": "e18", "from": "middleware",  "to": "requireAuth" }
+  ],
+  "flows": [
+    {
+      "id": "register",
+      "name": "Registro",
+      "nodes": ["electron","authForm","apiClient","express","middleware","rateLimiter","authRoutes","bcrypt","mysql","jwtService","state"],
+      "edges": [0,1,2,4,5,7,8,9,10,3],
+      "steps": [
+        {"nodeId":"electron","text":"App inicia, contextIsolation + sandbox"},
+        {"nodeId":"authForm","text":"Renderiza formulario registro"},
+        {"nodeId":"authForm","text":"Usuario ingresa username + password"},
+        {"nodeId":"apiClient","text":"POST /api/auth/register con credentials:include"},
+        {"nodeId":"express","text":"Recibe petición HTTP"},
+        {"nodeId":"middleware","text":"cookie-parser + express.json() parsean"},
+        {"nodeId":"rateLimiter","text":"Verifica límite: 10 req / 15 min"},
+        {"nodeId":"authRoutes","text":"validateCredentials() formato correcto"},
+        {"nodeId":"authRoutes","text":"authDb.ensureAvailable() MySQL OK"},
+        {"nodeId":"bcrypt","text":"hash(password, 12) — cost 12 (~250ms)"},
+        {"nodeId":"mysql","text":"INSERT INTO usuarios (usuario, password_hash)"},
+        {"nodeId":"jwtService","text":"issueSession() firma JWT {sub, username}"},
+        {"nodeId":"authRoutes","text":"Set cookie httpOnly + 201 Created"},
+        {"nodeId":"apiClient","text":"Recibe {user} respuesta"},
+        {"nodeId":"state","text":"state.user = result.user, UI actualiza"}
+      ]
+    },
+    {
+      "id": "login",
+      "name": "Inicio Sesión",
+      "nodes": ["electron","authForm","apiClient","express","middleware","rateLimiter","authRoutes","mysql","bcrypt","jwtService","state"],
+      "edges": [0,1,2,4,5,7,9,8,10,3],
+      "steps": [
+        {"nodeId":"electron","text":"App iniciada, muestra login"},
+        {"nodeId":"authForm","text":"Renderiza formulario inicio sesión"},
+        {"nodeId":"authForm","text":"Usuario ingresa credenciales"},
+        {"nodeId":"apiClient","text":"POST /api/auth/login con credentials"},
+        {"nodeId":"express","text":"Recibe petición HTTP"},
+        {"nodeId":"middleware","text":"Cookie + body parseados"},
+        {"nodeId":"rateLimiter","text":"10 req / 15 min verificados"},
+        {"nodeId":"authRoutes","text":"validateCredentials() OK"},
+        {"nodeId":"mysql","text":"findUserByUsername() SELECT usuario"},
+        {"nodeId":"bcrypt","text":"compare(password, hash) validación"},
+        {"nodeId":"jwtService","text":"issueSession() firma JWT"},
+        {"nodeId":"authRoutes","text":"Set cookie + 200 OK"},
+        {"nodeId":"apiClient","text":"Recibe {user} respuesta"},
+        {"nodeId":"state","text":"state.user actualizado"}
+      ]
+    },
+    {
+      "id": "offline",
+      "name": "Modo Offline",
+      "nodes": ["electron","authForm","apiClient","express","middleware","authRoutes","offline","jwtService","state"],
+      "edges": [0,1,2,4,6,11,10,3],
+      "steps": [
+        {"nodeId":"electron","text":"App iniciada, muestra login"},
+        {"nodeId":"authForm","text":"Renderiza botón 'Entrar offline'"},
+        {"nodeId":"authForm","text":"Usuario click offline"},
+        {"nodeId":"apiClient","text":"POST /api/auth/offline"},
+        {"nodeId":"express","text":"Recibe petición"},
+        {"nodeId":"middleware","text":"Cookie + body parseados"},
+        {"nodeId":"authRoutes","text":"Rutea a offline handler"},
+        {"nodeId":"offline","text":"issueOfflineSession() sin DB"},
+        {"nodeId":"jwtService","text":"Firma JWT {sub:'offline', offline:true}"},
+        {"nodeId":"authRoutes","text":"Set cookie + 200"},
+        {"nodeId":"apiClient","text":"Recibe user offline"},
+        {"nodeId":"state","text":"state.user = offline, UI cambia"}
+      ]
+    },
+    {
+      "id": "session",
+      "name": "Verificar Sesión",
+      "nodes": ["electron","apiClient","express","middleware","authRoutes","requireAuth","jwtService","mysql","state"],
+      "edges": [17,2,4,6,13,15,16,3],
+      "steps": [
+        {"nodeId":"electron","text":"App inicia, llama initialiseSession()"},
+        {"nodeId":"apiClient","text":"GET /api/auth/me con cookie"},
+        {"nodeId":"express","text":"Recibe petición"},
+        {"nodeId":"middleware","text":"cookie-parser lee nexusdata_session"},
+        {"nodeId":"authRoutes","text":"Rutea a handler /me"},
+        {"nodeId":"requireAuth","text":"Middleware: lee cookie, verifica JWT"},
+        {"nodeId":"jwtService","text":"jwt.verify() decodifica token"},
+        {"nodeId":"mysql","text":"ensureAvailable() + findUser (si online)"},
+        {"nodeId":"requireAuth","text":"req.user seteado, pasa"},
+        {"nodeId":"authRoutes","text":"Retorna {user} o offline user"},
+        {"nodeId":"apiClient","text":"Recibe respuesta"},
+        {"nodeId":"state","text":"state.user seteado, app lista"}
+      ]
+    },
+    {
+      "id": "protected",
+      "name": "API Protegida",
+      "nodes": ["apiClient","express","middleware","requireAuth","jwtService","mysql","protectedApis"],
+      "edges": [2,4,18,15,16,14],
+      "steps": [
+        {"nodeId":"apiClient","text":"Solicitud a /api/sources, /api/documents, etc."},
+        {"nodeId":"express","text":"Express recibe"},
+        {"nodeId":"middleware","text":"Cookie + body parseados"},
+        {"nodeId":"requireAuth","text":"Guardián global: lee cookie"},
+        {"nodeId":"jwtService","text":"jwt.verify() — si inválido → 401"},
+        {"nodeId":"mysql","text":"ensureAvailable() — si caído → 503"},
+        {"nodeId":"requireAuth","text":"req.user = {id, username}"},
+        {"nodeId":"protectedApis","text":"Handler ejecuta, retorna datos"},
+        {"nodeId":"apiClient","text":"Recibe respuesta protegida"}
+      ]
+    },
+    {
+      "id": "logout",
+      "name": "Cerrar Sesión",
+      "nodes": ["apiClient","express","middleware","authRoutes","logout","state"],
+      "edges": [2,4,6,12,3],
+      "steps": [
+        {"nodeId":"apiClient","text":"POST /api/auth/logout"},
+        {"nodeId":"express","text":"Express recibe"},
+        {"nodeId":"middleware","text":"Parseado"},
+        {"nodeId":"authRoutes","text":"Rutea a logout handler"},
+        {"nodeId":"logout","text":"res.clearCookie('nexusdata_session')"},
+        {"nodeId":"authRoutes","text":"Retorna 204 No Content"},
+        {"nodeId":"apiClient","text":"Recibe confirmación"},
+        {"nodeId":"state","text":"state.user = null, UI auth mostrada"}
+      ]
+    }
+  ]
+}

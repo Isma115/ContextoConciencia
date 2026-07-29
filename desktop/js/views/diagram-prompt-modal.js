@@ -2,7 +2,7 @@ import { $ } from '../core/dom.js';
 import { showToast } from '../ui/notifications.js';
 import { closeModal, bindModalClose } from '../ui/modals.js';
 
-const DIAGRAM_PROMPT_TEMPLATE = `Analiza dentro de mi proyecto la parte de [PARTE]. Genera un HTML autocontenido (Tailwind CDN, dark theme) con diagrama interactivo de arquitectura + sección de Flows interactivos (selecciona y resalta path + pasos).\n\nY un JSON {nodes, edges, flows: [{steps}]} para agentes IA.\n\nPanel lateral derecho con todos los flujos\n\nEl resto de la pantalla dedicado solamente al diagrama completo\n\nSin textos ni títulos extra, aprovechando al máximo el tamaño de la ventana\n\nEntrega ambos completos.`;
+const DIAGRAM_PROMPT_TEMPLATE = `Analiza dentro de mi proyecto la parte de [PARTE]. Genera un HTML autocontenido (Tailwind CDN, dark theme) con diagrama interactivo de arquitectura + sección de Flows interactivos (selecciona y resalta path + pasos).\n\nY un JSON {nodes, edges, flows: [{steps}]} para agentes IA.\n\nPanel lateral derecho con todos los flujos\n\nEl resto de la pantalla dedicado solamente al diagrama completo\n\nSin textos ni títulos extra, aprovechando al máximo el tamaño de la ventana\n\nTrata de que las tarjetas del diagrama no se superpongan entre ellas\n\nPermite que las tarjetas se puedan desplazar y mover\n\nEntrega ambos completos.`;
 
 async function copyTextToClipboard(text) {
   if (navigator.clipboard?.writeText) {

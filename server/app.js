@@ -17,7 +17,7 @@ function createApp({ dbPath, authDb, environment = process.env } = {}) {
   app.locals.dbPath = db.path;
 
   app.use(cookieParser());
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({ limit: '30mb' }));
   installRoutes(app, db, resolvedAuthDb, environment);
   app.use(express.static(path.join(__dirname, '..', 'desktop'), { index: 'index.html' }));
   app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));

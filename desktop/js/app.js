@@ -7,8 +7,8 @@ import { configureDocuments, openDocument } from './views/documents.js';
 import { configureSearch, performGlobalSearch, performSearch, renderGlobalSearch, renderSearch } from './views/search.js';
 import { configureSources, renderSources, syncSource } from './views/sources.js';
 import { configureSourceModal } from './views/source-modal.js';
-import { bindHtmlViewerMenu, renderHtmlViewer } from './views/html-viewer.js';
-import { renderSettings } from './views/settings.js';
+import { bindHtmlViewerMenu, configureHtmlViewer, openPersistedHtmlSource, renderHtmlViewer } from './views/html-viewer.js';
+import { configureSettings, renderSettings } from './views/settings.js';
 
 let nativeMenuView = null;
 
@@ -16,18 +16,22 @@ configureApi({ onUnauthorized: () => showAuthentication('', { onAuthenticated })
 
 async function refreshData() {
   try {
-    const [sources, collections, tags, globalProject] = await Promise.all([
+    const [sources, collections, tags, globalProject, stats] = await Promise.all([
       api('/sources'),
       api('/collections'),
       api('/tags'),
-      api('/global-project')
+      api('/global-project'),
+      api('/stats')
     ]);
     state.sources = sources;
     state.collections = collections;
     state.tags = tags;
     state.globalProject = globalProject.project || null;
+    state.stats = stats;
     setConnection('online', 'API local conectada');
     renderView();
+    if (state.view === 'search') await performSearch();
+    if (state.view === 'global-search' && state.globalProject) await performGlobalSearch();
   } catch (error) {
     setConnection('error', 'API no disponible');
     showToast(error.message, true);
@@ -76,10 +80,12 @@ function bindNavigation() {
   });
 }
 
-configureDocuments({ onRefresh: refreshData });
+configureHtmlViewer({ onNavigate: (view) => { state.view = view; renderView(); } });
+configureDocuments({ onRefresh: refreshData, onOpenHtmlViewer: openPersistedHtmlSource });
 configureSearch({ onRefresh: refreshData });
 configureSources({ onRefresh: refreshData });
 configureSourceModal({ onRefresh: refreshData, onSync: syncSource });
+configureSettings({ onRefresh: refreshData });
 bindHtmlViewerMenu();
 bindNavigation();
 initialiseSession();

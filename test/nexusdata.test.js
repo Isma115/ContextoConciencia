@@ -104,6 +104,15 @@ test('importa fuentes locales y conserva el origen', async () => {
   const detail = await request(`/documents/${readme.id}`);
   assert.equal(detail.id, readme.id);
   assert.match(detail.content, /Authentication service/);
+
+  const orderBeforeSync = (await request('/search?q=')).results
+    .filter((document) => document.sourceId === source.id)
+    .map((document) => document.id);
+  await request(`/sources/${source.id}/sync`, { method: 'POST' });
+  const orderAfterSync = (await request('/search?q=')).results
+    .filter((document) => document.sourceId === source.id)
+    .map((document) => document.id);
+  assert.deepEqual(orderAfterSync, orderBeforeSync);
 });
 
 test('carga un proyecto global y poda recursos que ya no existen', async () => {
@@ -116,15 +125,41 @@ test('carga un proyecto global y poda recursos que ya no existen', async () => {
   const loaded = await request('/global-project', { method: 'POST', body: JSON.stringify({ path: projectDir, name: 'Proyecto global' }) });
   assert.equal(loaded.loaded, true);
   assert.equal(loaded.project.name, 'Proyecto global');
-  assert.equal(loaded.sync.total, 3);
+  assert.equal(loaded.sync.total, 1);
+  assert.equal(loaded.project.source.documentCount, 1);
 
-  fs.rmSync(path.join(projectDir, 'app.js'));
+  fs.writeFileSync(path.join(projectDir, 'notes.md'), '# Notas del proyecto');
   const synced = await request(`/sources/${loaded.project.id}/sync`, { method: 'POST' });
   assert.equal(synced.source.documentCount, 2);
   const globalProject = await request('/global-project');
   assert.equal(globalProject.project.source.documentCount, 2);
   await request('/global-project', { method: 'DELETE' }, { expectedStatus: 204 });
   assert.equal((await request('/global-project')).loaded, false);
+});
+
+test('guarda las fuentes del visor HTML y permite recuperarlas desde el buscador', async () => {
+  const htmlDir = path.join(fixtureDir, 'visor-html');
+  fs.mkdirSync(htmlDir);
+  fs.writeFileSync(path.join(htmlDir, 'index.html'), '<!doctype html><h1>Visor persistente</h1>');
+  fs.writeFileSync(path.join(htmlDir, 'styles.css'), 'h1 { color: red; }');
+  fs.writeFileSync(path.join(htmlDir, 'app.js'), 'document.body.dataset.ready = "yes";');
+
+  const payload = { name: 'Visor persistente', paths: [htmlDir] };
+  const saved = await request('/html-viewer/sources', { method: 'POST', body: JSON.stringify(payload) });
+  assert.equal(saved.source.config.role, 'html-viewer');
+  assert.equal(saved.project.entry, 'index.html');
+  assert.equal(saved.sync.total, 1);
+
+  const sameSource = await request('/html-viewer/sources', { method: 'POST', body: JSON.stringify(payload) });
+  assert.equal(sameSource.source.id, saved.source.id);
+
+  const results = await request('/search?q=Visor%20persistente');
+  const htmlDocument = results.results.find((document) => document.sourceId === saved.source.id);
+  assert.ok(htmlDocument);
+
+  const reopened = await request(`/html-viewer/sources/${saved.source.id}/project`);
+  assert.equal(reopened.source.id, saved.source.id);
+  assert.equal(reopened.project.entry, 'index.html');
 });
 
 test('edita y persiste documentos', async () => {

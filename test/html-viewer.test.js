@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { inspectHtmlProject } = require('../server/services/html-viewer');
+const { createHtmlPreview, getHtmlPreview } = require('../server/services/html-viewer-preview');
 const { readFileDocument } = require('../server/importers/local');
 
 test('inspecciona un proyecto HTML y conserva sus rutas relativas', () => {
@@ -36,4 +37,12 @@ test('el importador local reconoce HTML, CSS y JavaScript', () => {
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('mantiene una previsualización HTML temporal para el iframe aislado', () => {
+  const content = '<!doctype html><html><body><h1>Vista</h1></body></html>';
+  const token = createHtmlPreview(content);
+
+  assert.match(token, /^[0-9a-f-]{36}$/);
+  assert.equal(getHtmlPreview(token), content);
 });

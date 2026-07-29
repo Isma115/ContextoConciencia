@@ -5,13 +5,10 @@ const { startServer } = require('../server/app');
 
 let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
+const PROMPTS_MENU_NAME = 'Prompts';
 
 function setApplicationMenuForView(window, view) {
-  if (view !== 'html-viewer') {
-    Menu.setApplicationMenu(null);
-    return;
-  }
-  const menu = Menu.buildFromTemplate([
+  const template = [
     {
       // macOS reserves the first top-level item for the application menu.
       // Its visible name is controlled by Electron/the application bundle.
@@ -27,8 +24,11 @@ function setApplicationMenuForView(window, view) {
         { type: 'separator' },
         { role: 'quit' }
       ]
-    },
-    {
+    }
+  ];
+
+  if (view === 'html-viewer') {
+    template.push({
       label: HTML_VIEW_MENU_NAME,
       submenu: [
         {
@@ -39,13 +39,26 @@ function setApplicationMenuForView(window, view) {
           label: 'Abrir Archivo',
           click: () => window.webContents.send('html-viewer-menu-action', 'choose-files')
         },
+        { type: 'separator' },
         {
-          label: 'Nuevo diagrama prompt',
-          click: () => window.webContents.send('html-viewer-menu-action', 'new-diagram-prompt')
+          label: 'Cerrar documento',
+          click: () => window.webContents.send('html-viewer-menu-action', 'close-document')
         }
       ]
-    }
-  ]);
+    });
+  }
+
+  template.push({
+    label: PROMPTS_MENU_NAME,
+    submenu: [
+      {
+        label: 'Nuevo diagrama prompt',
+        click: () => window.webContents.send('html-viewer-menu-action', 'new-diagram-prompt')
+      }
+    ]
+  });
+
+  const menu = Menu.buildFromTemplate(template);
   Menu.setApplicationMenu(menu);
 }
 
@@ -65,6 +78,7 @@ function createWindow(apiBase) {
     }
   });
   window.maximize();
+  setApplicationMenuForView(window, null);
   window.loadURL(apiBase);
   return window;
 }
@@ -81,9 +95,9 @@ app.whenReady().then(async () => {
   ipcMain.handle('select-local-paths', async (_event, options = {}) => {
     const directory = Boolean(options.directory);
     const result = await dialog.showOpenDialog({
-      title: directory ? 'Seleccionar carpeta con documentación' : 'Seleccionar archivos técnicos',
+      title: directory ? 'Seleccionar carpeta con documentación' : 'Seleccionar documentos',
       properties: directory ? ['openDirectory'] : ['openFile', 'multiSelections'],
-      filters: directory ? undefined : [{ name: 'Archivos compatibles', extensions: ['json', 'csv', 'txt', 'md', 'markdown', 'html', 'htm', 'css', 'js', 'mjs', 'cjs'] }]
+      filters: directory ? undefined : [{ name: 'Documentos compatibles', extensions: ['json', 'csv', 'txt', 'md', 'markdown', 'html', 'htm'] }]
     });
     return result.canceled ? [] : result.filePaths;
   });

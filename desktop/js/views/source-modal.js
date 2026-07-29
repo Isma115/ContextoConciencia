@@ -38,7 +38,7 @@ export function openSourceModal(existing = null, forcedType = null, initialPaths
       const body = {
         name: $('#source-name').value.trim(),
         type: selectedType,
-        config: selectedType === 'local' ? { paths: [...new Set(paths)] } : (() => {
+        config: selectedType === 'local' ? { paths: [...new Set(paths)], ...(config.role ? { role: config.role } : {}) } : (() => {
           let headers = {};
           try { headers = $('#rest-headers').value.trim() ? JSON.parse($('#rest-headers').value) : {}; } catch { throw new Error('Las cabeceras no son JSON válido'); }
           return { url: $('#rest-url').value.trim(), headers, mapping: { id: $('#map-id').value.trim(), title: $('#map-title').value.trim(), content: $('#map-content').value.trim() } };

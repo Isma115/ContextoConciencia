@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="es" class="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={darkMode:'class',corePlugins:{preflight:false}}</script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#030712;color:#e2e8f0;font-family:system-ui,-apple-system,sans-serif}
+#diagram{position:relative;flex:1;overflow:auto;min-height:0}
+#diagram svg{position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:0}
+.node{position:absolute;z-index:1;border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;transition:all 0.4s cubic-bezier(0.4,0,0.2,1);border:1.5px solid;backdrop-filter:blur(8px);user-select:none;overflow:hidden;box-shadow:0 4px 12px rgba(0,0,0,0.4),0 0 0 0 transparent}
+.node::before{content:'';position:absolute;inset:0;border-radius:10px;opacity:0.08}
+.node .label{text-align:center;line-height:1.3;position:relative;z-index:1;padding:4px}
+.node .label .main{font-size:13px;font-weight:600;letter-spacing:0.01em;display:block}
+.node .label .sub{font-size:10px;opacity:0.7;display:block;margin-top:1px}
+.node.dim{opacity:0.12!important;transform:scale(0.95);filter:grayscale(0.8)}
+.node.highlight{opacity:1!important;transform:scale(1.04);z-index:2;border-width:2px;filter:brightness(1.3)}
+.node.highlight .label .main{text-shadow:0 0 20px currentColor}
+.node:not(.dim):not(.highlight){opacity:0.85}
+.node::after{content:'';position:absolute;bottom:0;left:10%;right:10%;height:1px;opacity:0.3}
+.edge-path{fill:none;stroke-width:1.8;stroke-linecap:round;transition:all 0.5s cubic-bezier(0.4,0,0.2,1)}
+.edge-path.dim{opacity:0.05!important}
+.edge-path.highlight{stroke-width:2.8;opacity:1!important;filter:drop-shadow(0 0 6px rgba(96,165,250,0.5))}
+.edge-path.default{opacity:0.3}
+#panel{width:280px;min-width:280px;background:#0f172a;border-left:1px solid #1e293b;display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden}
+#panel::-webkit-scrollbar{width:4px}
+#panel::-webkit-scrollbar-track{background:transparent}
+#panel::-webkit-scrollbar-thumb{background:#334155;border-radius:2px}
+.flow-item{border-bottom:1px solid #1e293b;cursor:pointer;transition:background 0.2s}
+.flow-item:hover{background:#1e293b}
+.flow-item.active{background:#1e293b}
+.flow-header{display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:13px;font-weight:500;color:#cbd5e1}
+.flow-header .dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:all 0.3s}
+.flow-header .arrow{font-size:10px;opacity:0.5;transition:transform 0.3s;margin-left:auto}
+.flow-item.active .flow-header .arrow{transform:rotate(90deg)}
+.flow-header .count{font-size:10px;opacity:0.4;margin-left:4px}
+.flow-steps{max-height:0;overflow:hidden;transition:max-height 0.35s ease}
+.flow-item.active .flow-steps{max-height:800px}
+.step-item{display:flex;align-items:flex-start;gap:8px;padding:6px 14px 6px 26px;font-size:11.5px;color:#94a3b8;cursor:pointer;transition:all 0.2s;line-height:1.4}
+.step-item:hover{background:#1e293b;color:#e2e8f0}
+.step-item .num{font-size:10px;opacity:0.4;width:16px;flex-shrink:0;text-align:right;font-variant-numeric:tabular-nums}
+.step-item .text{flex:1}
+.step-item{position:relative}
+.step-item.active{color:#60a5fa;background:rgba(30,58,95,0.3)}
+.step-item.active::before{content:'';position:absolute;left:18px;width:2px;height:16px;background:#60a5fa;border-radius:1px}
+.dot-el{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}
+.tooltip{position:fixed;z-index:100;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:8px 12px;font-size:12px;color:#cbd5e1;pointer-events:none;opacity:0;transition:opacity 0.15s;box-shadow:0 8px 24px rgba(0,0,0,0.5);max-width:240px;line-height:1.4}
+.tooltip.show{opacity:1}
+.legend-label{font-size:10px;opacity:0.3;letter-spacing:0.05em}
+</style>
+</head>
+<body class="flex">
+<div id="diagram">
+  <svg id="svg"><defs>
+    <marker id="arr" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#475569"/></marker>
+    <marker id="arr-a" markerWidth="7" markerHeight="5" refX="7" refY="2.5" orient="auto"><polygon points="0 0,7 2.5,0 5" fill="#60a5fa"/></marker>
+  </defs></svg>
+</div>
+<div id="panel"></div>
+<div id="tooltip" class="tooltip"></div>
+
+<script>
+const COLORS={
+  frontend:{border:'#3b82f6',bg:'#1e3a5f',glow:'rgba(59,130,246,0.3)',text:'#93c5fd',dot:'#3b82f6'},
+  server:{border:'#10b981',bg:'#064e3b',glow:'rgba(16,185,129,0.3)',text:'#6ee7b7',dot:'#10b981'},
+  auth:{border:'#8b5cf6',bg:'#3b0764',glow:'rgba(139,92,246,0.3)',text:'#c4b5fd',dot:'#8b5cf6'},
+  services:{border:'#f59e0b',bg:'#451a03',glow:'rgba(245,158,11,0.3)',text:'#fcd34d',dot:'#f59e0b'},
+  protected:{border:'#e11d48',bg:'#4c0519',glow:'rgba(225,29,72,0.3)',text:'#fda4af',dot:'#e11d48'}
+};
+
+const NODES=[
+  {id:'electron',label:['Electron','App'],x:40,y:30,w:150,h:64,layer:'frontend',desc:'contextIsolation + sandbox true. Entry point app desktop.'},
+  {id:'authForm',label:['Auth','Form UI'],x:40,y:124,w:150,h:64,layer:'frontend',desc:'Login/Register/Offline forms. Captura credenciales.'},
+  {id:'apiClient',label:['HTTP','Client'],x:40,y:218,w:150,h:64,layer:'frontend',desc:'fetch() wrapper. credentials:include. onUnauthorized handler.'},
+  {id:'state',label:['Session','State'],x:40,y:312,w:150,h:64,layer:'frontend',desc:'state.user {id,username,offline,createdAt}. Drive UI.'},
+  {id:'express',label:['Express','Server'],x:240,y:30,w:150,h:64,layer:'server',desc:'App factory. cookieParser + json + auth routes + static.'},
+  {id:'middleware',label:['Middleware','Stack'],x:240,y:124,w:150,h:64,layer:'server',desc:'cookie-parser + express.json(). Parseo pre-ruteo.'},
+  {id:'rateLimiter',label:['Rate','Limiter'],x:240,y:218,w:150,h:64,layer:'server',desc:'express-rate-limit: 10 req / 15 min en auth.'},
+  {id:'authRoutes',label:['Auth Route','Handlers'],x:440,y:30,w:150,h:84,layer:'auth',desc:'register/login/offline/me/logout. validateCredentials + issueSession.'},
+  {id:'requireAuth',label:['requireAuth','Guard'],x:440,y:144,w:150,h:64,layer:'auth',desc:'Middleware ruta protegida. Lee cookie, verify JWT, check MySQL.'},
+  {id:'jwtService',label:['JWT','Sign/Verify'],x:440,y:238,w:150,h:64,layer:'auth',desc:'jsonwebtoken. HMAC-SHA256. Secret 64 hex chars.'},
+  {id:'bcrypt',label:['bcrypt','Password'],x:640,y:30,w:150,h:64,layer:'services',desc:'bcryptjs. hash(password,12) registro, compare() login.'},
+  {id:'mysql',label:['MySQL','usuarios'],x:640,y:124,w:150,h:64,layer:'services',desc:'Pool mysql2. Tabla: id, usuario, password_hash, creado_en.'},
+  {id:'offline',label:['Offline','Handler'],x:640,y:218,w:150,h:64,layer:'services',desc:'JWT {sub:offline, offline:true}. Sin MySQL.'},
+  {id:'logout',label:['Logout','Handler'],x:640,y:312,w:150,h:64,layer:'services',desc:'res.clearCookie(nexusdata_session). 204 No Content.'},
+  {id:'protectedApis',label:['Protected','API Routes'],x:840,y:124,w:150,h:80,layer:'protected',desc:'Sources, documents, tags, search, collections. Requiere req.user.'}
+];
+
+const EDGES=[
+  {id:'e0',from:'electron',to:'authForm'},
+  {id:'e1',from:'authForm',to:'apiClient'},
+  {id:'e2',from:'apiClient',to:'express'},
+  {id:'e3',from:'apiClient',to:'state'},
+  {id:'e4',from:'express',to:'middleware'},
+  {id:'e5',from:'middleware',to:'rateLimiter'},
+  {id:'e6',from:'middleware',to:'authRoutes'},
+  {id:'e7',from:'rateLimiter',to:'authRoutes'},
+  {id:'e8',from:'authRoutes',to:'bcrypt'},
+  {id:'e9',from:'authRoutes',to:'mysql'},
+  {id:'e10',from:'authRoutes',to:'jwtService'},
+  {id:'e11',from:'authRoutes',to:'offline'},
+  {id:'e12',from:'authRoutes',to:'logout'},
+  {id:'e13',from:'authRoutes',to:'requireAuth'},
+  {id:'e14',from:'requireAuth',to:'protectedApis'},
+  {id:'e15',from:'jwtService',to:'requireAuth'},
+  {id:'e16',from:'mysql',to:'requireAuth'},
+  {id:'e17',from:'electron',to:'apiClient'},
+  {id:'e18',from:'middleware',to:'requireAuth'}
+];
+
+const FLOWS=[
+  {id:'register',name:'Registro',
+    nodes:['electron','authForm','apiClient','express','middleware','rateLimiter','authRoutes','bcrypt','mysql','jwtService','state'],
+    edges:[0,1,2,4,5,7,8,9,10,3],
+    color:'#3b82f6',
+    steps:[
+      {n:'electron',t:'App inicia con contextIsolation + sandbox'},
+      {n:'authForm',t:'Renderiza formulario de registro'},
+      {n:'apiClient',t:'POST /api/auth/register con credentials:include'},
+      {n:'express',t:'Express recibe petición HTTP'},
+      {n:'middleware',t:'cookie-parser + express.json() parsean'},
+      {n:'rateLimiter',t:'10 req / 15 min verificados'},
+      {n:'authRoutes',t:'validateCredentials() formato válido'},
+      {n:'bcrypt',t:'hash(password, 12) — cost 12 (~250ms)'},
+      {n:'mysql',t:'INSERT INTO usuarios (usuario, password_hash)'},
+      {n:'jwtService',t:'issueSession() firma JWT {sub, username}'},
+      {n:'authRoutes',t:'Set cookie httpOnly + 201 Created'},
+      {n:'apiClient',t:'Respuesta {user} recibida'},
+      {n:'state',t:'state.user seteado, UI actualiza'}
+    ]},
+  {id:'login',name:'Inicio Sesión',
+    nodes:['electron','authForm','apiClient','express','middleware','rateLimiter','authRoutes','mysql','bcrypt','jwtService','state'],
+    edges:[0,1,2,4,5,7,9,8,10,3],
+    color:'#10b981',
+    steps:[
+      {n:'electron',t:'App iniciada, muestra login'},
+      {n:'authForm',t:'Formulario inicio sesión renderizado'},
+      {n:'apiClient',t:'POST /api/auth/login con credenciales'},
+      {n:'express',t:'Petición recibida'},
+      {n:'middleware',t:'Cookie + body parseados'},
+      {n:'rateLimiter',t:'10 req / 15 min OK'},
+      {n:'authRoutes',t:'validateCredentials()'},
+      {n:'mysql',t:'findUserByUsername() SELECT usuario'},
+      {n:'bcrypt',t:'compare(password, hash) validación'},
+      {n:'jwtService',t:'issueSession() firma JWT'},
+      {n:'authRoutes',t:'Set cookie + 200 OK'},
+      {n:'apiClient',t:'Respuesta {user}'},
+      {n:'state',t:'state.user actualizado'}
+    ]},
+  {id:'offline',name:'Modo Offline',
+    nodes:['electron','authForm','apiClient','express','middleware','authRoutes','offline','jwtService','state'],
+    edges:[0,1,2,4,6,11,10,3],
+    color:'#f59e0b',
+    steps:[
+      {n:'electron',t:'App iniciada'},
+      {n:'authForm',t:'Botón Entrar offline visible'},
+      {n:'apiClient',t:'POST /api/auth/offline'},
+      {n:'express',t:'Petición recibida'},
+      {n:'middleware',t:'Parseado'},
+      {n:'authRoutes',t:'Rutea a offline handler'},
+      {n:'offline',t:'issueOfflineSession() sin DB'},
+      {n:'jwtService',t:'JWT {sub:offline, offline:true}'},
+      {n:'authRoutes',t:'Set cookie + 200'},
+      {n:'apiClient',t:'User offline recibido'},
+      {n:'state',t:'state.user = offline'}
+    ]},
+  {id:'session',name:'Verificar Sesión',
+    nodes:['electron','apiClient','express','middleware','authRoutes','requireAuth','jwtService','mysql','state'],
+    edges:[17,2,4,6,13,15,16,3],
+    color:'#8b5cf6',
+    steps:[
+      {n:'electron',t:'initialiseSession() al arrancar'},
+      {n:'apiClient',t:'GET /api/auth/me con cookie'},
+      {n:'express',t:'Petición recibida'},
+      {n:'middleware',t:'cookie-parser lee nexusdata_session'},
+      {n:'authRoutes',t:'Rutea a handler /me'},
+      {n:'requireAuth',t:'Middleware: lee cookie'},
+      {n:'jwtService',t:'jwt.verify() decodifica'},
+      {n:'mysql',t:'ensureAvailable() + findUser si online'},
+      {n:'authRoutes',t:'Retorna {user} o offline user'},
+      {n:'apiClient',t:'Respuesta recibida'},
+      {n:'state',t:'state.user seteado'}
+    ]},
+  {id:'protected',name:'API Protegida',
+    nodes:['apiClient','express','middleware','requireAuth','jwtService','mysql','protectedApis'],
+    edges:[2,4,18,15,16,14],
+    color:'#e11d48',
+    steps:[
+      {n:'apiClient',t:'Solicitud a /api/sources, documents, etc.'},
+      {n:'express',t:'Express recibe'},
+      {n:'middleware',t:'Cookie + body parseados'},
+      {n:'requireAuth',t:'Guardián global: lee cookie'},
+      {n:'jwtService',t:'jwt.verify() — inválido → 401'},
+      {n:'mysql',t:'ensureAvailable() — caído → 503'},
+      {n:'requireAuth',t:'req.user seteado'},
+      {n:'protectedApis',t:'Handler ejecuta, retorna datos'}
+    ]},
+  {id:'logout',name:'Cerrar Sesión',
+    nodes:['apiClient','express','middleware','authRoutes','logout','state'],
+    edges:[2,4,6,12,3],
+    color:'#94a3b8',
+    steps:[
+      {n:'apiClient',t:'POST /api/auth/logout'},
+      {n:'express',t:'Petición recibida'},
+      {n:'middleware',t:'Parseado'},
+      {n:'authRoutes',t:'Rutea a logout handler'},
+      {n:'logout',t:'res.clearCookie(nexusdata_session)'},
+      {n:'authRoutes',t:'204 No Content'},
+      {n:'apiClient',t:'Confirmación recibida'},
+      {n:'state',t:'state.user = null, UI auth'}
+    ]}
+];
+
+const nodeMap=Object.fromEntries(NODES.map(n=>[n.id,n]));
+const edgeMap=Object.fromEntries(EDGES.map((e,i)=>{e.idx=i;return[e.id,e]}));
+let activeFlow=null,activeStep=-1,tooltipTimer=null;
+
+function nodeCenter(n,side){
+  const c={x:n.x+n.w/2,y:n.y+n.h/2};
+  if(side==='r')return{x:n.x+n.w,y:c.y};
+  if(side==='l')return{x:n.x,y:c.y};
+  if(side==='b')return{x:c.x,y:n.y+n.h};
+  if(side==='t')return{x:c.x,y:n.y};
+  return c;
+}
+
+function edgePath(fromId,toId,idx){
+  const f=nodeMap[fromId],t=nodeMap[toId];
+  const dx=t.x-f.x,dy=(t.y+t.h/2)-(f.y+f.h/2);
+  let x1,y1,x2,y2;
+  if(Math.abs(dx)>20){
+    if(dx>0){x1=f.x+f.w;y1=f.y+f.h*(0.3+0.4*(idx%3)/3);x2=t.x;y2=t.y+t.h*(0.3+0.4*((idx+1)%3)/3)}
+    else{x1=f.x;y1=f.y+f.h*(0.6+0.3*(idx%2)/2);x2=t.x+t.w;y2=t.y+t.h*(0.4+0.3*((idx+1)%2)/2)}
+  }else{
+    if(dy>0){x1=f.x+f.w*(0.25+0.15*(idx%3));y1=f.y+f.h;x2=t.x+t.w*(0.25+0.15*(idx%3));y2=t.y}
+    else{x1=f.x+f.w*(0.6+0.15*(idx%2));y1=f.y;x2=t.x+t.w*(0.6+0.15*(idx%2));y2=t.y+t.h}
+  }
+  const cp1x=x1+(x2-x1)*0.4,cp1y=y1,cp2x=x1+(x2-x1)*0.6,cp2y=y2;
+  return `M${x1},${y1}C${cp1x},${cp1y},${cp2x},${cp2y},${x2},${y2}`;
+}
+
+function render(){
+  const svg=document.getElementById('svg');
+  const dia=document.getElementById('diagram');
+  svg.innerHTML=svg.innerHTML.split('</defs>')[0]+'</defs>';
+  const ns='http://www.w3.org/2000/svg';
+  const g=document.createElementNS(ns,'g');
+  EDGES.forEach((e,i)=>{
+    const path=document.createElementNS(ns,'path');
+    path.setAttribute('d',edgePath(e.from,e.to,i));
+    path.setAttribute('class','edge-path default');
+    path.setAttribute('data-edge-idx',i);
+    path.setAttribute('marker-end','url(#arr)');
+    path.setAttribute('stroke','#475569');
+    g.appendChild(path);
+  });
+  svg.appendChild(g);
+  svg.style.display='block';
+  svg.style.position='absolute';
+  svg.style.top='0';svg.style.left='0';svg.style.width='100%';svg.style.height='100%';
+
+  NODES.forEach(n=>{
+    const c=COLORS[n.layer];
+    const el=document.createElement('div');
+    el.className='node';
+    el.style.left=n.x+'px';el.style.top=n.y+'px';
+    el.style.width=n.w+'px';el.style.height=n.h+'px';
+    el.style.background=`linear-gradient(135deg,${c.bg}dd,${c.bg}88)`;
+    el.style.borderColor=c.border;
+    el.style.boxShadow=`0 4px 12px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05)`;
+    el.dataset.nodeId=n.id;
+    el.innerHTML=`<div class="label"><span class="main" style="color:${c.text}">${n.label[0]}</span><span class="sub" style="color:${c.text}">${n.label[1]}</span></div>`;
+    el.addEventListener('mouseenter',()=>showTooltip(el,n));
+    el.addEventListener('mousemove',moveTooltip);
+    el.addEventListener('mouseleave',hideTooltip);
+    el.addEventListener('click',()=>{if(activeFlow){const idx=activeFlow.steps.findIndex(s=>s.n===n.id);if(idx>=0)highlightStep(idx);}});
+    document.getElementById('diagram').appendChild(el);
+  });
+
+  buildPanel();
+}
+
+function buildPanel(){
+  const panel=document.getElementById('panel');
+  FLOWS.forEach((f,fi)=>{
+    const item=document.createElement('div');
+    item.className='flow-item';
+    item.dataset.flowIdx=fi;
+    const c=COLORS[['frontend','server','services','services','auth','protected','services'][fi]]||{dot:f.color};
+    const hueMatch=NODES.find(n=>f.nodes.includes(n.id));
+    const dotColor=COLORS[hueMatch?.layer||'frontend'].border;
+    item.innerHTML=`<div class="flow-header"><span class="dot" style="background:${dotColor}"></span><span>${f.name}</span><span class="count">${f.steps.length}</span><span class="arrow">▸</span></div><div class="flow-steps"></div>`;
+    const stepsDiv=item.querySelector('.flow-steps');
+    f.steps.forEach((s,si)=>{
+      const nd=nodeMap[s.n];
+      const sc=COLORS[nd?.layer||'frontend'];
+      const st=document.createElement('div');
+      st.className='step-item';
+      st.dataset.stepIdx=si;
+      st.innerHTML=`<span class="dot-el" style="background:${sc.dot}"></span><span class="num">${si+1}</span><span class="text">${s.t}</span>`;
+      st.addEventListener('click',(e)=>{e.stopPropagation();selectFlow(fi);highlightStep(si);});
+      stepsDiv.appendChild(st);
+    });
+    item.querySelector('.flow-header').addEventListener('click',()=>{
+      if(activeFlow&&activeFlow.id===f.id){clearSelection();}
+      else{selectFlow(fi);}
+    });
+    panel.appendChild(item);
+  });
+}
+
+function selectFlow(fi){
+  const f=FLOWS[fi];
+  activeFlow=f;activeStep=-1;
+  const items=document.querySelectorAll('.flow-item');
+  items.forEach((it,i)=>{it.classList.toggle('active',i===fi);});
+  const allNodes=document.querySelectorAll('.node');
+  const allEdges=document.querySelectorAll('.edge-path');
+  const nSet=new Set(f.nodes),eSet=new Set(f.edges);
+  allNodes.forEach(el=>{
+    el.classList.remove('highlight','dim');
+    if(!nSet.has(el.dataset.nodeId))el.classList.add('dim');
+    else el.classList.add('highlight');
+  });
+  allEdges.forEach(el=>{
+    el.classList.remove('highlight','dim','default');
+    const idx=parseInt(el.dataset.edgeIdx);
+    if(eSet.has(idx)){el.classList.add('highlight');el.setAttribute('stroke','#60a5fa');el.setAttribute('marker-end','url(#arr-a)');}
+    else{el.classList.add('dim');el.setAttribute('stroke','#475569');el.setAttribute('marker-end','url(#arr)');}
+  });
+  const stepsDiv=document.querySelectorAll('.flow-item')[fi].querySelector('.step-steps')||document.querySelectorAll('.flow-item')[fi].querySelector('.flow-steps');
+  stepsDiv.querySelectorAll('.step-item').forEach(el=>el.classList.remove('active'));
+}
+
+function clearSelection(){
+  activeFlow=null;activeStep=-1;
+  document.querySelectorAll('.flow-item').forEach(el=>el.classList.remove('active'));
+  document.querySelectorAll('.node').forEach(el=>el.classList.remove('highlight','dim'));
+  document.querySelectorAll('.edge-path').forEach(el=>{
+    el.classList.remove('highlight','dim','default');
+    el.classList.add('default');
+    el.setAttribute('stroke','#475569');
+    el.setAttribute('marker-end','url(#arr)');
+  });
+}
+
+function highlightStep(si){
+  if(!activeFlow||!activeFlow.steps[si])return;
+  activeStep=si;
+  const step=activeFlow.steps[si];
+  const fi=FLOWS.indexOf(activeFlow);
+  if(fi<0)return;
+  const items=document.querySelectorAll('.flow-item');
+  const stepsContainer=items[fi].querySelector('.flow-steps');
+  if(!stepsContainer)return;
+  stepsContainer.querySelectorAll('.step-item').forEach((el,i)=>{
+    el.classList.toggle('active',i===si);
+  });
+  const nSet=new Set(activeFlow.nodes);
+  document.querySelectorAll('.node').forEach(el=>{
+    el.classList.remove('highlight','dim');
+    if(!nSet.has(el.dataset.nodeId)){el.classList.add('dim');return;}
+    if(el.dataset.nodeId===step.n){el.classList.add('highlight');el.style.boxShadow='0 0 24px 6px rgba(59,130,246,0.5)';}
+    else el.classList.add('highlight');
+  });
+  setTimeout(()=>{
+    document.querySelectorAll('.node').forEach(el=>{
+      if(el.dataset.nodeId===step.n)el.style.boxShadow='';
+    });
+  },1200);
+  stepsContainer.querySelectorAll('.step-item')[si]?.scrollIntoView({block:'nearest'});
+}
+
+function showTooltip(el,n){
+  clearTimeout(tooltipTimer);
+  const tt=document.getElementById('tooltip');
+  tt.innerHTML=`<strong style="color:${COLORS[n.layer].text}">${n.label[0]} ${n.label[1]}</strong><br><span style="opacity:0.7;font-size:11px">${n.desc}</span>`;
+  tt.classList.add('show');
+}
+
+function moveTooltip(e){
+  const tt=document.getElementById('tooltip');
+  let x=e.clientX+14,y=e.clientY+10;
+  const r=tt.getBoundingClientRect();
+  if(x+r.width>window.innerWidth-10)x=e.clientX-r.width-10;
+  if(y+r.height>window.innerHeight-10)y=e.clientY-r.height-10;
+  tt.style.left=x+'px';tt.style.top=y+'px';
+}
+
+function hideTooltip(){
+  const tt=document.getElementById('tooltip');
+  tooltipTimer=setTimeout(()=>tt.classList.remove('show'),100);
+}
+
+document.addEventListener('click',(e)=>{
+  if(!e.target.closest('.flow-item')&&!e.target.closest('.node'))clearSelection();
+});
+
+render();
+</script>
+</body>
+</html>
