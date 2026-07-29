@@ -5,6 +5,7 @@ const Fuse = require('fuse.js');
 const { now, parseJson, sourceForResponse, withDocumentShape, documentSelect } = require('../database/db');
 const { importLocalSource } = require('../importers/local');
 const { syncRestSource, testRestSource } = require('../services/rest');
+const { inspectHtmlProject } = require('../services/html-viewer');
 const { installAuthRoutes, requireAuth } = require('../auth');
 
 const ID = (prefix) => `${prefix}_${crypto.randomUUID()}`;
@@ -19,6 +20,39 @@ function sourceRow(db, id, { localOnly = false } = {}) {
      FROM sources s WHERE s.id = ?${localOnly ? " AND s.type = 'local'" : ''}`,
     id
   );
+}
+
+function globalProjectRow(db) {
+  const rows = db.all(
+    `SELECT s.*, (SELECT COUNT(*) FROM documents d WHERE d.source_id = s.id) AS document_count
+     FROM sources s WHERE s.type = 'local' ORDER BY s.created_at DESC`
+  );
+  return rows.find((row) => parseJson(row.config_json).role === 'global-project') || null;
+}
+
+function globalProjectResponse(db) {
+  const row = globalProjectRow(db);
+  if (!row) return { loaded: false, project: null };
+  const source = sourceForResponse(row);
+  const config = parseJson(row.config_json);
+  return {
+    loaded: true,
+    project: {
+      id: source.id,
+      name: source.name,
+      path: config.paths?.[0] || null,
+      source
+    }
+  };
+}
+
+function validateGlobalProjectPath(value) {
+  const rawPath = asText(value);
+  if (!rawPath) throw new Error('Indica la carpeta del proyecto global');
+  const projectPath = path.resolve(rawPath);
+  if (!fs.existsSync(projectPath)) throw new Error('La carpeta del proyecto global no existe');
+  if (!fs.statSync(projectPath).isDirectory()) throw new Error('El proyecto global debe ser una carpeta');
+  return projectPath;
 }
 
 function isOffline(req) {
@@ -95,8 +129,9 @@ function setSourceStatus(db, id, status, lastError = null) {
 async function syncSource(db, source) {
   setSourceStatus(db, source.id, 'syncing', null);
   try {
+    const config = source.type === 'local' ? parseJson(source.config_json) : {};
     const result = source.type === 'local'
-      ? importLocalSource(db, source)
+      ? importLocalSource(db, source, { prune: config.role === 'global-project' })
       : await syncRestSource(db, source);
     const syncAt = now();
     db.run('UPDATE sources SET status = ?, last_sync_at = ?, last_error = NULL WHERE id = ?', 'ready', syncAt, source.id);
@@ -187,6 +222,46 @@ function installRoutes(app, db, authDb, environment = process.env) {
   app.get('/api/health', (req, res) => res.json({ ok: true, name: 'NexusData API', timestamp: now() }));
   installAuthRoutes(app, authDb, environment);
   app.use('/api', requireAuth(authDb, environment));
+
+  app.post('/api/html-viewer/inspect', (req, res) => {
+    try {
+      res.json(inspectHtmlProject(req.body?.paths));
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/global-project', (req, res) => {
+    res.json(globalProjectResponse(db));
+  });
+
+  app.post('/api/global-project', async (req, res) => {
+    try {
+      const projectPath = validateGlobalProjectPath(req.body?.path);
+      const name = asText(req.body?.name, path.basename(projectPath) || 'Proyecto global').slice(0, 120);
+      if (!name) throw new Error('Indica un nombre para el proyecto global');
+      const existing = globalProjectRow(db);
+      const id = existing?.id || ID('source');
+      const createdAt = existing?.created_at || now();
+      const config = { role: 'global-project', paths: [projectPath] };
+      if (existing) {
+        db.run('UPDATE sources SET name = ?, type = ?, config_json = ?, status = ?, last_error = NULL WHERE id = ?', name, 'local', JSON.stringify(config), 'pending', id);
+      } else {
+        db.run('INSERT INTO sources (id, name, type, config_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?)', id, name, 'local', JSON.stringify(config), 'pending', createdAt);
+      }
+      const result = await syncSource(db, sourceRow(db, id, { localOnly: true }));
+      res.status(existing ? 200 : 201).json({ ...globalProjectResponse(db), sync: result });
+    } catch (error) {
+      res.status(error.message.includes('proyecto global') || error.message.includes('carpeta') || error.message.includes('nombre') ? 400 : 502).json({ error: error.message });
+    }
+  });
+
+  app.delete('/api/global-project', (req, res) => {
+    const project = globalProjectRow(db);
+    if (!project) return res.status(404).json({ error: 'No hay un proyecto global cargado' });
+    db.run('DELETE FROM sources WHERE id = ?', project.id);
+    res.status(204).end();
+  });
 
   app.get('/api/stats', (req, res) => {
     const localOnly = isOffline(req);

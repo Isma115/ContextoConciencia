@@ -1,0 +1,29 @@
+.markdown-preview { min-height: 0; flex: 1; overflow: auto; padding: clamp(24px, 4vw, 58px) clamp(24px, 7vw, 96px); border: 1px solid #363636; border-radius: 3px; color: #cfcfcf; background: #1e1e1e; font-size: 13px; line-height: 1.72; overflow-wrap: anywhere; }
+.markdown-preview[hidden], .markdown-editor[hidden] { display: none; }
+.markdown-preview > :first-child { margin-top: 0; }
+.markdown-preview > :last-child { margin-bottom: 0; }
+.markdown-preview h1, .markdown-preview h2, .markdown-preview h3, .markdown-preview h4, .markdown-preview h5, .markdown-preview h6 { margin: 1.55em 0 .65em; color: #ededed; line-height: 1.25; }
+.markdown-preview h1 { padding-bottom: .35em; border-bottom: 1px solid #3a3a3a; font-size: 2em; }
+.markdown-preview h2 { padding-bottom: .3em; border-bottom: 1px solid #343434; font-size: 1.55em; }
+.markdown-preview h3 { font-size: 1.28em; }
+.markdown-preview h4, .markdown-preview h5, .markdown-preview h6 { font-size: 1em; }
+.markdown-preview p { margin: 0 0 1em; }
+.markdown-preview a { color: #6cb6ff; text-decoration: none; }
+.markdown-preview a:hover { text-decoration: underline; }
+.markdown-preview strong { color: #e7e7e7; }
+.markdown-preview code { padding: .15em .38em; border-radius: 3px; color: #e6b673; background: #2b2b2b; font-family: var(--mono); font-size: .9em; }
+.markdown-preview pre { overflow: auto; margin: 1.15em 0; padding: 16px; border: 1px solid #383838; border-radius: 4px; background: #171717; }
+.markdown-preview pre code { padding: 0; color: #d4d4d4; background: transparent; font-size: 11px; line-height: 1.6; white-space: pre; }
+.markdown-preview blockquote { margin: 1em 0; padding: .2em 1em; border-left: 3px solid #569cd6; color: #a8a8a8; }
+.markdown-preview blockquote > :last-child { margin-bottom: 0; }
+.markdown-preview ul, .markdown-preview ol { margin: .65em 0 1em; padding-left: 2em; }
+.markdown-preview li { margin: .25em 0; }
+.markdown-preview .task-item { list-style: none; margin-left: -1.4em; }
+.markdown-preview .task-item input { margin-right: .35em; accent-color: var(--blue); }
+.markdown-preview hr { height: 1px; margin: 2em 0; border: 0; background: #3a3a3a; }
+.markdown-table-wrap { overflow-x: auto; margin: 1.15em 0; }
+.markdown-preview table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.markdown-preview th, .markdown-preview td { padding: 8px 10px; border: 1px solid #414141; text-align: left; }
+.markdown-preview th { color: #e5e5e5; background: #292929; }
+.markdown-preview tr:nth-child(even) td { background: #232323; }
+.markdown-empty { color: #777; font-style: italic; }

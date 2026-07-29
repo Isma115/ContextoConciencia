@@ -106,6 +106,27 @@ test('importa fuentes locales y conserva el origen', async () => {
   assert.match(detail.content, /Authentication service/);
 });
 
+test('carga un proyecto global y poda recursos que ya no existen', async () => {
+  const projectDir = path.join(fixtureDir, 'proyecto-global');
+  fs.mkdirSync(projectDir);
+  fs.writeFileSync(path.join(projectDir, 'index.html'), '<h1>Proyecto global</h1>');
+  fs.writeFileSync(path.join(projectDir, 'styles.css'), 'h1 { color: red; }');
+  fs.writeFileSync(path.join(projectDir, 'app.js'), 'document.body.dataset.ready = "yes";');
+
+  const loaded = await request('/global-project', { method: 'POST', body: JSON.stringify({ path: projectDir, name: 'Proyecto global' }) });
+  assert.equal(loaded.loaded, true);
+  assert.equal(loaded.project.name, 'Proyecto global');
+  assert.equal(loaded.sync.total, 3);
+
+  fs.rmSync(path.join(projectDir, 'app.js'));
+  const synced = await request(`/sources/${loaded.project.id}/sync`, { method: 'POST' });
+  assert.equal(synced.source.documentCount, 2);
+  const globalProject = await request('/global-project');
+  assert.equal(globalProject.project.source.documentCount, 2);
+  await request('/global-project', { method: 'DELETE' }, { expectedStatus: 204 });
+  assert.equal((await request('/global-project')).loaded, false);
+});
+
 test('edita y persiste documentos', async () => {
   const docs = await request('/documents');
   const readme = docs.documents.find((doc) => doc.path.endsWith('README.md'));

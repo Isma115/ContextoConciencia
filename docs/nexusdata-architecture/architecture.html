@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="es" class="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NexusData · Architecture Explorer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'], mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'] },
+          colors: { ink: '#08111f', cyan: '#63e6e2', violet: '#a78bfa', amber: '#fbbf75' }
+        }
+      }
+    };
+  </script>
+  <style>
+    :root { color-scheme: dark; --bg: #08111f; --panel: rgba(15, 28, 48, .82); --panel-strong: #10213a; --line: rgba(137, 164, 199, .2); --muted: #93a7c1; --text: #edf5ff; --cyan: #63e6e2; --violet: #a78bfa; --amber: #fbbf75; --rose: #fb7185; }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body { margin: 0; min-width: 320px; background: var(--bg); color: var(--text); font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+    body::before { position: fixed; inset: 0; z-index: -1; pointer-events: none; content: ''; background: radial-gradient(circle at 15% 0%, rgba(99,230,226,.12), transparent 34rem), radial-gradient(circle at 84% 35%, rgba(167,139,250,.12), transparent 34rem), linear-gradient(180deg, #08111f 0%, #0a1424 100%); }
+    button { font: inherit; }
+    .glass { background: var(--panel); border: 1px solid var(--line); box-shadow: 0 24px 80px rgba(0,0,0,.18); backdrop-filter: blur(16px); }
+    .eyebrow { color: var(--cyan); font: 500 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .16em; text-transform: uppercase; }
+    .muted { color: var(--muted); }
+    .section-kicker { color: #a8bad2; font: 500 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .12em; text-transform: uppercase; }
+    .legend-dot { width: 8px; height: 8px; display: inline-block; border-radius: 999px; box-shadow: 0 0 16px currentColor; }
+    .diagram-scroll { overflow-x: auto; padding-bottom: 8px; }
+    .diagram-canvas { position: relative; width: 1400px; height: 900px; min-width: 1400px; background: linear-gradient(145deg, rgba(14,30,52,.78), rgba(8,17,31,.4)); border: 1px solid rgba(137,164,199,.18); border-radius: 22px; overflow: hidden; }
+    .diagram-canvas::after { position: absolute; inset: 0; pointer-events: none; content: ''; opacity: .26; background-image: linear-gradient(rgba(151,174,204,.1) 1px, transparent 1px), linear-gradient(90deg, rgba(151,174,204,.1) 1px, transparent 1px); background-size: 56px 56px; mask-image: linear-gradient(180deg, black, transparent 92%); }
+    .zone { position: absolute; border: 1px solid rgba(137,164,199,.13); border-radius: 18px; pointer-events: none; }
+    .zone-label { position: absolute; top: 12px; left: 16px; color: rgba(201,218,240,.65); font: 500 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .13em; text-transform: uppercase; }
+    .zone-client { left: 18px; top: 64px; width: 31%; height: 50%; background: rgba(99,230,226,.025); }
+    .zone-application { left: 35%; top: 64px; width: 38%; height: 57%; background: rgba(167,139,250,.025); }
+    .zone-data { left: 70%; top: 64px; width: 28%; height: 57%; background: rgba(251,191,117,.025); }
+    .zone-integration { left: 47%; top: 53%; width: 51%; height: 25%; background: rgba(251,113,133,.018); }
+    .zone-experimental { left: 18px; right: 18px; bottom: 22px; height: 142px; background: rgba(167,139,250,.018); }
+    .edge-layer { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; }
+    .edge { fill: none; stroke: rgba(142,164,193,.35); stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: stroke; cursor: pointer; transition: stroke .2s ease, stroke-width .2s ease, opacity .2s ease, filter .2s ease; }
+    .edge.experimental { stroke-dasharray: 6 7; stroke: rgba(167,139,250,.35); }
+    .edge.is-dimmed { opacity: .12; }
+    .edge.is-active { stroke: var(--cyan); stroke-width: 3.5; opacity: 1; filter: drop-shadow(0 0 6px rgba(99,230,226,.5)); }
+    .edge.is-current { stroke: var(--amber); stroke-width: 5; opacity: 1; filter: drop-shadow(0 0 8px rgba(251,191,117,.7)); }
+    .node-layer { position: absolute; inset: 0; z-index: 2; }
+    .diagram-node { position: absolute; width: 148px; min-height: 72px; transform: translate(-50%, -50%); padding: 11px 12px; color: var(--text); text-align: left; background: rgba(18, 35, 59, .94); border: 1px solid rgba(137,164,199,.28); border-radius: 14px; cursor: pointer; transition: transform .2s ease, border-color .2s ease, opacity .2s ease, box-shadow .2s ease, background .2s ease; }
+    .diagram-node:hover, .diagram-node:focus-visible { z-index: 3; transform: translate(-50%, -50%) translateY(-3px); border-color: var(--cyan); outline: none; box-shadow: 0 0 0 3px rgba(99,230,226,.13), 0 12px 34px rgba(0,0,0,.28); }
+    .diagram-node.is-dimmed { opacity: .33; }
+    .diagram-node.is-active { border-color: rgba(99,230,226,.72); box-shadow: 0 0 24px rgba(99,230,226,.14); }
+    .diagram-node.is-current { border-color: var(--amber); box-shadow: 0 0 0 3px rgba(251,191,117,.14), 0 0 28px rgba(251,191,117,.18); }
+    .diagram-node.is-selected { background: linear-gradient(140deg, rgba(28,68,81,.98), rgba(18,35,59,.98)); }
+    .node-kind { display: block; margin-bottom: 7px; color: var(--cyan); font: 500 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .11em; text-transform: uppercase; }
+    .diagram-node.is-current .node-kind { color: var(--amber); }
+    .node-label { display: block; font-size: 13px; line-height: 1.25; font-weight: 600; }
+    .node-layer { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; line-height: 1.2; }
+    .flow-tab { transition: color .2s ease, background .2s ease, border-color .2s ease, transform .2s ease; }
+    .flow-tab:hover { transform: translateY(-1px); }
+    .flow-tab.active { color: #062228; background: var(--cyan); border-color: var(--cyan); box-shadow: 0 0 22px rgba(99,230,226,.2); }
+    .step-button { transition: background .2s ease, border-color .2s ease, transform .2s ease, opacity .2s ease; }
+    .step-button:hover, .step-button:focus-visible { transform: translateX(3px); border-color: rgba(99,230,226,.6); outline: none; }
+    .step-button.active { background: rgba(99,230,226,.12); border-color: rgba(99,230,226,.55); }
+    .step-button.current { background: rgba(251,191,117,.12); border-color: rgba(251,191,117,.65); }
+    .step-number { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 auto; color: var(--cyan); background: rgba(99,230,226,.1); border: 1px solid rgba(99,230,226,.28); border-radius: 9px; font: 500 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .step-button.current .step-number { color: #24190a; background: var(--amber); border-color: var(--amber); }
+    .file-chip { color: #b9c9dc; background: rgba(137,164,199,.1); border: 1px solid rgba(137,164,199,.16); }
+    .metric { border-left: 1px solid rgba(137,164,199,.22); padding-left: 14px; }
+    .metric:first-child { border-left: 0; padding-left: 0; }
+    @media (max-width: 760px) {
+      .metric { border-left: 0; padding-left: 0; }
+      .diagram-canvas { height: 820px; }
+      .zone-experimental { height: 120px; }
+      .diagram-node { width: 136px; }
+    }
+  </style>
+</head>
+<body class="dark">
+  <div class="mx-auto max-w-[1540px] px-4 py-5 sm:px-6 lg:px-10 lg:py-8">
+    <header class="mb-9 flex flex-col gap-6 border-b border-slate-800/80 pb-7 lg:flex-row lg:items-end lg:justify-between">
+      <div>
+        <div class="eyebrow mb-4">NexusData / architecture explorer</div>
+        <h1 class="max-w-3xl text-3xl font-medium tracking-tight text-slate-50 sm:text-5xl">Una vista navegable de cómo entra, se transforma y se organiza el conocimiento.</h1>
+        <p class="mt-4 max-w-2xl text-sm leading-6 text-slate-400">Mapa generado a partir de la implementación actual: shell Electron, API Express, ingestión local/REST, búsqueda Fuse.js y persistencia separada para contenido y cuentas.</p>
+      </div>
+      <div class="flex flex-wrap items-center gap-x-6 gap-y-3 text-xs text-slate-400">
+        <span><i class="legend-dot mr-2 text-cyan" style="background:#63e6e2"></i>path activo</span>
+        <span><i class="legend-dot mr-2 text-amber-300" style="background:#fbbf75"></i>paso actual</span>
+        <span><i class="legend-dot mr-2 text-violet-400" style="background:#a78bfa"></i>experimental</span>
+      </div>
+    </header>
+
+    <main>
+      <section id="architecture" class="mb-14">
+        <div class="mb-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <div class="section-kicker mb-2">01 / System map</div>
+            <h2 class="text-2xl font-medium tracking-tight text-slate-100">Arquitectura por capas</h2>
+          </div>
+          <div id="metrics" class="flex flex-wrap gap-5 text-xs text-slate-400"></div>
+        </div>
+        <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_310px]">
+          <div class="glass rounded-3xl p-3 sm:p-4">
+            <div class="mb-3 flex flex-wrap items-center justify-between gap-3 px-1 text-xs text-slate-400">
+              <span>Haz clic en un nodo, una arista o un flow para cambiar el foco.</span>
+              <span class="font-mono text-[11px] text-slate-500">main + experimental surfaces</span>
+            </div>
+            <div class="diagram-scroll" aria-label="Diagrama interactivo de arquitectura">
+              <div id="diagramCanvas" class="diagram-canvas">
+                <div class="zone zone-client"><span class="zone-label">01 / client</span></div>
+                <div class="zone zone-application"><span class="zone-label">02 / application</span></div>
+                <div class="zone zone-data"><span class="zone-label">03 / data</span></div>
+                <div class="zone zone-integration"><span class="zone-label">04 / integrations</span></div>
+                <div class="zone zone-experimental"><span class="zone-label">05 / experimental apps</span></div>
+                <svg id="edgeLayer" class="edge-layer" viewBox="0 0 1400 900" role="img" aria-label="Relaciones entre los componentes del proyecto"></svg>
+                <div id="nodeLayer" class="node-layer"></div>
+              </div>
+            </div>
+          </div>
+          <aside class="glass rounded-3xl p-5" aria-live="polite">
+            <div class="section-kicker mb-3">Selected component</div>
+            <div id="selectedNode"></div>
+            <div class="mt-5 border-t border-slate-800 pt-5">
+              <div class="mb-2 text-xs font-medium uppercase tracking-[.12em] text-slate-500">Responsibility</div>
+              <p id="selectedDescription" class="text-sm leading-6 text-slate-300"></p>
+            </div>
+            <div class="mt-5 border-t border-slate-800 pt-5">
+              <div class="mb-3 text-xs font-medium uppercase tracking-[.12em] text-slate-500">Source files</div>
+              <div id="selectedFiles" class="flex flex-col gap-2"></div>
+            </div>
+            <div class="mt-5 rounded-2xl border border-cyan-300/10 bg-cyan-300/[.04] p-4 text-xs leading-5 text-slate-400">Los nodos experimentales están conectados como superficies independientes: no participan en los flows principales de NexusData.</div>
+          </aside>
+        </div>
+      </section>
+
+      <section id="flows" class="scroll-mt-8">
+        <div class="mb-5">
+          <div class="section-kicker mb-2">02 / Interactive flows</div>
+          <h2 class="text-2xl font-medium tracking-tight text-slate-100">Selecciona un recorrido y sigue sus pasos</h2>
+          <p class="mt-2 max-w-2xl text-sm leading-6 text-slate-400">Cada selección resalta los nodos y aristas que atraviesa el caso de uso. Pulsa un paso para aislar el tramo actual y ver el detalle operativo.</p>
+        </div>
+        <div id="flowTabs" class="mb-5 flex flex-wrap gap-2" role="tablist" aria-label="Flows disponibles"></div>
+        <div class="grid gap-5 xl:grid-cols-[minmax(0,1fr)_minmax(320px,420px)]">
+          <div class="glass rounded-3xl p-5 sm:p-6">
+            <div class="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-slate-800 pb-5">
+              <div>
+                <div class="section-kicker mb-2">Current flow</div>
+                <h3 id="activeFlowName" class="text-xl font-medium text-slate-100"></h3>
+                <p id="activeFlowSummary" class="mt-2 max-w-2xl text-sm leading-6 text-slate-400"></p>
+              </div>
+              <div id="flowProgress" class="rounded-full border border-slate-700 bg-slate-900/70 px-3 py-1.5 font-mono text-[11px] text-slate-400"></div>
+            </div>
+            <div id="stepList" class="flex flex-col gap-3" aria-label="Pasos del flow"></div>
+          </div>
+          <aside class="glass rounded-3xl p-5 sm:p-6" aria-live="polite">
+            <div class="section-kicker mb-3">Current step</div>
+            <div id="currentStep"></div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <footer class="mt-14 flex flex-col gap-3 border-t border-slate-800/80 pt-5 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+      <span>Snapshot del codebase · 2026-07-29 · NexusData</span>
+      <span class="font-mono">architecture.json · nodes / edges / flows</span>
+    </footer>
+  </div>
+
+  <script>
+    const architectureData = {
+      nodes: [
+        { id:'user', label:'Usuario', kind:'actor', layer:'client', description:'Persona que opera NexusData desde la aplicación de escritorio.', files:[] },
+        { id:'electron-main', label:'Electron main', kind:'runtime', layer:'client', description:'Crea BrowserWindow, carga la API local y registra menús y handlers IPC.', files:['desktop/main.js'] },
+        { id:'electron-preload', label:'Preload bridge', kind:'runtime', layer:'client', description:'Expone una superficie IPC mínima con contextIsolation y nodeIntegration desactivado.', files:['desktop/preload.js'] },
+        { id:'desktop-ui', label:'Desktop UI', kind:'interface', layer:'client', description:'Interfaz de búsqueda, fuentes, visor HTML, etiquetas, colecciones y ajustes.', files:['desktop/index.html','desktop/js/app.js','desktop/js/markdown.js','desktop/css/styles.css'] },
+        { id:'express-api', label:'Express API', kind:'service', layer:'application', description:'Servidor HTTP local; monta rutas, middleware JSON, archivos estáticos y manejo de errores.', files:['server/app.js','server/routes/index.js'] },
+        { id:'auth-middleware', label:'Auth + sesiones', kind:'security', layer:'application', description:'Registro/login/offline, bcrypt, JWT en cookie HttpOnly, rate limit y guard de /api.', files:['server/auth.js'] },
+        { id:'local-importer', label:'Local importer', kind:'worker', layer:'application', description:'Recorre archivos soportados, extrae metadatos y hace upsert/prune de documentos.', files:['server/importers/local.js','server/services/documents.js'] },
+        { id:'rest-sync', label:'REST sync', kind:'worker', layer:'application', description:'Hace GET con timeout, normaliza payloads y aplica el mapping id/title/content.', files:['server/services/rest.js','server/services/documents.js'] },
+        { id:'html-inspector', label:'HTML inspector', kind:'worker', layer:'application', description:'Inspecciona proyectos HTML/CSS/JS, calcula raíz común y devuelve entry + archivos.', files:['server/services/html-viewer.js'] },
+        { id:'search-fuse', label:'Search + Fuse.js', kind:'query', layer:'application', description:'Combina filtros SQL con búsqueda exacta/aproximada y ranking por coincidencia.', files:['server/routes/index.js'] },
+        { id:'organizer', label:'Tags + collections', kind:'domain', layer:'application', description:'Gestiona etiquetas, colecciones y relaciones entre documentos.', files:['server/routes/index.js','server/database/db.js'] },
+        { id:'sqlite', label:'SQLite local', kind:'database', layer:'data', description:'Persistencia local de fuentes, documentos, tags, colecciones y relaciones.', files:['server/database/db.js'] },
+        { id:'mysql-auth', label:'MySQL auth', kind:'database', layer:'data', description:'Esquema nexusdata_auth para usuarios y hashes bcrypt; pool con disponibilidad comprobable.', files:['server/database/mysql.js','compose.yaml'] },
+        { id:'filesystem', label:'Filesystem', kind:'external', layer:'integration', description:'Archivos y carpetas locales que alimentan fuentes local/global-project y el visor HTML.', files:['server/importers/local.js','server/services/html-viewer.js'] },
+        { id:'remote-rest', label:'REST sources', kind:'external', layer:'integration', description:'Endpoints HTTP configurables; el payload puede ser array o envolverse en data/results/items/issues.', files:['server/services/rest.js'] },
+        { id:'test-source-server', label:'Test source server', kind:'external', layer:'integration', description:'Servidor auxiliar que publica índice REST, Markdown y health para pruebas locales.', files:['test-source-server/server.js'] },
+        { id:'precio-claro', label:'Precio Claro', kind:'application', layer:'experimental', description:'Aplicación Electron independiente para catálogo de productos y ofertas comparables.', files:['comparador-precios-electron/src/main.js','comparador-precios-electron/src/renderer.js'] },
+        { id:'serpapi', label:'SerpApi / Shopping', kind:'external', layer:'experimental', description:'Proveedor externo para resultados google_shopping usado por Precio Claro.', files:['comparador-precios-electron/src/providers/serpapi.js'] },
+        { id:'desvios-web', label:'Desvíos web', kind:'application', layer:'experimental', description:'Catálogo React/Vinext de 16 direcciones visuales con design notes Markdown.', files:['catalogo-frontends-experimentales/app/page.tsx','catalogo-frontends-experimentales/app/designs.ts'] },
+        { id:'desvios-desktop', label:'Desvíos desktop', kind:'runtime', layer:'experimental', description:'Shell Electron opcional que abre el renderer compilado del catálogo visual.', files:['catalogo-frontends-experimentales/desktop/main.cjs','catalogo-frontends-experimentales/desktop/renderer.tsx'] },
+        { id:'desvios-worker', label:'Cloudflare worker', kind:'runtime', layer:'experimental', description:'Entry point de producción; resuelve assets y optimización de imágenes para Vinext.', files:['catalogo-frontends-experimentales/worker/index.ts'] },
+        { id:'chatgpt-auth', label:'ChatGPT auth headers', kind:'security', layer:'experimental', description:'Lee headers de identidad y protege retornos relativos en el catálogo experimental.', files:['catalogo-frontends-experimentales/app/chatgpt-auth.ts'] }
+      ],
+      edges: [
+        ['e01','user','electron-main','launch','Abre la aplicación de escritorio.',['online-auth']], ['e02','electron-main','express-api','HTTP local','Carga la API local en 127.0.0.1:3000.',['online-auth']], ['e03','electron-main','electron-preload','preload','Conecta BrowserWindow con el bridge seguro.',[]], ['e04','electron-preload','desktop-ui','IPC','Expone selección de rutas, menús y acciones del visor.',[]], ['e05','desktop-ui','express-api','fetch /api','La UI usa fetch con credentials include.',['online-auth','offline-local','rest-sync','global-search','html-preview','organize']], ['e06','express-api','auth-middleware','middleware','Protege las rutas de datos y resuelve la sesión JWT.',['online-auth','offline-local','rest-sync','global-search']], ['e07','auth-middleware','mysql-auth','mysql2','Comprueba disponibilidad y consulta/crea usuarios.',['online-auth']], ['e08','auth-middleware','desktop-ui','cookie + JSON','Devuelve identidad o modo offline.',['online-auth','offline-local']], ['e09','express-api','local-importer','service call','Selecciona importLocalSource.', ['offline-local']], ['e10','local-importer','filesystem','fs','Recorre archivos soportados y límites de tamaño.',['offline-local','global-search']], ['e11','local-importer','sqlite','transaction','Upsert de documentos y prune opcional.',['offline-local','global-search']], ['e12','local-importer','desktop-ui','JSON','Entrega totales, errores y estado.',['offline-local','global-search']], ['e13','express-api','rest-sync','service call','Selecciona syncRestSource.', ['rest-sync']], ['e14','rest-sync','remote-rest','GET','Consulta el endpoint configurado.', ['rest-sync']], ['e15','rest-sync','sqlite','transaction','Mapea items a documentos con metadata.', ['rest-sync']], ['e16','rest-sync','desktop-ui','JSON','Devuelve creados, actualizados e items.', ['rest-sync']], ['e17','express-api','html-inspector','service call','Ejecuta inspectHtmlProject.', ['html-preview']], ['e18','html-inspector','filesystem','fs','Lee HTML/CSS/JS y evita symlinks.', ['html-preview']], ['e19','html-inspector','desktop-ui','JSON','Devuelve root, entry, files y contenido.', ['html-preview']], ['e20','express-api','search-fuse','query','Pasa q y filtros.', ['global-search']], ['e21','search-fuse','sqlite','SQL + Fuse','Obtiene candidatos y rankea coincidencias.', ['global-search']], ['e22','search-fuse','desktop-ui','JSON','Entrega score, snippet, tags y origen.', ['global-search']], ['e23','express-api','organizer','service call','Gestiona tags y collections.', ['organize']], ['e24','organizer','sqlite','SQL','Persiste document_tags y collection_items.', ['organize']], ['e25','test-source-server','remote-rest','HTTP 4100','Sirve el índice REST de prueba.', ['rest-sync']], ['e26','precio-claro','serpapi','HTTPS','Consulta google_shopping.', []], ['e27','desvios-desktop','desvios-web','bundled renderer','Embebe el renderer compilado.', []], ['e28','desvios-web','desvios-worker','Vinext / Cloudflare','Sirve el build web mediante el worker.', []], ['e29','desvios-web','chatgpt-auth','request headers','Lee identidad OAI del entorno hospedado.', []], ['e30','express-api','sqlite','SQL','Lee stats, fuentes, documentos, tags y colecciones.', ['global-search','organize']], ['e31','user','desktop-ui','interaction','Escribe consultas y selecciona rutas.', ['offline-local','rest-sync','global-search','html-preview','organize']], ['e32','organizer','desktop-ui','JSON','Devuelve la taxonomía actualizada.', ['organize']]
+      ].map(([id, source, target, protocol, description, flowIds]) => ({ id, source, target, protocol, description, flowIds })),
+      flows: [
+        { id:'online-auth', name:'Login online', summary:'Autentica al usuario contra MySQL y deja una sesión JWT en cookie HttpOnly.', steps:[['Abrir la aplicación','user','electron-main','e01','Electron crea la ventana principal.'],['Cargar UI local','electron-main','express-api','e02','La ventana carga la API local.'],['Enviar credenciales','desktop-ui','express-api','e05','La UI llama login o register.'],['Validar sesión','express-api','auth-middleware','e06','Se aplican validación, rate limit y JWT.'],['Consultar usuarios','auth-middleware','mysql-auth','e07','mysql2 lee o crea el hash bcrypt.'],['Confirmar identidad','auth-middleware','desktop-ui','e08','La cookie permite acceder a datos.']] },
+        { id:'offline-local', name:'Importación local offline', summary:'Permite trabajar sin MySQL: solo fuentes locales, archivos y contenido de SQLite.', steps:[['Seleccionar carpeta o archivo','user','desktop-ui','e31','El usuario usa el diálogo nativo.'],['Crear sesión offline','desktop-ui','express-api','e05','Se crea un JWT con offline=true.'],['Aplicar restricciones','express-api','auth-middleware','e06','El guard limita los datos a type=local.'],['Importar archivos','express-api','local-importer','e09','Se detectan extensiones y metadatos.'],['Leer filesystem','local-importer','filesystem','e10','collectFiles recorre carpetas.'],['Persistir documentos','local-importer','sqlite','e11','upsertDocument conserva el origen.'],['Refrescar la vista','local-importer','desktop-ui','e12','La UI muestra totales y errores.']] },
+        { id:'rest-sync', name:'Sincronizar API REST', summary:'Trae items remotos mediante GET, los mapea a documentos y conserva sus metadatos.', steps:[['Configurar fuente REST','user','desktop-ui','e31','Se define URL, headers y mapping.'],['Solicitar sincronización','desktop-ui','express-api','e05','POST /api/sources/:id/sync inicia el ciclo.'],['Seleccionar worker REST','express-api','rest-sync','e13','syncSource deriva por source.type=rest.'],['Obtener payload','rest-sync','remote-rest','e14','fetchRest valida, limita y normaliza.'],['Upsert en SQLite','rest-sync','sqlite','e15','Cada item queda URL + mappedId.'],['Informar resultado','rest-sync','desktop-ui','e16','La UI recibe creados y actualizados.']] },
+        { id:'global-search', name:'Búsqueda global', summary:'Consulta contenido local/remoto con filtros y ranking aproximado para devolver snippets útiles.', steps:[['Escribir consulta','user','desktop-ui','e31','La UI aplica debounce y filtros.'],['Enviar query + filtros','desktop-ui','express-api','e05','GET /api/search admite filtros.'],['Aplicar guard de sesión','express-api','auth-middleware','e06','Offline filtra a fuentes locales.'],['Cargar candidatos','express-api','sqlite','e30','documentRows prepara documentos.'],['Rankear coincidencias','express-api','search-fuse','e20','Fuse.js pondera title, content y metadata.'],['Devolver resultados','search-fuse','desktop-ui','e22','La UI renderiza score, snippet y origen.']] },
+        { id:'html-preview', name:'Previsualizar proyecto HTML', summary:'Inspecciona un conjunto de HTML/CSS/JS local y devuelve entry, árbol relativo y contenido.', steps:[['Elegir rutas web','user','desktop-ui','e31','El diálogo permite carpetas o archivos.'],['Pedir inspección','desktop-ui','express-api','e05','POST /api/html-viewer/inspect envía paths.'],['Analizar estructura','express-api','html-inspector','e17','Se calcula commonRoot y entry.'],['Leer archivos web','html-inspector','filesystem','e18','Se omiten symlinks y se respetan límites.'],['Renderizar preview','html-inspector','desktop-ui','e19','La UI recibe contenido y relaciones.']] },
+        { id:'organize', name:'Organizar conocimiento', summary:'Añade tags y documentos a colecciones, manteniendo las relaciones en SQLite.', steps:[['Elegir documento','user','desktop-ui','e31','La UI ofrece acciones rápidas.'],['Enviar acción','desktop-ui','express-api','e05','POST de tag o collection item.'],['Resolver dominio','express-api','organizer','e23','Se validan documento y colección.'],['Persistir relación','organizer','sqlite','e24','Se escriben document_tags o collection_items.'],['Actualizar UI','organizer','desktop-ui','e32','La UI refresca taxonomía y conteos.']] }
+      ].map(flow => ({ ...flow, steps: flow.steps.map(([label, from, to, edgeId, details], index) => ({ id:`${flow.id}-${index+1}`, label, from, to, edgeId, details })) }))
+    };
+
+    const positions = {
+      user:[70,230], 'electron-main':[220,150], 'electron-preload':[220,340], 'desktop-ui':[360,245], 'express-api':[550,245], 'auth-middleware':[730,130], 'local-importer':[730,255], 'rest-sync':[730,380], 'html-inspector':[730,505], 'search-fuse':[930,205], organizer:[930,360], sqlite:[1160,255], 'mysql-auth':[1160,410], filesystem:[930,565], 'remote-rest':[1160,565], 'test-source-server':[1160,690], 'precio-claro':[175,825], serpapi:[370,825], 'desvios-web':[610,825], 'desvios-desktop':[820,825], 'desvios-worker':[1030,825], 'chatgpt-auth':[1230,825]
+    };
+    const nodesById = Object.fromEntries(architectureData.nodes.map(node => [node.id, node]));
+    const edgesById = Object.fromEntries(architectureData.edges.map(edge => [edge.id, edge]));
+    const edgeLayer = document.getElementById('edgeLayer');
+    const nodeLayer = document.getElementById('nodeLayer');
+    const metrics = document.getElementById('metrics');
+    const selectedNode = document.getElementById('selectedNode');
+    const selectedDescription = document.getElementById('selectedDescription');
+    const selectedFiles = document.getElementById('selectedFiles');
+    const flowTabs = document.getElementById('flowTabs');
+    const stepList = document.getElementById('stepList');
+    const activeFlowName = document.getElementById('activeFlowName');
+    const activeFlowSummary = document.getElementById('activeFlowSummary');
+    const flowProgress = document.getElementById('flowProgress');
+    const currentStep = document.getElementById('currentStep');
+    let activeFlowId = 'global-search';
+    let activeStepIndex = 0;
+    let selectedNodeId = 'user';
+
+    const kindLabel = kind => ({ actor:'actor', runtime:'runtime', interface:'interface', service:'service', security:'security', worker:'worker', query:'query', domain:'domain', database:'database', external:'external', application:'application' }[kind] || kind);
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#039;' }[char]));
+    const activeFlow = () => architectureData.flows.find(flow => flow.id === activeFlowId) || architectureData.flows[0];
+
+    function renderMetrics() {
+      metrics.innerHTML = [['nodes', architectureData.nodes.length], ['edges', architectureData.edges.length], ['flows', architectureData.flows.length]].map(([label, value]) => `<span class="metric"><strong class="text-slate-200">${value}</strong> <span class="ml-1">${label}</span></span>`).join('');
+    }
+
+    function pathFor(sourceId, targetId) {
+      const [sx, sy] = positions[sourceId];
+      const [tx, ty] = positions[targetId];
+      const bend = Math.max(90, Math.abs(tx - sx) * .44);
+      const direction = tx >= sx ? 1 : -1;
+      return `M ${sx} ${sy} C ${sx + bend * direction} ${sy}, ${tx - bend * direction} ${ty}, ${tx} ${ty}`;
+    }
+
+    function renderEdges() {
+      edgeLayer.innerHTML = `<defs><marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="rgba(142,164,193,.7)"></path></marker><marker id="arrow-active" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#63e6e2"></path></marker></defs>` + architectureData.edges.map(edge => `<path class="edge${edge.source.startsWith('desvios') || edge.target.startsWith('desvios') || edge.source === 'precio-claro' ? ' experimental' : ''}" data-edge-id="${edge.id}" d="${pathFor(edge.source, edge.target)}" marker-end="url(#arrow)" aria-label="${esc(nodesById[edge.source].label)} a ${esc(nodesById[edge.target].label)}"></path>`).join('');
+      edgeLayer.querySelectorAll('.edge').forEach(edgeEl => edgeEl.addEventListener('click', () => {
+        const edge = edgesById[edgeEl.dataset.edgeId];
+        const flow = activeFlow();
+        const index = flow.steps.findIndex(step => step.edgeId === edge.id);
+        if (index >= 0) activeStepIndex = index;
+        selectedNodeId = edge.target;
+        renderAll();
+      }));
+    }
+
+    function renderNodes() {
+      nodeLayer.innerHTML = architectureData.nodes.map(node => {
+        const [x, y] = positions[node.id];
+        return `<button type="button" class="diagram-node" data-node-id="${node.id}" style="left:${x / 14}%;top:${y / 9}%" aria-label="Seleccionar ${esc(node.label)}"><span class="node-kind">${esc(kindLabel(node.kind))}</span><span class="node-label">${esc(node.label)}</span><span class="node-layer">${esc(node.layer)}</span></button>`;
+      }).join('');
+      nodeLayer.querySelectorAll('.diagram-node').forEach(button => button.addEventListener('click', () => {
+        selectedNodeId = button.dataset.nodeId;
+        renderAll();
+      }));
+    }
+
+    function renderSelectedNode() {
+      const node = nodesById[selectedNodeId] || nodesById.user;
+      selectedNode.innerHTML = `<div class="flex items-start gap-3"><span class="mt-1 inline-block h-3 w-3 rounded-full bg-cyan shadow-[0_0_16px_rgba(99,230,226,.85)]"></span><div><h3 class="text-lg font-medium text-slate-100">${esc(node.label)}</h3><div class="mt-1 font-mono text-[11px] text-slate-500">${esc(node.id)} · ${esc(node.layer)}</div></div></div>`;
+      selectedDescription.textContent = node.description;
+      selectedFiles.innerHTML = node.files.length ? node.files.map(file => `<code class="file-chip rounded-lg px-2.5 py-2 text-[11px] leading-4">${esc(file)}</code>`).join('') : '<span class="text-sm text-slate-500">Sin archivo fuente · actor conceptual</span>';
+    }
+
+    function renderTabs() {
+      flowTabs.innerHTML = architectureData.flows.map(flow => `<button type="button" class="flow-tab rounded-full border border-slate-700 bg-slate-900/70 px-4 py-2 text-xs font-medium text-slate-300" data-flow-id="${flow.id}" role="tab" aria-selected="${flow.id === activeFlowId}">${esc(flow.name)}</button>`).join('');
+      flowTabs.querySelectorAll('.flow-tab').forEach(button => button.addEventListener('click', () => { activeFlowId = button.dataset.flowId; activeStepIndex = 0; renderAll(); document.getElementById('flows').scrollIntoView({ behavior:'smooth', block:'start' }); }));
+    }
+
+    function renderSteps() {
+      const flow = activeFlow();
+      activeFlowName.textContent = flow.name;
+      activeFlowSummary.textContent = flow.summary;
+      flowProgress.textContent = `${String(activeStepIndex + 1).padStart(2, '0')} / ${String(flow.steps.length).padStart(2, '0')} steps`;
+      stepList.innerHTML = flow.steps.map((step, index) => `<button type="button" class="step-button ${index <= activeStepIndex ? 'active' : ''} ${index === activeStepIndex ? 'current' : ''} flex w-full items-start gap-3 rounded-2xl border border-slate-800 bg-slate-950/25 p-3 text-left" data-step-index="${index}"><span class="step-number">${String(index + 1).padStart(2, '0')}</span><span class="min-w-0"><span class="block text-sm font-medium text-slate-100">${esc(step.label)}</span><span class="mt-1 block text-[11px] text-slate-500"><code>${esc(step.from)}</code> → <code>${esc(step.to)}</code></span><span class="mt-2 block text-xs leading-5 text-slate-400">${esc(step.details)}</span></span></button>`).join('');
+      stepList.querySelectorAll('.step-button').forEach(button => button.addEventListener('click', () => { activeStepIndex = Number(button.dataset.stepIndex); selectedNodeId = flow.steps[activeStepIndex].to; renderAll(); }));
+      const step = flow.steps[activeStepIndex];
+      const from = nodesById[step.from];
+      const to = nodesById[step.to];
+      currentStep.innerHTML = `<div class="rounded-2xl border border-amber-300/20 bg-amber-300/[.05] p-4"><div class="flex items-center justify-between gap-3"><span class="eyebrow" style="color:var(--amber)">Step ${String(activeStepIndex + 1).padStart(2, '0')}</span><span class="rounded-full border border-amber-300/20 px-2 py-1 font-mono text-[10px] text-amber-200">${esc(step.edgeId)}</span></div><h3 class="mt-4 text-lg font-medium text-slate-100">${esc(step.label)}</h3><p class="mt-3 text-sm leading-6 text-slate-300">${esc(step.details)}</p><div class="mt-5 grid gap-2 sm:grid-cols-2 xl:grid-cols-1"><div class="rounded-xl border border-slate-800 bg-slate-950/30 p-3"><div class="text-[10px] uppercase tracking-[.12em] text-slate-500">from</div><div class="mt-1 text-sm text-slate-200">${esc(from.label)}</div><div class="mt-1 font-mono text-[10px] text-slate-500">${esc(from.id)}</div></div><div class="rounded-xl border border-slate-800 bg-slate-950/30 p-3"><div class="text-[10px] uppercase tracking-[.12em] text-slate-500">to</div><div class="mt-1 text-sm text-slate-200">${esc(to.label)}</div><div class="mt-1 font-mono text-[10px] text-slate-500">${esc(to.id)}</div></div></div></div>`;
+    }
+
+    function updateHighlights() {
+      const flow = activeFlow();
+      const activeEdges = new Set(flow.steps.map(step => step.edgeId));
+      const activeNodes = new Set(flow.steps.flatMap(step => [step.from, step.to]));
+      const currentStep = flow.steps[activeStepIndex];
+      document.querySelectorAll('.edge').forEach(edgeEl => {
+        const isActive = activeEdges.has(edgeEl.dataset.edgeId);
+        edgeEl.classList.toggle('is-active', isActive);
+        edgeEl.classList.toggle('is-current', edgeEl.dataset.edgeId === currentStep.edgeId);
+        edgeEl.classList.toggle('is-dimmed', !isActive);
+        if (isActive) edgeEl.setAttribute('marker-end', 'url(#arrow-active)');
+        else edgeEl.setAttribute('marker-end', 'url(#arrow)');
+      });
+      document.querySelectorAll('.diagram-node').forEach(nodeEl => {
+        const id = nodeEl.dataset.nodeId;
+        nodeEl.classList.toggle('is-active', activeNodes.has(id));
+        nodeEl.classList.toggle('is-current', id === currentStep.from || id === currentStep.to);
+        nodeEl.classList.toggle('is-dimmed', !activeNodes.has(id));
+        nodeEl.classList.toggle('is-selected', id === selectedNodeId);
+      });
+      document.querySelectorAll('.flow-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.flowId === activeFlowId));
+    }
+
+    function renderAll() { renderSelectedNode(); renderTabs(); renderSteps(); updateHighlights(); }
+    renderMetrics();
+    renderEdges();
+    renderNodes();
+    renderAll();
+  </script>
+</body>
+</html>

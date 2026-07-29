@@ -1,0 +1,139 @@
+{
+  "nodes": [
+    { "id": "user", "label": "Usuario", "kind": "actor", "layer": "client", "description": "Persona que opera NexusData desde la aplicación de escritorio.", "files": [] },
+    { "id": "electron-main", "label": "Electron main", "kind": "runtime", "layer": "client", "description": "Crea BrowserWindow, carga la API local y registra menús y handlers IPC.", "files": ["desktop/main.js"] },
+    { "id": "electron-preload", "label": "Preload bridge", "kind": "runtime", "layer": "client", "description": "Expone una superficie IPC mínima con contextIsolation y nodeIntegration desactivado.", "files": ["desktop/preload.js"] },
+    { "id": "desktop-ui", "label": "Desktop UI", "kind": "interface", "layer": "client", "description": "Interfaz de búsqueda, fuentes, visor HTML, etiquetas, colecciones y ajustes.", "files": ["desktop/index.html", "desktop/js/app.js", "desktop/js/markdown.js", "desktop/css/styles.css"] },
+    { "id": "express-api", "label": "Express API", "kind": "service", "layer": "application", "description": "Servidor HTTP local; monta rutas, middleware JSON, archivos estáticos y manejo de errores.", "files": ["server/app.js", "server/routes/index.js"] },
+    { "id": "auth-middleware", "label": "Auth + sesiones", "kind": "security", "layer": "application", "description": "Registro/login/offline, bcrypt, JWT en cookie HttpOnly, rate limit y guard de /api.", "files": ["server/auth.js"] },
+    { "id": "local-importer", "label": "Local importer", "kind": "worker", "layer": "application", "description": "Recorre archivos soportados, extrae metadatos y hace upsert/prune de documentos.", "files": ["server/importers/local.js", "server/services/documents.js"] },
+    { "id": "rest-sync", "label": "REST sync", "kind": "worker", "layer": "application", "description": "Hace GET con timeout, normaliza payloads y aplica el mapping id/title/content.", "files": ["server/services/rest.js", "server/services/documents.js"] },
+    { "id": "html-inspector", "label": "HTML inspector", "kind": "worker", "layer": "application", "description": "Inspecciona proyectos HTML/CSS/JS, calcula raíz común y devuelve entry + archivos.", "files": ["server/services/html-viewer.js"] },
+    { "id": "search-fuse", "label": "Search + Fuse.js", "kind": "query", "layer": "application", "description": "Combina filtros SQL con búsqueda exacta/aproximada y ranking por coincidencia.", "files": ["server/routes/index.js"] },
+    { "id": "organizer", "label": "Tags + collections", "kind": "domain", "layer": "application", "description": "Gestiona etiquetas, colecciones y relaciones entre documentos.", "files": ["server/routes/index.js", "server/database/db.js"] },
+    { "id": "sqlite", "label": "SQLite local", "kind": "database", "layer": "data", "description": "Persistencia local de fuentes, documentos, tags, colecciones y relaciones.", "files": ["server/database/db.js"] },
+    { "id": "mysql-auth", "label": "MySQL auth", "kind": "database", "layer": "data", "description": "Esquema nexusdata_auth para usuarios y hashes bcrypt; pool con disponibilidad comprobable.", "files": ["server/database/mysql.js", "compose.yaml"] },
+    { "id": "filesystem", "label": "Filesystem", "kind": "external", "layer": "integration", "description": "Archivos y carpetas locales que alimentan fuentes local/global-project y el visor HTML.", "files": ["server/importers/local.js", "server/services/html-viewer.js"] },
+    { "id": "remote-rest", "label": "REST sources", "kind": "external", "layer": "integration", "description": "Endpoints HTTP configurables; el payload puede ser array o envolverse en data/results/items/issues.", "files": ["server/services/rest.js"] },
+    { "id": "test-source-server", "label": "Test source server", "kind": "external", "layer": "integration", "description": "Servidor auxiliar que publica índice REST, Markdown y health para pruebas locales.", "files": ["test-source-server/server.js", "test-source-server/documents/documento-prueba.md"] },
+    { "id": "precio-claro", "label": "Precio Claro", "kind": "application", "layer": "experimental", "description": "Aplicación Electron independiente para catálogo de productos y ofertas comparables.", "files": ["comparador-precios-electron/src/main.js", "comparador-precios-electron/src/renderer.js", "comparador-precios-electron/src/store.js"] },
+    { "id": "serpapi", "label": "SerpApi / Shopping", "kind": "external", "layer": "experimental", "description": "Proveedor externo para resultados google_shopping usado por Precio Claro.", "files": ["comparador-precios-electron/src/providers/serpapi.js"] },
+    { "id": "desvios-web", "label": "Desvíos web", "kind": "application", "layer": "experimental", "description": "Catálogo React/Vinext de 16 direcciones visuales con design notes Markdown.", "files": ["catalogo-frontends-experimentales/app/page.tsx", "catalogo-frontends-experimentales/app/designs.ts", "catalogo-frontends-experimentales/app/globals.css"] },
+    { "id": "desvios-desktop", "label": "Desvíos desktop", "kind": "runtime", "layer": "experimental", "description": "Shell Electron opcional que abre el renderer compilado del catálogo visual.", "files": ["catalogo-frontends-experimentales/desktop/main.cjs", "catalogo-frontends-experimentales/desktop/renderer.tsx"] },
+    { "id": "desvios-worker", "label": "Cloudflare worker", "kind": "runtime", "layer": "experimental", "description": "Entry point de producción; resuelve assets y optimización de imágenes para Vinext.", "files": ["catalogo-frontends-experimentales/worker/index.ts", "catalogo-frontends-experimentales/package.json"] },
+    { "id": "chatgpt-auth", "label": "ChatGPT auth headers", "kind": "security", "layer": "experimental", "description": "Lee headers de identidad y protege retornos relativos en el catálogo experimental.", "files": ["catalogo-frontends-experimentales/app/chatgpt-auth.ts"] }
+  ],
+  "edges": [
+    { "id": "e01", "source": "user", "target": "electron-main", "protocol": "launch", "description": "Abre la aplicación de escritorio.", "flowIds": ["online-auth"] },
+    { "id": "e02", "source": "electron-main", "target": "express-api", "protocol": "HTTP local", "description": "Carga http://127.0.0.1:3000 y deja que Express sirva la UI estática.", "flowIds": ["online-auth"] },
+    { "id": "e03", "source": "electron-main", "target": "electron-preload", "protocol": "preload", "description": "Conecta el BrowserWindow con el bridge seguro.", "flowIds": [] },
+    { "id": "e04", "source": "electron-preload", "target": "desktop-ui", "protocol": "IPC", "description": "Expone selección de rutas, menús, revelar archivos y acciones del visor.", "flowIds": [] },
+    { "id": "e05", "source": "desktop-ui", "target": "express-api", "protocol": "fetch /api", "description": "La UI usa fetch con credentials include para auth, fuentes y contenido.", "flowIds": ["online-auth", "offline-local", "rest-sync", "global-search", "html-preview", "organize"] },
+    { "id": "e06", "source": "express-api", "target": "auth-middleware", "protocol": "middleware", "description": "Protege las rutas de datos y resuelve la sesión JWT.", "flowIds": ["online-auth", "offline-local", "rest-sync", "global-search"] },
+    { "id": "e07", "source": "auth-middleware", "target": "mysql-auth", "protocol": "mysql2", "description": "Comprueba disponibilidad y consulta/crea usuarios.", "flowIds": ["online-auth"] },
+    { "id": "e08", "source": "auth-middleware", "target": "desktop-ui", "protocol": "cookie + JSON", "description": "Devuelve identidad o modo offline; la cookie queda HttpOnly.", "flowIds": ["online-auth", "offline-local"] },
+    { "id": "e09", "source": "express-api", "target": "local-importer", "protocol": "service call", "description": "Selecciona importLocalSource para fuentes local y global-project.", "flowIds": ["offline-local"] },
+    { "id": "e10", "source": "local-importer", "target": "filesystem", "protocol": "fs", "description": "Recorre hasta 2.000 archivos y soporta JSON, CSV, TXT, Markdown, HTML, CSS y JS.", "flowIds": ["offline-local", "global-search"] },
+    { "id": "e11", "source": "local-importer", "target": "sqlite", "protocol": "transaction", "description": "Upsert de documentos y prune opcional del proyecto global.", "flowIds": ["offline-local", "global-search"] },
+    { "id": "e12", "source": "local-importer", "target": "desktop-ui", "protocol": "JSON", "description": "Entrega created/updated/errors y el estado de sincronización a la UI.", "flowIds": ["offline-local", "global-search"] },
+    { "id": "e13", "source": "express-api", "target": "rest-sync", "protocol": "service call", "description": "Selecciona syncRestSource para fuentes de tipo rest.", "flowIds": ["rest-sync"] },
+    { "id": "e14", "source": "rest-sync", "target": "remote-rest", "protocol": "GET", "description": "Consulta el endpoint configurado con headers y AbortController.", "flowIds": ["rest-sync"] },
+    { "id": "e15", "source": "rest-sync", "target": "sqlite", "protocol": "transaction", "description": "Mapea cada item a documento y conserva payload + remoteId en metadata.", "flowIds": ["rest-sync"] },
+    { "id": "e16", "source": "rest-sync", "target": "desktop-ui", "protocol": "JSON", "description": "Devuelve created/updated/items/errors y lastSyncAt.", "flowIds": ["rest-sync"] },
+    { "id": "e17", "source": "express-api", "target": "html-inspector", "protocol": "service call", "description": "Ejecuta inspectHtmlProject sobre paths seleccionadas.", "flowIds": ["html-preview"] },
+    { "id": "e18", "source": "html-inspector", "target": "filesystem", "protocol": "fs", "description": "Lee HTML/CSS/JS, evita symlinks y limita tamaño total del proyecto.", "flowIds": ["html-preview"] },
+    { "id": "e19", "source": "html-inspector", "target": "desktop-ui", "protocol": "JSON", "description": "Devuelve root, entry, files, tamaños, errores y contenido para previsualizar.", "flowIds": ["html-preview"] },
+    { "id": "e20", "source": "express-api", "target": "search-fuse", "protocol": "query", "description": "Pasa q y filtros por fuente, tipo, tag, colección y fecha.", "flowIds": ["global-search"] },
+    { "id": "e21", "source": "search-fuse", "target": "sqlite", "protocol": "SQL + Fuse", "description": "Obtiene candidatos y rankea title/content/path/tags/metadata.", "flowIds": ["global-search"] },
+    { "id": "e22", "source": "search-fuse", "target": "desktop-ui", "protocol": "JSON", "description": "Entrega resultados ordenados con score y snippet.", "flowIds": ["global-search"] },
+    { "id": "e23", "source": "express-api", "target": "organizer", "protocol": "service call", "description": "Gestiona endpoints de tags, collections y collection_items.", "flowIds": ["organize"] },
+    { "id": "e24", "source": "organizer", "target": "sqlite", "protocol": "SQL", "description": "Persiste relaciones document_tags y collection_items.", "flowIds": ["organize"] },
+    { "id": "e25", "source": "test-source-server", "target": "remote-rest", "protocol": "HTTP 4100", "description": "Sirve el índice REST de prueba que puede configurarse como fuente.", "flowIds": ["rest-sync"] },
+    { "id": "e26", "source": "precio-claro", "target": "serpapi", "protocol": "HTTPS", "description": "Consulta google_shopping por proveedor, región, idioma y moneda.", "flowIds": [] },
+    { "id": "e27", "source": "desvios-desktop", "target": "desvios-web", "protocol": "bundled renderer", "description": "La variante Electron embebe el renderer compilado.", "flowIds": [] },
+    { "id": "e28", "source": "desvios-web", "target": "desvios-worker", "protocol": "Vinext / Cloudflare", "description": "El build web se sirve mediante el worker y assets de Cloudflare.", "flowIds": [] },
+    { "id": "e29", "source": "desvios-web", "target": "chatgpt-auth", "protocol": "request headers", "description": "La app puede leer identidad OAI desde headers del entorno hospedado.", "flowIds": [] },
+    { "id": "e30", "source": "express-api", "target": "sqlite", "protocol": "SQL", "description": "Lee stats, fuentes, documentos, tags y colecciones directamente.", "flowIds": ["global-search", "organize"] },
+    { "id": "e31", "source": "user", "target": "desktop-ui", "protocol": "interaction", "description": "Escribe consultas, selecciona rutas y opera las vistas.", "flowIds": ["offline-local", "rest-sync", "global-search", "html-preview", "organize"] },
+    { "id": "e32", "source": "organizer", "target": "desktop-ui", "protocol": "JSON", "description": "Devuelve la taxonomía actualizada para refrescar la vista.", "flowIds": ["organize"] }
+  ],
+  "flows": [
+    {
+      "id": "online-auth",
+      "name": "Login online",
+      "summary": "Autentica al usuario contra MySQL y deja una sesión JWT en cookie HttpOnly.",
+      "steps": [
+        { "id": "online-auth-1", "label": "Abrir la aplicación", "from": "user", "to": "electron-main", "edgeId": "e01", "details": "Electron crea la ventana principal." },
+        { "id": "online-auth-2", "label": "Cargar UI local", "from": "electron-main", "to": "express-api", "edgeId": "e02", "details": "La ventana carga la API local en 127.0.0.1:3000." },
+        { "id": "online-auth-3", "label": "Enviar credenciales", "from": "desktop-ui", "to": "express-api", "edgeId": "e05", "details": "La UI llama POST /api/auth/login o /api/auth/register." },
+        { "id": "online-auth-4", "label": "Validar sesión", "from": "express-api", "to": "auth-middleware", "edgeId": "e06", "details": "El módulo aplica validación, rate limit y firma JWT." },
+        { "id": "online-auth-5", "label": "Consultar usuarios", "from": "auth-middleware", "to": "mysql-auth", "edgeId": "e07", "details": "mysql2 lee el usuario o crea el hash bcrypt." },
+        { "id": "online-auth-6", "label": "Confirmar identidad", "from": "auth-middleware", "to": "desktop-ui", "edgeId": "e08", "details": "La cookie de sesión permite acceder a las rutas de datos." }
+      ]
+    },
+    {
+      "id": "offline-local",
+      "name": "Importación local offline",
+      "summary": "Permite trabajar sin MySQL: solo fuentes locales, archivos y contenido de SQLite.",
+      "steps": [
+        { "id": "offline-local-1", "label": "Seleccionar carpeta o archivo", "from": "user", "to": "desktop-ui", "edgeId": "e31", "details": "El usuario usa el diálogo nativo expuesto por preload." },
+        { "id": "offline-local-2", "label": "Crear sesión offline", "from": "desktop-ui", "to": "express-api", "edgeId": "e05", "details": "POST /api/auth/offline crea un JWT con offline=true." },
+        { "id": "offline-local-3", "label": "Aplicar restricciones", "from": "express-api", "to": "auth-middleware", "edgeId": "e06", "details": "El guard limita fuentes, stats, documentos y colecciones a type=local." },
+        { "id": "offline-local-4", "label": "Importar archivos", "from": "express-api", "to": "local-importer", "edgeId": "e09", "details": "Se detectan extensiones, metadatos y límites de tamaño." },
+        { "id": "offline-local-5", "label": "Leer filesystem", "from": "local-importer", "to": "filesystem", "edgeId": "e10", "details": "collectFiles recorre carpetas y omite entradas ocultas." },
+        { "id": "offline-local-6", "label": "Persistir documentos", "from": "local-importer", "to": "sqlite", "edgeId": "e11", "details": "upsertDocument mantiene el origen y el contenido local." },
+        { "id": "offline-local-7", "label": "Refrescar la vista", "from": "local-importer", "to": "desktop-ui", "edgeId": "e12", "details": "La UI muestra totales, errores y estado ready/error." }
+      ]
+    },
+    {
+      "id": "rest-sync",
+      "name": "Sincronizar API REST",
+      "summary": "Trae items remotos mediante GET, los mapea a documentos y conserva sus metadatos.",
+      "steps": [
+        { "id": "rest-sync-1", "label": "Configurar fuente REST", "from": "user", "to": "desktop-ui", "edgeId": "e31", "details": "Se define URL, headers y mapping id/title/content." },
+        { "id": "rest-sync-2", "label": "Solicitar sincronización", "from": "desktop-ui", "to": "express-api", "edgeId": "e05", "details": "POST /api/sources/:id/sync inicia el ciclo manual." },
+        { "id": "rest-sync-3", "label": "Seleccionar worker REST", "from": "express-api", "to": "rest-sync", "edgeId": "e13", "details": "syncSource deriva por source.type=rest." },
+        { "id": "rest-sync-4", "label": "Obtener payload", "from": "rest-sync", "to": "remote-rest", "edgeId": "e14", "details": "fetchRest valida http/https, aplica timeout y normaliza arrays." },
+        { "id": "rest-sync-5", "label": "Upsert en SQLite", "from": "rest-sync", "to": "sqlite", "edgeId": "e15", "details": "Cada item queda identificado por URL + mappedId." },
+        { "id": "rest-sync-6", "label": "Informar resultado", "from": "rest-sync", "to": "desktop-ui", "edgeId": "e16", "details": "La UI recibe creados, actualizados, items y errores." }
+      ]
+    },
+    {
+      "id": "global-search",
+      "name": "Búsqueda global",
+      "summary": "Consulta contenido local/remoto con filtros y ranking aproximado para devolver snippets útiles.",
+      "steps": [
+        { "id": "global-search-1", "label": "Escribir consulta", "from": "user", "to": "desktop-ui", "edgeId": "e31", "details": "La UI aplica debounce y conserva filtros activos." },
+        { "id": "global-search-2", "label": "Enviar query + filtros", "from": "desktop-ui", "to": "express-api", "edgeId": "e05", "details": "GET /api/search?q=... admite source, type, tag, collection y updatedFrom." },
+        { "id": "global-search-3", "label": "Aplicar guard de sesión", "from": "express-api", "to": "auth-middleware", "edgeId": "e06", "details": "Offline filtra las consultas a fuentes locales." },
+        { "id": "global-search-4", "label": "Cargar candidatos", "from": "express-api", "to": "sqlite", "edgeId": "e30", "details": "documentRows prepara hasta 500 documentos con su origen." },
+        { "id": "global-search-5", "label": "Rankear coincidencias", "from": "express-api", "to": "search-fuse", "edgeId": "e20", "details": "Fuse.js pondera title, content, path, type, tags y metadata." },
+        { "id": "global-search-6", "label": "Devolver resultados", "from": "search-fuse", "to": "desktop-ui", "edgeId": "e22", "details": "La UI renderiza score, snippet, tags y origen." }
+      ]
+    },
+    {
+      "id": "html-preview",
+      "name": "Previsualizar proyecto HTML",
+      "summary": "Inspecciona un conjunto de HTML/CSS/JS local y devuelve entry, árbol relativo y contenido.",
+      "steps": [
+        { "id": "html-preview-1", "label": "Elegir rutas web", "from": "user", "to": "desktop-ui", "edgeId": "e31", "details": "El diálogo nativo permite carpetas o archivos." },
+        { "id": "html-preview-2", "label": "Pedir inspección", "from": "desktop-ui", "to": "express-api", "edgeId": "e05", "details": "POST /api/html-viewer/inspect envía paths seleccionadas." },
+        { "id": "html-preview-3", "label": "Analizar estructura", "from": "express-api", "to": "html-inspector", "edgeId": "e17", "details": "Se calcula commonRoot y se selecciona index.html como entry preferente." },
+        { "id": "html-preview-4", "label": "Leer archivos web", "from": "html-inspector", "to": "filesystem", "edgeId": "e18", "details": "Se omiten symlinks y se respetan límites de 50 rutas/20 MB." },
+        { "id": "html-preview-5", "label": "Renderizar preview", "from": "html-inspector", "to": "desktop-ui", "edgeId": "e19", "details": "La UI recibe contenido y relaciones relativas para mostrar el proyecto." }
+      ]
+    },
+    {
+      "id": "organize",
+      "name": "Organizar conocimiento",
+      "summary": "Añade tags y documentos a colecciones, manteniendo las relaciones en SQLite.",
+      "steps": [
+        { "id": "organize-1", "label": "Elegir documento", "from": "user", "to": "desktop-ui", "edgeId": "e31", "details": "La UI ofrece acciones rápidas en cada resultado." },
+        { "id": "organize-2", "label": "Enviar acción", "from": "desktop-ui", "to": "express-api", "edgeId": "e05", "details": "POST /api/documents/:id/tags o /api/collections/:id/items." },
+        { "id": "organize-3", "label": "Resolver dominio", "from": "express-api", "to": "organizer", "edgeId": "e23", "details": "Se validan documento, colección y modo offline antes de escribir." },
+        { "id": "organize-4", "label": "Persistir relación", "from": "organizer", "to": "sqlite", "edgeId": "e24", "details": "Se usan document_tags y collection_items con claves foráneas." },
+        { "id": "organize-5", "label": "Actualizar UI", "from": "organizer", "to": "desktop-ui", "edgeId": "e32", "details": "La UI refresca tags, colecciones y conteos." }
+      ]
+    }
+  ]
+}

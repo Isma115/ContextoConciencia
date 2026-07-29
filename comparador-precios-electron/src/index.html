@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' https: data:; connect-src 'none'; base-uri 'none'; form-action 'none'">
+    <title>Precio Claro</title>
+    <link rel="stylesheet" href="styles.css">
+    <script defer src="renderer.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Navegación">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">↘</div>
+          <div>
+            <strong>Precio Claro</strong>
+            <span>comparador de compras</span>
+          </div>
+        </div>
+
+        <div class="sidebar-title">CATÁLOGO</div>
+        <div class="sidebar-stat">
+          <span class="stat-label">Productos seguidos</span>
+          <strong id="side-product-count">0</strong>
+        </div>
+        <div class="sidebar-stat">
+          <span class="stat-label">Ofertas encontradas</span>
+          <strong id="side-offer-count">0</strong>
+        </div>
+
+        <div class="provider-card">
+          <div class="provider-card-top">
+            <span class="pulse" id="provider-pulse"></span>
+            <span id="provider-status">Proveedor sin configurar</span>
+          </div>
+          <p>Google Shopping a través de SerpApi, con resultados de múltiples comercios.</p>
+          <button class="text-button inverse" id="open-settings" type="button">Configurar búsqueda <span>→</span></button>
+        </div>
+
+        <p class="sidebar-footnote">Los precios se guardan solo en este equipo. Se ordenan por total estimado, no por publicidad.</p>
+      </aside>
+
+      <main class="main-content">
+        <header class="page-header">
+          <div>
+            <p class="eyebrow">CATÁLOGO INTELIGENTE</p>
+            <h1>El precio más bajo, primero.</h1>
+            <p class="subtitle">Busca las ofertas de tus productos y compáralas en una sola lista, de menor a mayor precio.</p>
+          </div>
+          <div class="header-actions">
+            <button class="button secondary" id="import-csv" type="button">
+              <span aria-hidden="true">↑</span> Importar CSV
+            </button>
+            <button class="button primary" id="search-all" type="button">
+              <span aria-hidden="true">⌕</span> Buscar todo
+            </button>
+          </div>
+        </header>
+
+        <section class="metrics" aria-label="Resumen del catálogo">
+          <article class="metric-card">
+            <span>PRODUCTOS</span>
+            <strong id="metric-products">0</strong>
+            <small>en tu catálogo</small>
+          </article>
+          <article class="metric-card highlight">
+            <span>MEJOR OFERTA</span>
+            <strong id="metric-lowest">—</strong>
+            <small id="metric-lowest-meta">Aún no hay precios</small>
+          </article>
+          <article class="metric-card">
+            <span>ÚLTIMA ACTUALIZACIÓN</span>
+            <strong id="metric-updated">—</strong>
+            <small id="metric-updated-meta">Sin búsquedas todavía</small>
+          </article>
+        </section>
+
+        <section class="workspace">
+          <section class="catalog-card" aria-labelledby="catalog-heading">
+            <div class="card-heading">
+              <div>
+                <p class="eyebrow">VISTA ORDENADA</p>
+                <h2 id="catalog-heading">Tu catálogo</h2>
+              </div>
+              <div class="catalog-controls">
+                <label class="search-box" for="filter-products">
+                  <span aria-hidden="true">⌕</span>
+                  <input id="filter-products" type="search" placeholder="Filtrar productos">
+                </label>
+                <button class="add-button" id="open-add-product" type="button" title="Añadir producto" aria-label="Añadir producto">+</button>
+              </div>
+            </div>
+
+            <div class="sort-note"><span aria-hidden="true">↕</span> Ordenado automáticamente por mejor precio total estimado</div>
+            <div class="catalog-table-wrap">
+              <table class="catalog-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Producto</th>
+                    <th scope="col">Mejor oferta</th>
+                    <th scope="col">Tienda</th>
+                    <th scope="col">Actualizado</th>
+                    <th scope="col"><span class="visually-hidden">Acciones</span></th>
+                  </tr>
+                </thead>
+                <tbody id="catalog-rows"></tbody>
+              </table>
+              <div class="empty-state" id="empty-catalog" hidden>
+                <div class="empty-icon" aria-hidden="true">⌕</div>
+                <h3>Empieza con tu lista de compras</h3>
+                <p>Añade productos uno a uno o importa un CSV para buscar sus mejores ofertas.</p>
+                <button class="button primary" id="empty-add-product" type="button">Añadir primer producto</button>
+              </div>
+              <div class="empty-state compact" id="empty-filter" hidden>
+                <h3>No hay coincidencias</h3>
+                <p>Prueba con otro término de búsqueda.</p>
+              </div>
+            </div>
+          </section>
+
+          <aside class="offers-card" aria-labelledby="offers-heading">
+            <div class="card-heading offer-heading">
+              <div>
+                <p class="eyebrow">COMPARADOR</p>
+                <h2 id="offers-heading">Selecciona un producto</h2>
+              </div>
+              <span class="offer-count" id="offer-count">0 ofertas</span>
+            </div>
+            <p class="offer-query" id="offer-query">Elige una fila del catálogo para ver y abrir las ofertas.</p>
+            <div class="offer-list" id="offer-list"></div>
+            <div class="offer-empty" id="offer-empty">
+              <div class="empty-icon small" aria-hidden="true">€</div>
+              <p>Las ofertas de cada producto aparecerán aquí ordenadas de más barata a más cara.</p>
+            </div>
+            <p class="price-disclaimer">El total suma el envío cuando la fuente lo indica. Verifica impuestos, disponibilidad y precio final antes de comprar.</p>
+          </aside>
+        </section>
+      </main>
+    </div>
+
+    <dialog class="modal" id="add-product-dialog" aria-labelledby="add-product-title">
+      <form method="dialog" id="add-product-form">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">NUEVO PRODUCTO</p>
+            <h2 id="add-product-title">Añadir al catálogo</h2>
+          </div>
+          <button class="icon-button" value="cancel" type="submit" aria-label="Cerrar">×</button>
+        </div>
+        <div class="form-grid">
+          <label>
+            Nombre del producto
+            <input id="product-name" name="name" maxlength="140" required minlength="2" placeholder="Ej. Auriculares Sony WH-1000XM6" autocomplete="off">
+          </label>
+          <label>
+            Consulta de búsqueda <span class="optional">opcional</span>
+            <input id="product-query" name="query" maxlength="200" placeholder="Si se deja vacío, se usa el nombre" autocomplete="off">
+          </label>
+          <label>
+            Categoría <span class="optional">opcional</span>
+            <input id="product-category" name="category" maxlength="80" placeholder="Ej. Electrónica" autocomplete="off">
+          </label>
+        </div>
+        <p class="form-hint">Usa una consulta concreta (modelo, tamaño, color) para que las ofertas sean comparables.</p>
+        <div class="modal-actions">
+          <button class="button secondary" value="cancel" type="submit">Cancelar</button>
+          <button class="button primary" id="add-product-submit" value="default" type="submit">Añadir producto</button>
+        </div>
+      </form>
+    </dialog>
+
+    <dialog class="modal settings-modal" id="settings-dialog" aria-labelledby="settings-title">
+      <form method="dialog" id="settings-form">
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">FUENTE DE PRECIOS</p>
+            <h2 id="settings-title">Configurar búsqueda web</h2>
+          </div>
+          <button class="icon-button" value="cancel" type="submit" aria-label="Cerrar">×</button>
+        </div>
+        <div class="provider-explainer">
+          <strong>SerpApi · Google Shopping</strong>
+          <p>Consulta resultados estructurados de Google Shopping mediante SerpApi y devuelve ofertas de múltiples comercios. Necesitas una clave de SerpApi para hacer búsquedas reales.</p>
+          <a href="https://serpapi.com/users/sign_up" target="_blank" rel="noreferrer">Crear una clave de SerpApi ↗</a>
+        </div>
+        <div class="form-grid settings-grid">
+          <label class="wide">
+            Clave de SerpApi
+            <input id="settings-api-key" name="apiKey" type="password" maxlength="500" placeholder="Pega una nueva clave para guardarla de forma cifrada" autocomplete="off">
+            <small id="api-key-status"></small>
+          </label>
+          <label>
+            País de resultados
+            <select id="settings-country" name="country">
+              <option value="ES">España</option>
+              <option value="FR">Francia</option>
+              <option value="DE">Alemania</option>
+              <option value="IT">Italia</option>
+              <option value="PT">Portugal</option>
+              <option value="GB">Reino Unido</option>
+              <option value="US">Estados Unidos</option>
+            </select>
+          </label>
+          <label>
+            Idioma
+            <select id="settings-language" name="language">
+              <option value="es">Español</option>
+              <option value="en">Inglés</option>
+              <option value="fr">Francés</option>
+              <option value="de">Alemán</option>
+              <option value="it">Italiano</option>
+              <option value="pt">Portugués</option>
+            </select>
+          </label>
+          <label>
+            Moneda esperada
+            <select id="settings-currency" name="currency">
+              <option value="EUR">EUR — Euro</option>
+              <option value="USD">USD — Dólar estadounidense</option>
+              <option value="GBP">GBP — Libra esterlina</option>
+            </select>
+          </label>
+        </div>
+        <label class="checkbox-row" id="clear-key-row">
+          <input id="settings-clear-key" name="clearApiKey" type="checkbox">
+          Eliminar la clave guardada en este equipo
+        </label>
+        <p class="form-hint">La clave se cifra con el llavero del sistema. También puedes definir <code>PRECIO_CLARO_SERPAPI_KEY</code> al iniciar la aplicación.</p>
+        <div class="modal-actions">
+          <button class="button secondary" value="cancel" type="submit">Cancelar</button>
+          <button class="button primary" id="settings-submit" value="default" type="submit">Guardar configuración</button>
+        </div>
+      </form>
+    </dialog>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </body>
+</html>

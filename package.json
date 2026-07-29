@@ -5,13 +5,15 @@
   "main": "desktop/main.js",
   "private": true,
   "scripts": {
-    "start": "electron .",
+    "dev": "electron desktop/main.js",
+    "start": "electron desktop/main.js",
     "server": "node server/app.js",
+    "test-source": "node test-source-server/server.js",
     "db:up": "docker compose up -d mysql",
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f mysql",
     "test": "node --test",
-    "check": "node --check server/app.js && node --check server/auth.js && node --check server/database/mysql.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/js/app.js"
+    "check": "node --check server/app.js && node --check server/auth.js && node --check server/database/mysql.js && node --check server/services/html-viewer.js && node --check test-source-server/server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/js/markdown.js && node --check desktop/js/app.js && for file in desktop/js/core/*.js desktop/js/ui/*.js desktop/js/views/*.js; do node --check \"$file\"; done"
   },
   "engines": {
     "node": ">=22.5.0"

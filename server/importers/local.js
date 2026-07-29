@@ -8,7 +8,13 @@ const SUPPORTED = new Map([
   ['.csv', 'csv'],
   ['.txt', 'text'],
   ['.md', 'markdown'],
-  ['.markdown', 'markdown']
+  ['.markdown', 'markdown'],
+  ['.html', 'html'],
+  ['.htm', 'html'],
+  ['.css', 'css'],
+  ['.js', 'javascript'],
+  ['.mjs', 'javascript'],
+  ['.cjs', 'javascript']
 ]);
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 2000;
@@ -70,7 +76,7 @@ function readFileDocument(filePath) {
   };
 }
 
-function importLocalSource(db, source) {
+function importLocalSource(db, source, { prune = false } = {}) {
   const config = parseJson(source.config_json);
   const inputs = Array.isArray(config.paths) ? config.paths : [];
   const files = [];
@@ -95,8 +101,16 @@ function importLocalSource(db, source) {
         errors.push({ path: filePath, message: error.message });
       }
     }
+    if (prune) {
+      const placeholders = uniqueFiles.map(() => '?').join(', ');
+      const params = [source.id, ...uniqueFiles];
+      db.run(
+        `DELETE FROM documents WHERE source_id = ?${placeholders ? ` AND external_id NOT IN (${placeholders})` : ''}`,
+        ...params
+      );
+    }
   });
   return { created, updated, total: created + updated, errors, files: uniqueFiles.length };
 }
 
-module.exports = { SUPPORTED, collectFiles, readFileDocument, importLocalSource };
+module.exports = { SUPPORTED, MAX_FILE_BYTES, MAX_FILES, collectFiles, readFileDocument, importLocalSource };
