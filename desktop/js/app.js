@@ -1,6 +1,6 @@
 import { $ } from './core/dom.js';
 import { configureApi, api } from './core/api.js';
-import { state } from './core/state.js';
+import { loadSearchPreferences, state } from './core/state.js';
 import { setConnection, showToast } from './ui/notifications.js';
 import { showApplication, showAuthentication } from './views/auth.js';
 import { configureDocuments, openDocument } from './views/documents.js';
@@ -8,6 +8,7 @@ import { configureSearch, performGlobalSearch, performSearch, renderGlobalSearch
 import { configureSources, renderSources, syncSource } from './views/sources.js';
 import { configureSourceModal } from './views/source-modal.js';
 import { bindHtmlViewerMenu, configureHtmlViewer, openPersistedHtmlSource, renderHtmlViewer } from './views/html-viewer.js';
+import { renderDiagrams } from './views/diagrams.js';
 import { configureSettings, renderSettings } from './views/settings.js';
 
 let nativeMenuView = null;
@@ -48,6 +49,7 @@ function renderView() {
   if (state.view === 'search') renderSearch();
   if (state.view === 'global-search') renderGlobalSearch();
   if (state.view === 'html-viewer') renderHtmlViewer();
+  if (state.view === 'diagrams') renderDiagrams();
   if (state.view === 'sources') renderSources();
   if (state.view === 'settings') renderSettings();
 }
@@ -80,6 +82,26 @@ function bindNavigation() {
   });
 }
 
+function showCloseConfirmation() {
+  if ($('#close-confirmation')) return;
+  document.body.insertAdjacentHTML('beforeend', `<div id="close-confirmation" class="modal-backdrop close-confirmation-backdrop"><div class="modal close-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="close-confirmation-title" aria-describedby="close-confirmation-description"><div class="modal-head"><div><h2 id="close-confirmation-title">Cerrar NexusData</h2><p>Se cerrará la ventana y el servidor local.</p></div></div><div class="modal-body"><p id="close-confirmation-description">¿Quieres cerrar la aplicación?</p></div><div class="modal-actions"><button id="close-confirmation-cancel" class="btn btn-primary close-confirmation-cancel" type="button">Cancelar</button><button id="close-confirmation-submit" class="btn btn-secondary" type="button">Cerrar</button></div></div></div>`);
+  const modal = $('#close-confirmation');
+  const resolve = (confirmed) => {
+    modal.remove();
+    window.nexusData.resolveCloseConfirmation(confirmed);
+  };
+  $('#close-confirmation-cancel').addEventListener('click', () => resolve(false));
+  $('#close-confirmation-submit').addEventListener('click', () => resolve(true));
+  modal.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') resolve(false);
+  });
+  $('#close-confirmation-cancel').focus();
+}
+
+function bindCloseConfirmation() {
+  window.nexusData?.onCloseConfirmationRequest?.(showCloseConfirmation);
+}
+
 configureHtmlViewer({ onNavigate: (view) => { state.view = view; renderView(); } });
 configureDocuments({ onRefresh: refreshData, onOpenHtmlViewer: openPersistedHtmlSource });
 configureSearch({ onRefresh: refreshData });
@@ -88,4 +110,11 @@ configureSourceModal({ onRefresh: refreshData, onSync: syncSource });
 configureSettings({ onRefresh: refreshData });
 bindHtmlViewerMenu();
 bindNavigation();
-initialiseSession();
+bindCloseConfirmation();
+
+async function startApplication() {
+  await loadSearchPreferences();
+  await initialiseSession();
+}
+
+startApplication();

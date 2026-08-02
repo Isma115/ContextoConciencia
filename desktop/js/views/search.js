@@ -1,6 +1,6 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
-import { DEFAULT_FILTERS, state, resetFilters } from '../core/state.js';
+import { persistSearchPreferences, state, resetFilters } from '../core/state.js';
 import { statusLabel, typeLabel } from '../core/format.js';
 import { showToast } from '../ui/notifications.js';
 import { bindDocumentOpeners } from './documents.js';
@@ -74,7 +74,17 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
   const input = $(`#${prefix ? 'global-search-input' : 'search-input'}`);
   const submit = $(`#${prefix ? 'global-search-submit' : 'search-submit'}`);
   submit.addEventListener('click', () => { cancel(); perform(); });
-  input.addEventListener('input', () => { if (prefix) globalSearchRequestId += 1; else searchRequestId += 1; schedule(prefix); });
+  input.addEventListener('input', () => {
+    if (prefix) {
+      state.globalSearchQuery = input.value;
+      globalSearchRequestId += 1;
+    } else {
+      state.searchQuery = input.value;
+      searchRequestId += 1;
+    }
+    persistSearchPreferences();
+    schedule(prefix);
+  });
   input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { cancel(); perform(); } });
   ['source', 'type', 'tag', 'collection', 'date'].forEach((name) => $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`).addEventListener('change', () => { cancel(); perform(); }));
   $(`#${prefix ? 'global-clear-filters' : 'clear-filters'}`).addEventListener('click', () => { cancel(); clear(); });
@@ -82,7 +92,7 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
 
 export function renderSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
   $('#view-search').innerHTML = `<div class="search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div></div><div class="panel search-results-panel"><div class="panel-header"><h2>${state.searchQuery ? `${(results || []).length} resultados` : 'Documentos'}</h2></div><div class="result-list">${resultMarkup(results)}</div></div>`;
-  bindSearchControls({ perform: performSearch, cancel: cancelSearchDebounce, clear: () => { searchRequestId += 1; state.searchQuery = ''; state.filters = resetFilters(); renderSearch([]); } });
+  bindSearchControls({ perform: performSearch, cancel: cancelSearchDebounce, clear: () => { searchRequestId += 1; state.searchQuery = ''; state.filters = resetFilters(); persistSearchPreferences(); renderSearch([]); } });
   const surface = $('#view-search');
   bindCollectionAndTagActions(surface);
   bindDocumentOpeners(surface);
@@ -124,6 +134,7 @@ export async function performSearch() {
   const requestId = ++searchRequestId;
   const params = new URLSearchParams({ q: state.searchQuery });
   [['filter-source', 'source'], ['filter-type', 'type'], ['filter-tag', 'tag'], ['filter-collection', 'collection'], ['filter-date', 'updatedFrom']].forEach(([id, key]) => { const stateKey = key === 'updatedFrom' ? 'date' : key; const value = $(`#${id}`)?.value || ''; state.filters[stateKey] = value; if (value) params.set(key, value); });
+  persistSearchPreferences();
   try { const response = await api(`/search?${params}`); if (requestId === searchRequestId && state.view === 'search') renderSearch(response.results, { restoreFocus, selectionStart, selectionEnd }); } catch (error) { if (requestId === searchRequestId && state.view === 'search') showToast(error.message, true); }
 }
 
@@ -154,6 +165,7 @@ function renderGlobalSearchControls({ restoreFocus = false, selectionStart = nul
     globalSearchRequestId += 1;
     state.globalSearchQuery = '';
     state.globalFilters = resetFilters();
+    persistSearchPreferences();
     renderGlobalSearchControls();
     renderGlobalSearchSurface([]);
   } });
@@ -175,6 +187,7 @@ export async function performGlobalSearch() {
   const requestId = ++globalSearchRequestId;
   const params = new URLSearchParams({ q: state.globalSearchQuery });
   [['global-filter-source', 'source'], ['global-filter-type', 'type'], ['global-filter-tag', 'tag'], ['global-filter-collection', 'collection'], ['global-filter-date', 'updatedFrom']].forEach(([id, key]) => { const stateKey = key === 'updatedFrom' ? 'date' : key; const value = $(`#${id}`)?.value || ''; state.globalFilters[stateKey] = value; if (value) params.set(key, value); });
+  persistSearchPreferences();
   try { const response = await api(`/search?${params}`); if (requestId === globalSearchRequestId && state.view === 'global-search') renderGlobalSearchSurface(response.results); } catch (error) { if (requestId === globalSearchRequestId && state.view === 'global-search') showToast(error.message, true); }
 }
 

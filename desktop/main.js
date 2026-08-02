@@ -6,6 +6,31 @@ const { startServer } = require('../server/app');
 let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
 const PROMPTS_MENU_NAME = 'Prompts';
+const SEARCH_PREFERENCES_FILENAME = 'search-preferences.json';
+const DESKTOP_PORT = Number(process.env.PORT) || 3000;
+const closeConfirmationStates = new WeakMap();
+
+function searchPreferencesPath() {
+  return path.join(app.getPath('userData'), SEARCH_PREFERENCES_FILENAME);
+}
+
+function readSearchPreferences() {
+  try {
+    const value = JSON.parse(fs.readFileSync(searchPreferencesPath(), 'utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('No se pudieron cargar los ajustes de búsqueda:', error.message);
+    return null;
+  }
+}
+
+function writeSearchPreferences(preferences) {
+  if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) {
+    throw new Error('Los ajustes de búsqueda no son válidos');
+  }
+  fs.writeFileSync(searchPreferencesPath(), `${JSON.stringify(preferences)}\n`, { encoding: 'utf8', mode: 0o600 });
+  return true;
+}
 
 function setApplicationMenuForView(window, view) {
   const template = [
@@ -62,6 +87,20 @@ function setApplicationMenuForView(window, view) {
   Menu.setApplicationMenu(menu);
 }
 
+function bindCloseConfirmation(window) {
+  const closeState = { closeConfirmed: false, pending: false };
+  closeConfirmationStates.set(window, closeState);
+  window.on('close', (event) => {
+    if (closeState.closeConfirmed) return;
+
+    event.preventDefault();
+    if (closeState.pending) return;
+    closeState.pending = true;
+    window.webContents.send('close-confirmation-request');
+  });
+  window.on('closed', () => closeConfirmationStates.delete(window));
+}
+
 function createWindow(apiBase) {
   const window = new BrowserWindow({
     width: 1400,
@@ -77,6 +116,7 @@ function createWindow(apiBase) {
       sandbox: true
     }
   });
+  bindCloseConfirmation(window);
   window.maximize();
   setApplicationMenuForView(window, null);
   window.loadURL(apiBase);
@@ -91,6 +131,20 @@ app.whenReady().then(async () => {
     if (window) setApplicationMenuForView(window, view);
     return true;
   });
+
+  ipcMain.on('close-confirmation-result', (event, confirmed) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    const closeState = window ? closeConfirmationStates.get(window) : null;
+    if (!window || !closeState || !closeState.pending) return;
+    closeState.pending = false;
+    if (confirmed === true) {
+      closeState.closeConfirmed = true;
+      app.quit();
+    }
+  });
+
+  ipcMain.handle('load-search-preferences', () => readSearchPreferences());
+  ipcMain.handle('save-search-preferences', (_event, preferences) => writeSearchPreferences(preferences));
 
   ipcMain.handle('select-local-paths', async (_event, options = {}) => {
     const directory = Boolean(options.directory);
@@ -131,7 +185,7 @@ app.whenReady().then(async () => {
 
   try {
     apiServer = await startServer({
-      port: 0,
+      port: DESKTOP_PORT,
       dbPath: path.join(app.getPath('userData'), 'nexusdata.db')
     });
     createWindow(`http://${apiServer.host}:${apiServer.port}`);
