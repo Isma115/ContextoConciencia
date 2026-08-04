@@ -7,6 +7,7 @@ let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
 const PROMPTS_MENU_NAME = 'Prompts';
 const SEARCH_PREFERENCES_FILENAME = 'search-preferences.json';
+const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DESKTOP_PORT = Number(process.env.PORT) || 3000;
 const closeConfirmationStates = new WeakMap();
 
@@ -79,6 +80,10 @@ function setApplicationMenuForView(window, view) {
       {
         label: 'Nuevo diagrama prompt',
         click: () => window.webContents.send('html-viewer-menu-action', 'new-diagram-prompt')
+      },
+      {
+        label: 'Analizar diff de git',
+        click: () => window.webContents.send('html-viewer-menu-action', 'copy-git-diff-prompt')
       }
     ]
   });
@@ -154,6 +159,38 @@ app.whenReady().then(async () => {
       filters: directory ? undefined : [{ name: 'Documentos compatibles', extensions: ['json', 'csv', 'txt', 'md', 'markdown', 'html', 'htm'] }]
     });
     return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle('select-diagram-file', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Importar diagrama por texto',
+      properties: ['openFile'],
+      filters: [{ name: 'Diagramas de texto', extensions: ['nxd', 'txt', 'md', 'markdown', 'json'] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = path.normalize(result.filePaths[0]);
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile()) throw new Error('La ubicación elegida no es un archivo');
+    if (stats.size > DIAGRAM_MAX_FILE_BYTES) throw new Error('El archivo del diagrama supera el límite de 2 MB');
+    return { path: filePath, content: fs.readFileSync(filePath, 'utf8') };
+  });
+
+  ipcMain.handle('save-diagram-file', async (_event, payload = {}) => {
+    if (!payload || typeof payload.content !== 'string') throw new Error('El contenido del diagrama no es válido');
+    if (Buffer.byteLength(payload.content, 'utf8') > DIAGRAM_MAX_FILE_BYTES) throw new Error('El diagrama supera el límite de 2 MB');
+    const format = payload.format === 'json' ? 'json' : 'nxd';
+    const extension = `.${format}`;
+    const result = await dialog.showSaveDialog({
+      title: 'Exportar diagrama',
+      defaultPath: path.join(app.getPath('documents'), `diagrama${extension}`),
+      filters: [{ name: format === 'json' ? 'JSON' : 'Diagrama por texto', extensions: [format] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    let filePath = path.normalize(result.filePath);
+    if (!path.extname(filePath)) filePath += extension;
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) throw new Error('La ubicación elegida es una carpeta');
+    fs.writeFileSync(filePath, payload.content, { encoding: 'utf8', mode: 0o600 });
+    return filePath;
   });
 
   ipcMain.handle('create-project-directory', async () => {

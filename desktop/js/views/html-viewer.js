@@ -2,7 +2,7 @@ import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { state } from '../core/state.js';
 import { showToast } from '../ui/notifications.js';
-import { openNewDiagramPromptModal } from './diagram-prompt-modal.js';
+import { copyGitDiffPrompt, openNewDiagramPromptModal } from './diagram-prompt-modal.js';
 
 let previewRenderId = 0;
 let viewerLoadId = 0;
@@ -236,6 +236,10 @@ export function bindHtmlViewerMenu() {
   window.nexusData?.onHtmlViewerMenuAction?.((action) => {
     if (action === 'new-diagram-prompt') {
       openNewDiagramPromptModal();
+      return;
+    }
+    if (action === 'copy-git-diff-prompt') {
+      copyGitDiffPrompt();
       return;
     }
     if (state.view !== 'html-viewer') return;

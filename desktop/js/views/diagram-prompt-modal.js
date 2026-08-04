@@ -3,6 +3,7 @@ import { showToast } from '../ui/notifications.js';
 import { closeModal, bindModalClose } from '../ui/modals.js';
 
 const DIAGRAM_PROMPT_TEMPLATE = `Analiza dentro de mi proyecto la parte de [PARTE]. Genera un HTML autocontenido (Tailwind CDN, dark theme) con diagrama interactivo de arquitectura + sección de Flows interactivos (selecciona y resalta path + pasos).\n\nY un JSON {nodes, edges, flows: [{steps}]} para agentes IA.\n\nPanel lateral derecho con todos los flujos\n\nEl resto de la pantalla dedicado solamente al diagrama completo\n\nSin textos ni títulos extra, aprovechando al máximo el tamaño de la ventana\n\nTrata de que las tarjetas del diagrama no se superpongan entre ellas\n\nPermite que las tarjetas se puedan desplazar y mover\n\nEntrega ambos completos.`;
+const GIT_DIFF_PROMPT = 'Analizar diff de git y describir con detalle los cambios';
 
 async function copyTextToClipboard(text) {
   if (navigator.clipboard?.writeText) {
@@ -19,6 +20,15 @@ async function copyTextToClipboard(text) {
   const copied = document.execCommand('copy');
   helper.remove();
   if (!copied) throw new Error('El portapapeles no está disponible');
+}
+
+export async function copyGitDiffPrompt() {
+  try {
+    await copyTextToClipboard(GIT_DIFF_PROMPT);
+    showToast('Prompt copiado al portapapeles');
+  } catch (error) {
+    showToast(error.message || 'No se pudo copiar el prompt', true);
+  }
 }
 
 export function openNewDiagramPromptModal() {

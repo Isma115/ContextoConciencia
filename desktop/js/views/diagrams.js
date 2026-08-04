@@ -1,5 +1,7 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { showToast } from '../ui/notifications.js';
+import { bindModalClose, closeModal } from '../ui/modals.js';
+import { parseDiagramText, serializeDiagram } from './diagram-language.mjs';
 
 const STORAGE_KEY = 'nexusdata.diagrams.v1';
 const BOARD_WIDTH = 1400;
@@ -7,7 +9,7 @@ const BOARD_HEIGHT = 900;
 const NODE_WIDTH = 190;
 const NODE_HEIGHT = 88;
 const NODE_MARGIN = 20;
-const ARROW_INSET = 18;
+const ARROW_INSET = 0;
 const HISTORY_LIMIT = 100;
 const NODE_TYPES = Object.freeze({
   start: 'Inicio',
@@ -123,6 +125,130 @@ function persistDiagrams() {
     if (typeof window !== 'undefined' && window.localStorage) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(diagrams));
   } catch {
     // La edición continúa disponible aunque el almacenamiento local no esté disponible.
+  }
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const helper = document.createElement('textarea');
+  helper.value = text;
+  helper.setAttribute('readonly', '');
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  document.body.appendChild(helper);
+  helper.select();
+  const copied = document.execCommand('copy');
+  helper.remove();
+  if (!copied) throw new Error('El portapapeles no está disponible');
+}
+
+function fileNameFromPath(filePath) {
+  return String(filePath || '').split(/[\\/]/).filter(Boolean).pop() || 'diagrama.nxd';
+}
+
+async function exportDiagramText(text, button = null) {
+  const originalText = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Exportando…';
+  }
+  try {
+    if (typeof window.nexusData?.saveDiagramFile !== 'function') throw new Error('La exportación de diagramas no está disponible');
+    const savedPath = await window.nexusData.saveDiagramFile({ content: text, format: 'nxd' });
+    if (savedPath) showToast(`Diagrama exportado: ${fileNameFromPath(savedPath)}`);
+  } catch (error) {
+    showToast(error.message || 'No se pudo exportar el diagrama', true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
+}
+
+function applyDiagramText(text) {
+  const parsed = parseDiagramText(text);
+  const current = activeDiagram();
+  const before = historySnapshot();
+  const index = Math.max(0, diagrams.findIndex((diagram) => diagram.id === current.id));
+  const next = normaliseDiagram({ ...parsed, id: current.id }, index);
+  diagrams = diagrams.map((diagram) => diagram.id === current.id ? next : diagram);
+  activeDiagramId = next.id;
+  resetDiagramInteraction();
+  recordHistory(before);
+  persistDiagrams();
+  renderDiagrams();
+  showToast('Diagrama generado desde texto');
+}
+
+function setDiagramCodeError(node, message = '') {
+  if (!node) return;
+  node.textContent = message;
+  node.hidden = !message;
+}
+
+function openDiagramCodeModal(initialText = serializeDiagram(activeDiagram()), sourcePath = '') {
+  const sourceName = sourcePath ? fileNameFromPath(sourcePath) : 'Diagrama activo';
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal diagram-code-modal" role="dialog" aria-modal="true" aria-labelledby="diagram-code-title"><div class="modal-head"><div><h2 id="diagram-code-title">Código del diagrama</h2><p>Escribe o revisa el lenguaje textual y genera el diagrama seleccionado.</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body diagram-code-body"><div class="diagram-code-source">Origen: <strong id="diagram-code-source">${escapeHtml(sourceName)}</strong></div><textarea id="diagram-code-editor" class="diagram-code-editor" aria-label="Código textual del diagrama" spellcheck="false">${escapeHtml(initialText)}</textarea><div id="diagram-code-error" class="diagram-code-error" role="alert" hidden></div><p class="diagram-code-hint">Usa <code>diagram</code>, <code>node</code> y <code>edge</code>. La guía completa está en <code>docs/diagramas-por-texto.md</code>.</p></div><div class="modal-actions"><button id="diagram-code-import" class="btn btn-secondary" type="button">Importar archivo</button><button id="diagram-code-copy" class="btn btn-secondary" type="button">Copiar</button><button id="diagram-code-export" class="btn btn-secondary" type="button">Exportar archivo</button><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="diagram-code-apply" class="btn btn-primary" type="button">Generar diagrama</button></div></div></div>`;
+  bindModalClose();
+  const editor = $('#diagram-code-editor');
+  const errorNode = $('#diagram-code-error');
+  const sourceNode = $('#diagram-code-source');
+  editor.focus();
+  editor.addEventListener('input', () => setDiagramCodeError(errorNode));
+  $('#diagram-code-copy').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Copiando…';
+    try {
+      await copyTextToClipboard(editor.value);
+      showToast('Código copiado al portapapeles');
+    } catch (error) {
+      showToast(error.message || 'No se pudo copiar el código', true);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Copiar';
+    }
+  });
+  $('#diagram-code-export').addEventListener('click', (event) => exportDiagramText(editor.value, event.currentTarget));
+  $('#diagram-code-import').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      if (typeof window.nexusData?.selectDiagramFile !== 'function') throw new Error('La importación de diagramas no está disponible');
+      const selected = await window.nexusData.selectDiagramFile();
+      if (!selected) return;
+      editor.value = selected.content;
+      if (sourceNode) sourceNode.textContent = fileNameFromPath(selected.path);
+      setDiagramCodeError(errorNode);
+      editor.focus();
+    } catch (error) {
+      showToast(error.message || 'No se pudo importar el diagrama', true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  $('#diagram-code-apply').addEventListener('click', () => {
+    try {
+      applyDiagramText(editor.value);
+      closeModal();
+    } catch (error) {
+      setDiagramCodeError(errorNode, error.message || 'El código del diagrama no es válido');
+      editor.focus();
+    }
+  });
+}
+
+async function importDiagramFile() {
+  try {
+    if (typeof window.nexusData?.selectDiagramFile !== 'function') throw new Error('La importación de diagramas no está disponible');
+    const selected = await window.nexusData.selectDiagramFile();
+    if (selected) openDiagramCodeModal(selected.content, selected.path);
+  } catch (error) {
+    showToast(error.message || 'No se pudo importar el diagrama', true);
   }
 }
 
@@ -332,7 +458,7 @@ function curveGeometry(start, end, sourcePortName, targetPortName = 'left') {
   const targetPort = PORTS[targetPortName] || PORTS.left;
   const distance = clamp(Math.hypot(end.x - start.x, end.y - start.y) * 0.45, 60, 190);
   const firstControl = { x: start.x + sourcePort.dx * distance, y: start.y + sourcePort.dy * distance };
-  const secondControl = { x: end.x - targetPort.dx * distance, y: end.y - targetPort.dy * distance };
+  const secondControl = { x: end.x + targetPort.dx * distance, y: end.y + targetPort.dy * distance };
   const path = `M ${start.x} ${start.y} C ${firstControl.x} ${firstControl.y}, ${secondControl.x} ${secondControl.y}, ${end.x} ${end.y}`;
   const midpoint = {
     x: 0.125 * start.x + 0.375 * firstControl.x + 0.375 * secondControl.x + 0.125 * end.x,
@@ -372,8 +498,8 @@ function freePreviewGeometry(start, end, sourcePortName) {
     ? { x: sourcePort.dx, y: sourcePort.dy }
     : direction;
   const firstControl = {
-    x: start.x + firstDirection.dx * handle,
-    y: start.y + firstDirection.dy * handle
+    x: start.x + firstDirection.x * handle,
+    y: start.y + firstDirection.y * handle
   };
   const secondControl = {
     x: end.x - direction.x * handle,
@@ -539,15 +665,24 @@ export function renderDiagrams() {
   if (!root) return;
   hideEdgeContextMenu();
   const diagram = activeDiagram();
-  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><div class="diagram-history-actions"><button id="diagram-undo" class="btn btn-secondary" type="button" title="Deshacer (⌘/Ctrl+Z)" aria-label="Deshacer (⌘/Ctrl+Z)" disabled>↶ Deshacer</button><button id="diagram-redo" class="btn btn-secondary" type="button" title="Rehacer (⌘/Ctrl+Shift+Z)" aria-label="Rehacer (⌘/Ctrl+Shift+Z)" disabled>↷ Rehacer</button></div><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4ec9b0"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div><aside class="diagram-side-panel"><div class="diagram-side-heading"><div><span class="diagram-eyebrow">EDITOR SIMPLE</span><h2>Mapa de flujo</h2></div><span id="diagram-count" class="diagram-count"></span></div><div id="diagram-status" class="diagram-status"></div><div id="diagram-inspector"></div><div class="diagram-help"><strong>Cómo usarlo</strong><p>1. Añade nodos y arrástralos por el lienzo.</p><p>2. Activa “Conectar” y pulsa dos puntos de unión, o arrastra de uno al otro.</p><p>3. Selecciona una línea para escribir una etiqueta o eliminarla.</p><p>4. Usa Deshacer/Rehacer o ⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z.</p></div></aside></div></div>`;
+  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><button id="diagram-code" class="btn btn-secondary" type="button">⌘ Código</button><button id="diagram-import" class="btn btn-secondary" type="button">⇧ Importar</button><button id="diagram-export" class="btn btn-secondary" type="button">⇩ Exportar</button><div class="diagram-history-actions"><button id="diagram-undo" class="btn btn-secondary" type="button" title="Deshacer (⌘/Ctrl+Z)" aria-label="Deshacer (⌘/Ctrl+Z)" disabled>↶ Deshacer</button><button id="diagram-redo" class="btn btn-secondary" type="button" title="Rehacer (⌘/Ctrl+Shift+Z)" aria-label="Rehacer (⌘/Ctrl+Shift+Z)" disabled>↷ Rehacer</button></div><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4ec9b0"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div><aside class="diagram-side-panel"><div class="diagram-side-heading"><div><span class="diagram-eyebrow">EDITOR SIMPLE</span><h2>Mapa de flujo</h2></div><span id="diagram-count" class="diagram-count"></span></div><div id="diagram-status" class="diagram-status"></div><div id="diagram-inspector"></div><div class="diagram-help"><strong>Cómo usarlo</strong><p>1. Añade nodos y arrástralos por el lienzo.</p><p>2. Activa “Conectar” y pulsa dos puntos de unión, o arrastra de uno al otro.</p><p>3. Selecciona una línea para escribir una etiqueta o eliminarla.</p><p>4. Usa Deshacer/Rehacer o ⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z.</p><p>5. Pulsa “Código” para generar el diagrama escribiendo texto.</p></div></aside></div></div>`;
   const arrowMarker = root.querySelector('#diagram-arrow');
   if (arrowMarker) {
     arrowMarker.setAttribute('orient', 'auto-start-reverse');
     arrowMarker.setAttribute('markerUnits', 'userSpaceOnUse');
-    arrowMarker.setAttribute('markerWidth', '10');
-    arrowMarker.setAttribute('markerHeight', '10');
-    arrowMarker.setAttribute('refX', '8');
-    arrowMarker.setAttribute('refY', '4');
+    arrowMarker.setAttribute('markerWidth', '12');
+    arrowMarker.setAttribute('markerHeight', '12');
+    arrowMarker.setAttribute('refX', '10');
+    arrowMarker.setAttribute('refY', '5');
+    arrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+  }
+  const previewArrowMarker = root.querySelector('#diagram-arrow-preview');
+  if (previewArrowMarker) {
+    previewArrowMarker.setAttribute('markerWidth', '12');
+    previewArrowMarker.setAttribute('markerHeight', '12');
+    previewArrowMarker.setAttribute('refX', '10');
+    previewArrowMarker.setAttribute('refY', '5');
+    previewArrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
   }
   root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Dirección de la conexión" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div>');
   bindDiagramEvents(root);
@@ -972,6 +1107,9 @@ function bindDiagramEvents(root) {
     const point = canvas ? { x: canvas.scrollLeft + canvas.clientWidth / 2, y: canvas.scrollTop + canvas.clientHeight / 2 } : { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
     addNodeAt(point);
   });
+  $('#diagram-code').addEventListener('click', () => openDiagramCodeModal());
+  $('#diagram-import').addEventListener('click', importDiagramFile);
+  $('#diagram-export').addEventListener('click', () => exportDiagramText(serializeDiagram(activeDiagram()), $('#diagram-export')));
   $('#diagram-connect').addEventListener('click', () => {
     connectMode = !connectMode;
     connectionStart = null;

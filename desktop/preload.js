@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld('nexusData', {
   loadSearchPreferences: () => ipcRenderer.invoke('load-search-preferences'),
   saveSearchPreferences: (preferences) => ipcRenderer.invoke('save-search-preferences', preferences),
   selectLocalPaths: (options) => ipcRenderer.invoke('select-local-paths', options),
+  selectDiagramFile: () => ipcRenderer.invoke('select-diagram-file'),
+  saveDiagramFile: (payload) => ipcRenderer.invoke('save-diagram-file', payload),
   createProjectDirectory: () => ipcRenderer.invoke('create-project-directory'),
   revealFile: (filePath) => ipcRenderer.invoke('reveal-file', filePath),
   setViewMenu: (view) => ipcRenderer.invoke('set-view-menu', view),

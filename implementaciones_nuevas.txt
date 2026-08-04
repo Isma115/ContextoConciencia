@@ -1,0 +1,1 @@
+Prompt nuevo disponible para el Menú de Prompts para copiar: Analizar diff de git y describir con detalle los cambios

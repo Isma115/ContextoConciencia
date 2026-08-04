@@ -17,6 +17,7 @@
   .diagram-toolbar-actions { width: 100%; align-items: end; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 1px; }
   .diagram-main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
   .diagram-side-panel { max-height: 210px; border-top: 1px solid var(--line); border-left: 0; }
+  .diagram-code-modal .modal-actions { flex-wrap: wrap; }
   .global-project-row { align-items: start; flex-direction: column; }
   .global-project-actions { width: 100%; justify-content: flex-start; }
   .global-sources-panel .panel-header { align-items: start; flex-direction: column; }
