@@ -10,11 +10,13 @@ NexusData es una aplicación de escritorio Electron para centralizar documentaci
 ## Puesta en marcha
 
 ```bash
-cp .env.example .env
+# Opcional: cp .env.example .env
 pnpm install
 pnpm db:up
 npm run dev
 ```
+
+`.env` es opcional; si no existe, la aplicación genera automáticamente el secreto de sesión necesario para el modo offline.
 
 MySQL tarda unos segundos en declarar su estado saludable la primera vez. La interfaz mostrará la pantalla de acceso; registra una cuenta (usuario de 3–50 caracteres y contraseña de 8–32) para continuar. También puedes elegir **Entrar offline** para trabajar sin iniciar sesión y sin MySQL: en ese modo solo se muestran, editan y sincronizan las fuentes de archivos locales del equipo; las fuentes REST no están disponibles.
 

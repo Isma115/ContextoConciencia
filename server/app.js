@@ -1,4 +1,5 @@
 const http = require('node:http');
+const crypto = require('node:crypto');
 const path = require('node:path');
 const express = require('express');
 const cookieParser = require('cookie-parser');
@@ -7,10 +8,19 @@ const { openDatabase } = require('./database/db');
 const { createAuthDatabase } = require('./database/mysql');
 const { installRoutes } = require('./routes');
 
+function resolveEnvironment(environment = process.env) {
+  const resolved = { ...environment };
+  if (!resolved.JWT_SECRET) {
+    resolved.JWT_SECRET = crypto.randomBytes(32).toString('hex');
+  }
+  return resolved;
+}
+
 function createApp({ dbPath, authDb, environment = process.env } = {}) {
+  const resolvedEnvironment = resolveEnvironment(environment);
   const app = express();
   const db = openDatabase(dbPath);
-  const resolvedAuthDb = authDb || createAuthDatabase(environment);
+  const resolvedAuthDb = authDb || createAuthDatabase(resolvedEnvironment);
   app.disable('x-powered-by');
   app.locals.db = db;
   app.locals.authDb = resolvedAuthDb;
@@ -18,7 +28,7 @@ function createApp({ dbPath, authDb, environment = process.env } = {}) {
 
   app.use(cookieParser());
   app.use(express.json({ limit: '30mb' }));
-  installRoutes(app, db, resolvedAuthDb, environment);
+  installRoutes(app, db, resolvedAuthDb, resolvedEnvironment);
   app.use(express.static(path.join(__dirname, '..', 'desktop'), { index: 'index.html' }));
   app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
   app.use((error, req, res, next) => {
