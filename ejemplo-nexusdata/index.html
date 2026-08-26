@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#111827">
+    <title>Atlas Local | Demo offline de NexusData</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <div class="page-frame">
+      <header class="topbar">
+        <a class="brand" href="#inicio" aria-label="Ir al inicio">
+          <span class="brand-mark" aria-hidden="true">✦</span>
+          <span class="brand-copy">
+            <strong>Atlas Local</strong>
+            <small>demo offline para NexusData</small>
+          </span>
+        </a>
+
+        <nav class="main-nav" aria-label="Navegación principal">
+          <a class="nav-link is-active" href="#recursos">Recursos</a>
+          <a class="nav-link" href="#flujo">Recorrido</a>
+          <a class="nav-link" href="#acerca">Acerca de</a>
+        </nav>
+
+        <button class="theme-toggle" id="theme-toggle" type="button" aria-pressed="false">
+          <span id="theme-icon" aria-hidden="true">☼</span>
+          <span id="theme-label">Claro</span>
+        </button>
+      </header>
+
+      <main>
+        <section class="hero" id="inicio">
+          <div class="hero-copy">
+            <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> MODO OFFLINE · SIN CONEXIONES EXTERNAS</p>
+            <h1>Tu proyecto,<br><em>en contexto.</em></h1>
+            <p class="hero-description">Una página pequeña para recorrer documentos, código y decisiones de producto desde una única carpeta local.</p>
+            <div class="hero-actions">
+              <button class="button button-primary" id="explore-button" type="button">Explorar recursos <span aria-hidden="true">↓</span></button>
+              <button class="button button-quiet" id="check-in-button" type="button">Marcar recorrido</button>
+            </div>
+            <p class="hero-note"><span aria-hidden="true">⌘</span> Todo lo que ves aquí vive en archivos del proyecto.</p>
+          </div>
+
+          <div class="hero-panel" aria-label="Resumen del proyecto de ejemplo">
+            <div class="panel-orbit orbit-one"></div>
+            <div class="panel-orbit orbit-two"></div>
+            <div class="panel-content">
+              <div class="panel-heading">
+                <span class="panel-kicker">RADAR DEL PROYECTO</span>
+                <span class="panel-live"><span class="status-dot" aria-hidden="true"></span> activo</span>
+              </div>
+              <div class="panel-number">06</div>
+              <p class="panel-caption">piezas conectadas<br>listas para explorar</p>
+              <div class="panel-bars" aria-hidden="true">
+                <span style="--bar-size: 78%"></span>
+                <span style="--bar-size: 56%"></span>
+                <span style="--bar-size: 88%"></span>
+                <span style="--bar-size: 42%"></span>
+                <span style="--bar-size: 68%"></span>
+              </div>
+              <div class="panel-footer"><span>Atlas Local</span><span>v1.0</span></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="content-section" id="recursos">
+          <div class="section-heading">
+            <div>
+              <p class="section-label">01 / BIBLIOTECA</p>
+              <h2>Recursos para explorar</h2>
+              <p class="section-intro">Prueba la búsqueda local con términos como <strong>offline</strong>, <strong>validación</strong> o <strong>sostenibilidad</strong>.</p>
+            </div>
+            <span class="section-badge" id="resource-count">06 recursos locales</span>
+          </div>
+
+          <div class="resource-toolbar">
+            <label class="search-field" for="resource-filter">
+              <span aria-hidden="true">⌕</span>
+              <input id="resource-filter" type="search" placeholder="Filtrar esta página..." autocomplete="off">
+              <kbd>/</kbd>
+            </label>
+            <button class="text-button" id="reset-filter" type="button">Limpiar</button>
+          </div>
+
+          <div class="resource-grid" id="resource-grid"></div>
+          <p class="empty-state" id="empty-state" hidden>No hay recursos que coincidan con ese filtro.</p>
+        </section>
+
+        <section class="content-section flow-section" id="flujo">
+          <div class="section-heading compact-heading">
+            <div>
+              <p class="section-label">02 / RECORRIDO</p>
+              <h2>De carpeta a contexto</h2>
+            </div>
+            <button class="text-button" id="check-in-link" type="button">Completar demo →</button>
+          </div>
+
+          <ol class="timeline" id="timeline">
+            <li class="timeline-item is-complete">
+              <span class="timeline-marker">01</span>
+              <div><strong>Selecciona la carpeta</strong><p>Carga <code>ejemplo-nexusdata</code> como proyecto.</p></div>
+            </li>
+            <li class="timeline-item">
+              <span class="timeline-marker">02</span>
+              <div><strong>Encuentra una pista</strong><p>Busca un término y abre el documento que lo contiene.</p></div>
+            </li>
+            <li class="timeline-item">
+              <span class="timeline-marker">03</span>
+              <div><strong>Conecta las piezas</strong><p>Genera un mapa sobre un archivo o importa el diagrama <code>.nxd</code>.</p></div>
+            </li>
+          </ol>
+        </section>
+
+        <section class="about-section" id="acerca">
+          <div class="about-mark" aria-hidden="true">✦</div>
+          <div>
+            <p class="section-label">03 / ACERCA DE</p>
+            <h2>Un espacio de prueba, sin ruido.</h2>
+            <p>Esta demo no descarga imágenes, fuentes ni datos. Está pensada para funcionar igual al abrirla desde el visor HTML de NexusData o directamente desde tu equipo.</p>
+          </div>
+          <div class="about-status"><span class="status-dot" aria-hidden="true"></span> datos locales</div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <span>Atlas Local / NexusData</span>
+        <span>Hecho para explorar con calma.</span>
+      </footer>
+    </div>
+
+    <script src="app.js" defer></script>
+  </body>
+</html>

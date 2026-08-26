@@ -58,6 +58,7 @@ before(async () => {
     port: 0,
     dbPath: path.join(fixtureDir, 'test.db'),
     authDb: authStore,
+    offlineOnly: false,
     environment: { JWT_SECRET: 'test-secret-that-is-long-enough-for-jwt-signing', SESSION_DURATION: '8h', NODE_ENV: 'test' }
   });
 });

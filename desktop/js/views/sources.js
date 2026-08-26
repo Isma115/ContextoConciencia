@@ -1,6 +1,6 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
-import { state } from '../core/state.js';
+import { OFFLINE_ONLY, state } from '../core/state.js';
 import { shortDate, sourceIcon, statusLabel } from '../core/format.js';
 import { showToast } from '../ui/notifications.js';
 import { openSourceModal } from './source-modal.js';
@@ -33,8 +33,9 @@ function bindActionButtons(container, selector, action) {
 }
 
 export function renderSources() {
-  const offline = state.user?.offline === true;
-  const cards = state.sources.map((source) => {
+  const offline = OFFLINE_ONLY || state.user?.offline === true;
+  const visibleSources = offline ? state.sources.filter((source) => source.type === 'local') : state.sources;
+  const cards = visibleSources.map((source) => {
     const config = source.config || {};
     const detail = source.type === 'rest' ? config.url : (config.paths || []).join(' · ');
     const sourceKind = source.type === 'rest' ? 'rest' : source.type === 'local' ? 'local' : 'generic';

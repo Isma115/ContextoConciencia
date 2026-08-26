@@ -5,6 +5,7 @@ const rateLimit = require('express-rate-limit');
 const COOKIE_NAME = 'nexusdata_session';
 const USERNAME_RE = /^[a-z0-9][a-z0-9._-]{2,49}$/;
 const OFFLINE_USER = { id: null, username: 'Modo offline', offline: true };
+const OFFLINE_ONLY_MESSAGE = 'Esta versión solo funciona en modo offline.';
 
 function sessionDuration(environment = process.env) { return environment.SESSION_DURATION || '8h'; }
 function sessionMilliseconds(duration = sessionDuration()) {
@@ -41,12 +42,23 @@ function issueOfflineSession(res, environment = process.env) {
 function loginLimiter() {
   return rateLimit({ windowMs: 15 * 60 * 1000, limit: 10, standardHeaders: 'draft-8', legacyHeaders: false, message: { error: 'Demasiados intentos. Espera unos minutos antes de volver a intentarlo.' } });
 }
-function requireAuth(authDb, environment = process.env) {
+function createOfflineAuthDatabase() {
+  return {
+    async initialize() { return false; },
+    isAvailable() { return false; },
+    async ensureAvailable() { return false; },
+    async findUserByUsername() { return null; },
+    async createUser() { throw new Error(OFFLINE_ONLY_MESSAGE); },
+    async close() {}
+  };
+}
+function requireAuth(authDb, environment = process.env, { offlineOnly = false } = {}) {
   return async (req, res, next) => {
     try {
       const token = req.cookies?.[COOKIE_NAME];
       if (!token) return res.status(401).json({ error: 'Sesión no válida.' });
       const session = jwt.verify(token, jwtSecret(environment));
+      if (offlineOnly && session.offline !== true) return res.status(403).json({ error: OFFLINE_ONLY_MESSAGE });
       if (session.offline === true) {
         req.user = { ...OFFLINE_USER };
         return next();
@@ -57,7 +69,7 @@ function requireAuth(authDb, environment = process.env) {
     } catch { return res.status(401).json({ error: 'Sesión no válida.' }); }
   };
 }
-function installAuthRoutes(app, authDb, environment = process.env) {
+function installAuthRoutes(app, authDb, environment = process.env, { offlineOnly = false } = {}) {
   app.post('/api/auth/offline', (req, res) => {
     try {
       issueOfflineSession(res, environment);
@@ -67,6 +79,7 @@ function installAuthRoutes(app, authDb, environment = process.env) {
     }
   });
   app.post('/api/auth/register', loginLimiter(), async (req, res) => {
+    if (offlineOnly) return res.status(403).json({ error: OFFLINE_ONLY_MESSAGE });
     const credentials = validateCredentials(req.body);
     if (credentials.error) return res.status(400).json({ error: credentials.error });
     if (!await authDb.ensureAvailable()) return res.status(503).json({ error: 'El servicio de autenticación no está disponible.' });
@@ -80,6 +93,7 @@ function installAuthRoutes(app, authDb, environment = process.env) {
     }
   });
   app.post('/api/auth/login', loginLimiter(), async (req, res) => {
+    if (offlineOnly) return res.status(403).json({ error: OFFLINE_ONLY_MESSAGE });
     const credentials = validateCredentials(req.body);
     if (credentials.error) return res.status(400).json({ error: credentials.error });
     if (!await authDb.ensureAvailable()) return res.status(503).json({ error: 'El servicio de autenticación no está disponible.' });
@@ -90,7 +104,7 @@ function installAuthRoutes(app, authDb, environment = process.env) {
       return res.json({ user: publicUser(user) });
     } catch { return res.status(503).json({ error: 'El servicio de autenticación no está disponible.' }); }
   });
-  app.get('/api/auth/me', requireAuth(authDb, environment), async (req, res) => {
+  app.get('/api/auth/me', requireAuth(authDb, environment, { offlineOnly }), async (req, res) => {
     if (req.user.offline) return res.json({ user: { ...OFFLINE_USER } });
     try {
       const user = await authDb.findUserByUsername(req.user.username);
@@ -104,4 +118,4 @@ function installAuthRoutes(app, authDb, environment = process.env) {
   });
 }
 
-module.exports = { COOKIE_NAME, OFFLINE_USER, installAuthRoutes, requireAuth, publicUser, normalizeUsername, validateCredentials };
+module.exports = { COOKIE_NAME, OFFLINE_ONLY_MESSAGE, OFFLINE_USER, createOfflineAuthDatabase, installAuthRoutes, requireAuth, publicUser, normalizeUsername, validateCredentials };

@@ -29,6 +29,24 @@ edge panel -> validar "Volver" reversa
   ]);
 });
 
+test('separa automáticamente los nodos sin coordenadas', async () => {
+  const { parseDiagramText } = await language;
+  const diagram = parseDiagramText(`diagram "Flujo espaciado"
+node inicio "Inicio"
+node validar "Validar"
+node terminar "Terminar"
+edge inicio -> validar
+edge validar -> terminar
+`);
+
+  assert.deepEqual(diagram.nodes.map(({ x, y }) => ({ x, y })), [
+    { x: 100, y: 100 },
+    { x: 430, y: 100 },
+    { x: 760, y: 100 }
+  ]);
+  assert.ok(diagram.nodes[1].x - diagram.nodes[0].x - 190 >= 140);
+});
+
 test('exporta una forma canónica que se puede volver a importar', async () => {
   const { parseDiagramText, serializeDiagram } = await language;
   const original = {

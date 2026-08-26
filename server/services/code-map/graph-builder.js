@@ -15,6 +15,11 @@ const ANALYZERS = {
 function fileId(relativePath) { return `file:${relativePath}`; }
 function packageId(name) { return `package:${name}`; }
 function normaliseEntry(entryFile) { return String(entryFile || '').replaceAll('\\', '/').replace(/^\.\//, ''); }
+function normaliseFolder(entryFolder) { return normaliseEntry(entryFolder).replace(/\/$/, '').replace(/^\.$/, ''); }
+function isPathInFolder(filePath, folderPath) {
+  const folder = normaliseFolder(folderPath);
+  return !folder || filePath === folder || filePath.startsWith(`${folder}/`);
+}
 
 function createFingerprint(files) {
   return crypto.createHash('sha1').update(files.map((file) => `${file.path}:${file.size}:${file.mtimeMs}`).join('\n')).digest('hex');
@@ -125,7 +130,7 @@ function relationFileId(relation, adjacency) {
   return null;
 }
 
-function buildCodeMap({ root, discovery, scope = 'project', entryFile = '', includeExternalPackages = false, maxRelations = 20000, cache = sharedCache } = {}) {
+function buildCodeMap({ root, discovery, scope = 'project', entryFile = '', entryFolder = '', includeExternalPackages = false, maxRelations = 20000, cache = sharedCache } = {}) {
   const startedAt = Date.now();
   const files = discovery.files || [];
   const resolver = createResolver(root, files);
@@ -236,8 +241,10 @@ function buildCodeMap({ root, discovery, scope = 'project', entryFile = '', incl
 
   const allFilePaths = files.map((file) => file.path);
   const entry = normaliseEntry(entryFile);
+  const folder = normaliseFolder(entryFolder);
   if (scope === 'entry' && !analyses.has(entry)) throw new Error('El fichero raíz no pertenece al proyecto global o no es compatible');
-  const reachable = new Set(scope === 'entry' ? [entry] : allFilePaths);
+  if (scope === 'folder' && !allFilePaths.some((filePath) => isPathInFolder(filePath, folder))) throw new Error('La carpeta raíz no contiene ficheros compatibles');
+  const reachable = new Set(scope === 'entry' ? [entry] : scope === 'folder' ? allFilePaths.filter((filePath) => isPathInFolder(filePath, folder)) : allFilePaths);
   if (scope === 'entry') {
     const adjacency = new Map();
     for (const relation of pendingRelations) {
@@ -300,6 +307,7 @@ function buildCodeMap({ root, discovery, scope = 'project', entryFile = '', incl
       root,
       scope,
       entryFile: scope === 'entry' ? entry : null,
+      entryFolder: scope === 'folder' ? folder : null,
       fingerprint: createFingerprint(files)
     },
     files: fileModels,

@@ -1,0 +1,34 @@
+[
+  {
+    "id": "atlas-001",
+    "title": "Guía de bienvenida",
+    "category": "documentación",
+    "status": "listo",
+    "tags": ["offline", "inicio", "contexto"],
+    "description": "Primer recorrido para cargar una carpeta y encontrar relaciones entre sus archivos."
+  },
+  {
+    "id": "atlas-002",
+    "title": "Inventario técnico",
+    "category": "datos",
+    "status": "listo",
+    "tags": ["json", "validación", "recursos"],
+    "description": "Conjunto de registros locales para probar búsquedas por categorías y etiquetas."
+  },
+  {
+    "id": "atlas-003",
+    "title": "Principios de sostenibilidad",
+    "category": "producto",
+    "status": "borrador",
+    "tags": ["sostenibilidad", "decisiones", "producto"],
+    "description": "Notas sobre decisiones de producto que mantienen el proyecto simple y mantenible."
+  },
+  {
+    "id": "atlas-004",
+    "title": "Mapa del recorrido",
+    "category": "diagrama",
+    "status": "listo",
+    "tags": ["nxd", "flujo", "nodos"],
+    "description": "Flujo de exploración preparado para abrirse como diagrama dentro de NexusData."
+  }
+]

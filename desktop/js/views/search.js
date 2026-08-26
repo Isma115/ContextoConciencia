@@ -1,6 +1,6 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
-import { persistSearchPreferences, state, resetFilters } from '../core/state.js';
+import { OFFLINE_ONLY, persistSearchPreferences, state, resetFilters } from '../core/state.js';
 import { statusLabel, typeLabel } from '../core/format.js';
 import { showToast } from '../ui/notifications.js';
 import { bindDocumentOpeners } from './documents.js';
@@ -12,13 +12,44 @@ let searchDebounceTimer = null;
 let searchRequestId = 0;
 let globalSearchDebounceTimer = null;
 let globalSearchRequestId = 0;
+let commonPathsSyncPromise = null;
+let commonPathsReady = false;
+let navigateToSearch = () => {};
 
-export function configureSearch({ onRefresh } = {}) {
+export function configureSearch({ onRefresh, onNavigate } = {}) {
   refreshData = onRefresh || refreshData;
+  navigateToSearch = onNavigate || navigateToSearch;
+}
+
+function syncSearchInputs(value) {
+  document.querySelectorAll('#search-input, #global-search-input, #sidebar-search-input').forEach((input) => {
+    if (input.value !== value) input.value = value;
+  });
+}
+
+function syncSearchQuery(query) {
+  state.searchQuery = query;
+  syncSearchInputs(query);
+}
+
+function syncSearchFilters(filters) {
+  const nextFilters = { ...filters };
+  state.filters = nextFilters;
+}
+
+function resetUnifiedSearch() {
+  searchRequestId += 1;
+  globalSearchRequestId += 1;
+  syncSearchQuery('');
+  syncSearchFilters(resetFilters());
+  state.includeCommonPaths = false;
+  commonPathsReady = false;
+  persistSearchPreferences();
 }
 
 function sourceOptions(selected = '') {
-  return `<option value="">Todas las fuentes</option>${state.sources.map((source) => `<option value="${escapeHtml(source.id)}" ${source.id === selected ? 'selected' : ''}>${escapeHtml(source.name)}</option>`).join('')}`;
+  const sources = state.sources.filter((source) => source.config?.role !== 'common-paths');
+  return `<option value="">Todas las fuentes</option>${sources.map((source) => `<option value="${escapeHtml(source.id)}" ${source.id === selected ? 'selected' : ''}>${escapeHtml(source.name)}</option>`).join('')}`;
 }
 
 function collectionOptions(selected = '') {
@@ -27,6 +58,32 @@ function collectionOptions(selected = '') {
 
 function tagOptions(selected = '') {
   return `<option value="">Todas las etiquetas</option>${state.tags.map((item) => `<option value="${escapeHtml(item.name)}" ${item.name === selected ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}`;
+}
+
+function commonPathsMarkup(prefix = '') {
+  const id = prefix ? 'global-common-paths' : 'common-paths';
+  const checked = state.includeCommonPaths ? ' checked' : '';
+  return `<label class="common-paths-option" title="Busca también en Documentos, Descargas, Imágenes, Escritorio, Películas, Música, Público, Proyectos y Código"><input id="${id}" type="checkbox"${checked}><span>Rutas comunes</span><small>Documentos · Descargas · Imágenes · Escritorio · …</small></label>`;
+}
+
+export function bindSidebarSearch() {
+  const input = $('#sidebar-search-input');
+  if (!input || input.dataset.bound === 'true') return;
+  input.dataset.bound = 'true';
+  input.value = state.searchQuery;
+  input.addEventListener('input', () => {
+    syncSearchQuery(input.value);
+    globalSearchRequestId += 1;
+    persistSearchPreferences();
+    if (state.view !== 'global-search') navigateToSearch('global-search');
+    schedule('global');
+  });
+  input.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    cancelGlobalSearchDebounce();
+    if (state.view !== 'global-search') navigateToSearch('global-search');
+    performGlobalSearch();
+  });
 }
 
 function bindCollectionAndTagActions(container, prefix = '') {
@@ -56,7 +113,7 @@ function bindCollectionAndTagActions(container, prefix = '') {
 
 function filterMarkup(prefix = '', filters = state.filters) {
   const id = (name) => prefix ? `global-filter-${name}` : `filter-${name}`;
-  return `<div class="filter-row"><select id="${id('source')}" class="select">${sourceOptions(filters.source)}</select><select id="${id('type')}" class="select"><option value="">Tipo</option><option value="markdown" ${filters.type === 'markdown' ? 'selected' : ''}>Markdown</option><option value="json" ${filters.type === 'json' ? 'selected' : ''}>JSON</option><option value="csv" ${filters.type === 'csv' ? 'selected' : ''}>CSV</option><option value="text" ${filters.type === 'text' ? 'selected' : ''}>TXT</option><option value="diagram" ${filters.type === 'diagram' ? 'selected' : ''}>Diagrama NexusData</option><option value="html" ${filters.type === 'html' ? 'selected' : ''}>HTML</option><option value="css" ${filters.type === 'css' ? 'selected' : ''}>CSS</option><option value="javascript" ${filters.type === 'javascript' ? 'selected' : ''}>JavaScript</option><option value="rest" ${filters.type === 'rest' ? 'selected' : ''}>REST</option></select><select id="${id('tag')}" class="select">${tagOptions(filters.tag).replace('Todas las etiquetas', 'Etiqueta')}</select><select id="${id('collection')}" class="select">${collectionOptions(filters.collection).replace('Todas las colecciones', 'Colección')}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label><button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div>`;
+  return `<div class="filter-row"><select id="${id('source')}" class="select">${sourceOptions(filters.source)}</select><select id="${id('type')}" class="select"><option value="">Tipo</option><option value="markdown" ${filters.type === 'markdown' ? 'selected' : ''}>Markdown</option><option value="json" ${filters.type === 'json' ? 'selected' : ''}>JSON</option><option value="csv" ${filters.type === 'csv' ? 'selected' : ''}>CSV</option><option value="text" ${filters.type === 'text' ? 'selected' : ''}>TXT</option><option value="diagram" ${filters.type === 'diagram' ? 'selected' : ''}>Diagrama NexusData</option><option value="html" ${filters.type === 'html' ? 'selected' : ''}>HTML</option><option value="css" ${filters.type === 'css' ? 'selected' : ''}>CSS</option><option value="javascript" ${filters.type === 'javascript' ? 'selected' : ''}>JavaScript</option></select><select id="${id('tag')}" class="select">${tagOptions(filters.tag).replace('Todas las etiquetas', 'Etiqueta')}</select><select id="${id('collection')}" class="select">${collectionOptions(filters.collection).replace('Todas las colecciones', 'Colección')}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div>`;
 }
 
 function resultMarkup(results, prefix = '') {
@@ -73,26 +130,44 @@ function resultMarkup(results, prefix = '') {
 function bindSearchControls({ prefix = '', perform, cancel, clear }) {
   const input = $(`#${prefix ? 'global-search-input' : 'search-input'}`);
   const submit = $(`#${prefix ? 'global-search-submit' : 'search-submit'}`);
+  const commonPaths = $(`#${prefix ? 'global-common-paths' : 'common-paths'}`);
   submit.addEventListener('click', () => { cancel(); perform(); });
   input.addEventListener('input', () => {
-    if (prefix) {
-      state.globalSearchQuery = input.value;
-      globalSearchRequestId += 1;
-    } else {
-      state.searchQuery = input.value;
-      searchRequestId += 1;
-    }
+    syncSearchQuery(input.value);
+    if (prefix) globalSearchRequestId += 1;
+    else searchRequestId += 1;
     persistSearchPreferences();
     schedule(prefix);
   });
   input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { cancel(); perform(); } });
   ['source', 'type', 'tag', 'collection', 'date'].forEach((name) => $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`).addEventListener('change', () => { cancel(); perform(); }));
+  commonPaths?.addEventListener('change', async () => {
+    state.includeCommonPaths = commonPaths.checked;
+    cancel();
+    if (!state.includeCommonPaths) {
+      commonPathsReady = false;
+      await perform();
+      return;
+    }
+    commonPaths.disabled = true;
+    try {
+      const result = await ensureCommonPathsReady();
+      showToast(result?.directories?.length ? 'Rutas comunes activadas' : 'No se encontraron rutas comunes');
+      await perform();
+    } catch (error) {
+      state.includeCommonPaths = false;
+      commonPaths.checked = false;
+      showToast(error.message, true);
+    } finally {
+      commonPaths.disabled = false;
+    }
+  });
   $(`#${prefix ? 'global-clear-filters' : 'clear-filters'}`).addEventListener('click', () => { cancel(); clear(); });
 }
 
 export function renderSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
-  $('#view-search').innerHTML = `<div class="search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div></div><div class="panel search-results-panel"><div class="panel-header"><h2>${state.searchQuery ? `${(results || []).length} resultados` : 'Documentos'}</h2></div><div class="result-list">${resultMarkup(results)}</div></div>`;
-  bindSearchControls({ perform: performSearch, cancel: cancelSearchDebounce, clear: () => { searchRequestId += 1; state.searchQuery = ''; state.filters = resetFilters(); persistSearchPreferences(); renderSearch([]); } });
+  $('#view-search').innerHTML = `<div class="search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div></div><div class="panel search-results-panel"><div class="panel-header"><h2>Documentos</h2></div><div class="result-list">${resultMarkup(results)}</div></div>`;
+  bindSearchControls({ perform: performSearch, cancel: cancelSearchDebounce, clear: () => { resetUnifiedSearch(); renderSearch([]); } });
   const surface = $('#view-search');
   bindCollectionAndTagActions(surface);
   bindDocumentOpeners(surface);
@@ -124,48 +199,85 @@ function schedule(prefix = '') {
   if (prefix) globalSearchDebounceTimer = timer; else searchDebounceTimer = timer;
 }
 
-export async function performSearch() {
-  const input = $('#search-input');
+function syncCommonPaths() {
+  if (!commonPathsSyncPromise) {
+    commonPathsSyncPromise = api('/common-paths/sync', { method: 'POST' })
+      .then((result) => {
+        commonPathsReady = state.includeCommonPaths;
+        return result;
+      })
+      .catch((error) => {
+        commonPathsReady = false;
+        throw error;
+      })
+      .finally(() => { commonPathsSyncPromise = null; });
+  }
+  return commonPathsSyncPromise;
+}
+
+function ensureCommonPathsReady() {
+  if (!state.includeCommonPaths || commonPathsReady) return Promise.resolve(null);
+  return syncCommonPaths();
+}
+
+async function performSearchRequest({ prefix = '', view, renderResults }) {
+  const input = $(`#${prefix ? 'global-search-input' : 'search-input'}`);
   if (!input) return;
   const restoreFocus = document.activeElement === input;
   const selectionStart = input.selectionStart;
   const selectionEnd = input.selectionEnd;
-  state.searchQuery = input.value.trim();
-  const requestId = ++searchRequestId;
-  const params = new URLSearchParams({ q: state.searchQuery });
-  [['filter-source', 'source'], ['filter-type', 'type'], ['filter-tag', 'tag'], ['filter-collection', 'collection'], ['filter-date', 'updatedFrom']].forEach(([id, key]) => { const stateKey = key === 'updatedFrom' ? 'date' : key; const value = $(`#${id}`)?.value || ''; state.filters[stateKey] = value; if (value) params.set(key, value); });
+  const query = input.value.trim();
+  const requestId = prefix ? ++globalSearchRequestId : ++searchRequestId;
+  const filters = { ...state.filters };
+  const params = new URLSearchParams({ q: query });
+  [['source', 'source'], ['type', 'type'], ['tag', 'tag'], ['collection', 'collection'], ['date', 'updatedFrom']].forEach(([name, key]) => {
+    const value = $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`)?.value || '';
+    const stateKey = key === 'updatedFrom' ? 'date' : key;
+    filters[stateKey] = value;
+    if (value) params.set(key, value);
+  });
+  syncSearchQuery(query);
+  syncSearchFilters(filters);
   persistSearchPreferences();
-  try { const response = await api(`/search?${params}`); if (requestId === searchRequestId && state.view === 'search') renderSearch(response.results, { restoreFocus, selectionStart, selectionEnd }); } catch (error) { if (requestId === searchRequestId && state.view === 'search') showToast(error.message, true); }
+  try {
+    await ensureCommonPathsReady();
+    if (state.includeCommonPaths) params.set('includeCommonPaths', 'true');
+    const response = await api(`/search?${params}`);
+    const latestRequestId = prefix ? globalSearchRequestId : searchRequestId;
+    if (requestId === latestRequestId && state.view === view) renderResults(response.results, { restoreFocus, selectionStart, selectionEnd });
+  } catch (error) {
+    const latestRequestId = prefix ? globalSearchRequestId : searchRequestId;
+    if (requestId === latestRequestId && state.view === view) showToast(error.message, true);
+  }
+}
+
+export function performSearch() {
+  return performSearchRequest({ view: 'search', renderResults: renderSearch });
 }
 
 function projectFolderName(value) { return String(value || '').split(/[\\/]/).filter(Boolean).pop() || 'Proyecto global'; }
 
 export function renderGlobalSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
   const project = state.globalProject;
-  const offline = state.user?.offline === true;
+  const offline = OFFLINE_ONLY || state.user?.offline === true;
   const sourceActions = offline ? '<button class="btn btn-primary btn-small" data-global-source-action="new-local">＋ Carpeta local</button>' : '<button class="btn btn-secondary btn-small" data-global-source-action="new-rest">＋ API REST</button><button class="btn btn-primary btn-small" data-global-source-action="new-local">＋ Carpeta local</button>';
   const projectPanel = project
-    ? `<div class="global-project-loaded"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>${escapeHtml(project.name)}</strong><span title="${escapeHtml(project.path || '')}">${escapeHtml(project.path || 'Sin ruta')}</span><small>${project.source.documentCount} recursos indexados · ${escapeHtml(statusLabel(project.source.status))}</small></div></div><div class="global-project-actions">${sourceActions}<button class="btn btn-secondary btn-small" data-global-project-action="sync">↻ Actualizar recursos</button><button class="btn btn-danger btn-small" data-global-project-action="close">Cerrar proyecto</button></div>`
+    ? `<div class="global-project-loaded"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>${escapeHtml(project.name)}</strong><span title="${escapeHtml(project.path || '')}">${escapeHtml(project.path || 'Sin ruta')}</span><small>${escapeHtml(statusLabel(project.source.status))}</small></div></div><div class="global-project-actions">${sourceActions}<button class="btn btn-secondary btn-small" data-global-project-action="sync">↻ Actualizar recursos</button><button class="btn btn-danger btn-small" data-global-project-action="close">Cerrar proyecto</button></div>`
     : `<div class="global-project-loaded is-empty"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>Ningún proyecto cargado</strong></div><div class="global-project-actions"><button class="btn btn-secondary" data-global-project-action="new">＋ Nuevo proyecto</button><button class="btn btn-primary" data-global-project-action="load">Cargar proyecto</button></div>`;
-  $('#view-global-search').innerHTML = `${project ? '<div id="global-search-controls"></div>' : ''}<div class="panel global-project-panel"><div class="global-project-row">${projectPanel}</div></div>${project ? '<div id="global-search-surface"></div>' : ''}`;
+  $('#view-global-search').innerHTML = '<div id="global-search-controls"></div><div class="panel global-project-panel"><div class="global-project-row">' + projectPanel + '</div></div><div id="global-search-surface"></div>';
   bindGlobalProjectActions();
   bindGlobalSourceActions();
   bindDocumentOpeners($('#view-global-search'));
-  if (project) {
-    renderGlobalSearchControls({ restoreFocus, selectionStart, selectionEnd });
-    renderGlobalSearchSurface(results);
-  }
+  renderGlobalSearchControls({ restoreFocus, selectionStart, selectionEnd });
+  renderGlobalSearchSurface(results);
 }
 
 function renderGlobalSearchControls({ restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
   const controls = $('#global-search-controls');
   if (!controls) return;
-  controls.innerHTML = `<div class="search-sticky global-search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="global-search-input" class="search-input" value="${escapeHtml(state.globalSearchQuery)}" placeholder="Buscar en todos los recursos…" autocomplete="off" /></div><button id="global-search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup('global', state.globalFilters)}</div></div></div>`;
+  controls.innerHTML = `<div class="search-sticky global-search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="global-search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="global-search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup('global', state.filters)}</div></div></div>`;
   bindSearchControls({ prefix: 'global', perform: performGlobalSearch, cancel: cancelGlobalSearchDebounce, clear: () => {
-    globalSearchRequestId += 1;
-    state.globalSearchQuery = '';
-    state.globalFilters = resetFilters();
-    persistSearchPreferences();
+    resetUnifiedSearch();
     renderGlobalSearchControls();
     renderGlobalSearchSurface([]);
   } });
@@ -175,20 +287,13 @@ function renderGlobalSearchControls({ restoreFocus = false, selectionStart = nul
 function renderGlobalSearchSurface(results = null) {
   const surface = $('#global-search-surface');
   if (!surface) return;
-  surface.innerHTML = `<div class="panel search-results-panel"><div class="panel-header"><h2>${state.globalSearchQuery ? `${(results || []).length} resultados` : 'Documentos'}</h2></div><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
+  surface.innerHTML = `<div class="panel search-results-panel global-documents-panel"><div class="panel-header"><h2>Documentos</h2></div><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
   bindCollectionAndTagActions(surface, 'global');
   bindDocumentOpeners(surface);
 }
 
-export async function performGlobalSearch() {
-  const input = $('#global-search-input');
-  if (!input || !state.globalProject) return;
-  state.globalSearchQuery = input.value.trim();
-  const requestId = ++globalSearchRequestId;
-  const params = new URLSearchParams({ q: state.globalSearchQuery });
-  [['global-filter-source', 'source'], ['global-filter-type', 'type'], ['global-filter-tag', 'tag'], ['global-filter-collection', 'collection'], ['global-filter-date', 'updatedFrom']].forEach(([id, key]) => { const stateKey = key === 'updatedFrom' ? 'date' : key; const value = $(`#${id}`)?.value || ''; state.globalFilters[stateKey] = value; if (value) params.set(key, value); });
-  persistSearchPreferences();
-  try { const response = await api(`/search?${params}`); if (requestId === globalSearchRequestId && state.view === 'global-search') renderGlobalSearchSurface(response.results); } catch (error) { if (requestId === globalSearchRequestId && state.view === 'global-search') showToast(error.message, true); }
+export function performGlobalSearch() {
+  return performSearchRequest({ prefix: 'global', view: 'global-search', renderResults: renderGlobalSearchSurface });
 }
 
 function bindGlobalProjectActions() {

@@ -25,6 +25,7 @@ test('descubre solo ficheros compatibles y aplica exclusiones técnicas', () => 
   try {
     const result = listCodeMapFiles(root);
     assert.deepEqual(result.files.map((file) => file.path), ['index.html', 'src/entry.ts', 'src/helper.ts', 'styles.css', 'theme.css']);
+    assert.deepEqual(result.folders, ['src']);
     assert.equal(result.files.some((file) => file.path.includes('node_modules')), false);
     assert.equal(result.files.some((file) => file.path.startsWith('dist/')), false);
   } finally {
@@ -45,6 +46,10 @@ test('construye relaciones, detecta ciclos y calcula el subgrafo desde una entra
 
     const partial = analyzeCodeMap(root, { scope: 'entry', entryFile: 'index.html' });
     assert.deepEqual(partial.files.map((file) => file.path), ['index.html', 'src/entry.ts', 'src/helper.ts', 'styles.css', 'theme.css']);
+
+    const folder = analyzeCodeMap(root, { scope: 'folder', entryFolder: 'src' });
+    assert.deepEqual(folder.files.map((file) => file.path), ['src/entry.ts', 'src/helper.ts']);
+    assert.equal(folder.project.entryFolder, 'src');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -57,6 +62,8 @@ test('conserva advertencias parciales y no permite abrir rutas fuera de la raíz
     const result = analyzeCodeMap(root);
     assert.ok(result.warnings.some((warning) => warning.path === 'broken.js'));
     assert.throws(() => getCodeMapFile(root, '../outside.js'), /ruta.*válida|fuera/i);
+    assert.throws(() => analyzeCodeMap(root, { scope: 'folder', entryFolder: '../' }), /ruta.*válida|fuera/i);
+    assert.throws(() => analyzeCodeMap(root, { scope: 'folder', entryFolder: 'src/entry.ts' }), /carpeta/i);
     const source = getCodeMapFile(root, 'src/entry.ts', 2);
     assert.equal(source.path, 'src/entry.ts');
     assert.equal(source.line, 2);

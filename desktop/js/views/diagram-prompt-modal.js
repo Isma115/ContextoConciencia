@@ -19,7 +19,7 @@ Reglas del lenguaje:
 - Las conexiones usan -> y solo pueden apuntar a nodos declarados.
 - Las direcciones son forward/directo, backward/reverse/reversa y none/simple. Usa forward salvo que el flujo necesite otro sentido o una línea sin flecha.
 - La etiqueta de un edge es opcional y debe ir entre comillas; también puede escribirse después de dos puntos.
-- at x, y es opcional. Cuando se use, coloca x entre 20 y 1190 e y entre 20 y 792 para mantener las tarjetas dentro del lienzo de 1400 × 900.
+- at x, y es opcional. Si no lo indicas, NexusData separa automáticamente las tarjetas. Cuando se use, coloca x entre 20 y 1190 e y entre 20 y 792, y deja al menos 140 unidades entre los bordes de las tarjetas conectadas para que las flechas sean legibles.
 - Las líneas vacías y los comentarios que comienzan por # o // se ignoran.
 - No añadas instrucciones distintas de diagram, node, edge o connect.
 
@@ -27,10 +27,10 @@ Ejemplo válido:
 
 diagram "Registro de usuario"
 node formulario "Completar formulario" start at 100, 300
-node validar "Validar datos" decision at 380, 300
-node guardar "Guardar usuario" step at 680, 180
-node error "Mostrar errores" step at 680, 430
-node fin "Cuenta creada" end at 980, 180
+node validar "Validar datos" decision at 430, 300
+node guardar "Guardar usuario" step at 800, 140
+node error "Mostrar errores" step at 800, 500
+node fin "Cuenta creada" end at 1170, 140
 edge formulario -> validar "Enviar" forward
 edge validar -> guardar "Correctos" forward
 edge validar -> error "Incorrectos" forward
@@ -56,7 +56,7 @@ ${DIAGRAM_CODE_INSTRUCTIONS}
 - Usa nombres de nodo estables, descriptivos y fáciles de relacionar con el código.
 - Usa start para el punto de entrada, decision para preguntas o bifurcaciones y end para cada resultado final.
 - Etiqueta las ramas de las decisiones, por ejemplo "Sí", "No", "Válido" o "Error".
-- Coloca los nodos de izquierda a derecha o de arriba abajo, mantén separación suficiente y evita que se superpongan.
+- Coloca los nodos de izquierda a derecha o de arriba abajo, mantén al menos 140 unidades entre los bordes de las tarjetas conectadas y evita que se superpongan.
 - Conecta todos los pasos relevantes y comprueba que el origen y el destino de cada edge existen.
 - Mantén las etiquetas breves, pero suficientemente claras para entender el flujo sin consultar una explicación adicional.
 

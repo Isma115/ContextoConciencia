@@ -8,6 +8,7 @@ const { syncRestSource, testRestSource } = require('../services/rest');
 const { inspectHtmlProject } = require('../services/html-viewer');
 const { createHtmlPreview, getHtmlPreview } = require('../services/html-viewer-preview');
 const { analyzeCodeMap, getCodeMapFile, listCodeMapFiles } = require('../services/code-map');
+const { commonPathsConfig, isCommonPathsConfig, listCommonDirectories, COMMON_PATHS_ROLE, COMMON_PATHS_SOURCE_NAME } = require('../services/common-paths');
 const { Worker } = require('node:worker_threads');
 const { installAuthRoutes, requireAuth } = require('../auth');
 
@@ -99,6 +100,14 @@ function globalProjectRoot(db) {
   if (!row) return null;
   const config = parseJson(row.config_json);
   return Array.isArray(config.paths) && typeof config.paths[0] === 'string' ? config.paths[0] : null;
+}
+
+function commonPathsSourceRow(db) {
+  const rows = db.all(
+    `SELECT s.*, (SELECT COUNT(*) FROM documents d WHERE d.source_id = s.id) AS document_count
+     FROM sources s WHERE s.type = 'local' ORDER BY s.created_at DESC`
+  );
+  return rows.find((row) => isCommonPathsConfig(parseJson(row.config_json))) || null;
 }
 
 function validateGlobalProjectPath(value) {
@@ -199,7 +208,7 @@ async function syncSource(db, source) {
   try {
     const config = source.type === 'local' ? parseJson(source.config_json) : {};
     const result = source.type === 'local'
-      ? importLocalSource(db, source, { prune: config.role === 'global-project' })
+      ? importLocalSource(db, source, { prune: ['global-project', COMMON_PATHS_ROLE].includes(config.role) })
       : await syncRestSource(db, source);
     const syncAt = now();
     db.run('UPDATE sources SET status = ?, last_sync_at = ?, last_error = NULL WHERE id = ?', 'ready', syncAt, source.id);
@@ -211,10 +220,11 @@ async function syncSource(db, source) {
   }
 }
 
-function documentRows(db, query = {}, { localOnly = false } = {}) {
+function documentRows(db, query = {}, { localOnly = false, includeCommonPaths = true } = {}) {
   const clauses = [];
   const params = [];
   if (localOnly) clauses.push(localDocumentClause(true));
+  if (!includeCommonPaths) clauses.push(`s.config_json NOT LIKE '%"role":"${COMMON_PATHS_ROLE}"%'`);
   if (query.source) {
     clauses.push('d.source_id = ?');
     params.push(query.source);
@@ -292,10 +302,10 @@ function searchDocuments(db, query, filters, options = {}) {
   return results.map(({ _rank, tagsText, metadataText, ...result }) => result).slice(0, 100);
 }
 
-function installRoutes(app, db, authDb, environment = process.env) {
+function installRoutes(app, db, authDb, environment = process.env, { offlineOnly = false } = {}) {
   app.get('/api/health', (req, res) => res.json({ ok: true, name: 'NexusData API', timestamp: now() }));
-  installAuthRoutes(app, authDb, environment);
-  app.use('/api', requireAuth(authDb, environment));
+  installAuthRoutes(app, authDb, environment, { offlineOnly });
+  app.use('/api', requireAuth(authDb, environment, { offlineOnly }));
 
   app.post('/api/html-viewer/inspect', (req, res) => {
     try {
@@ -356,12 +366,34 @@ function installRoutes(app, db, authDb, environment = process.env) {
   app.get('/api/html-viewer/preview/:token', (req, res) => {
     const content = getHtmlPreview(req.params.token);
     if (!content) return res.status(404).send('Previsualización no encontrada o caducada');
-    res.set('Content-Security-Policy', "default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; script-src 'unsafe-inline' https: blob:; style-src 'unsafe-inline' https: data:; img-src data: https: blob:; font-src data: https: blob:; media-src data: https: blob:; worker-src blob:; connect-src 'none'; frame-src 'none'");
+    res.set('Content-Security-Policy', "default-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; media-src data:; worker-src blob:; connect-src 'none'; frame-src 'none'");
     return res.type('html').send(content);
   });
 
   app.get('/api/global-project', (req, res) => {
     res.json(globalProjectResponse(db));
+  });
+
+  app.get('/api/common-paths', (_req, res) => {
+    res.json({ directories: listCommonDirectories() });
+  });
+
+  app.post('/api/common-paths/sync', async (_req, res) => {
+    try {
+      const directories = listCommonDirectories();
+      const config = commonPathsConfig(directories);
+      const existing = commonPathsSourceRow(db);
+      const id = existing?.id || ID('source');
+      if (existing) {
+        db.run('UPDATE sources SET name = ?, type = ?, config_json = ?, status = ?, last_error = NULL WHERE id = ?', COMMON_PATHS_SOURCE_NAME, 'local', JSON.stringify(config), 'pending', id);
+      } else {
+        db.run('INSERT INTO sources (id, name, type, config_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?)', id, COMMON_PATHS_SOURCE_NAME, 'local', JSON.stringify(config), 'pending', now());
+      }
+      const synced = await syncSource(db, sourceRow(db, id, { localOnly: true }));
+      return res.json({ directories, source: synced.source, sync: { created: synced.created, updated: synced.updated, total: synced.total, files: synced.files, errors: synced.errors } });
+    } catch (error) {
+      return res.status(502).json({ error: error.message });
+    }
   });
 
   app.post('/api/global-project', async (req, res) => {
@@ -396,7 +428,7 @@ function installRoutes(app, db, authDb, environment = process.env) {
     const project = globalProjectResponse(db).project;
     const root = globalProjectRoot(db);
     if (!project || !root) {
-      return res.json({ loaded: false, project: null, files: [], warnings: [], excludedDirectories: [], limits: {} });
+      return res.json({ loaded: false, project: null, files: [], folders: [], warnings: [], excludedDirectories: [], limits: {} });
     }
     try {
       const result = listCodeMapFiles(root, {
@@ -493,7 +525,7 @@ function installRoutes(app, db, authDb, environment = process.env) {
   app.post('/api/sources', (req, res) => {
     try {
       const input = validateSourceInput(req.body || {});
-      if (isOffline(req) && input.type !== 'local') return res.status(403).json({ error: 'El modo offline solo admite archivos locales.' });
+      if ((offlineOnly || isOffline(req)) && input.type !== 'local') return res.status(403).json({ error: 'El modo offline solo admite archivos locales.' });
       const id = ID('source');
       const createdAt = now();
       db.run('INSERT INTO sources (id, name, type, config_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?)', id, input.name, input.type, JSON.stringify(input.config), 'pending', createdAt);
@@ -508,7 +540,7 @@ function installRoutes(app, db, authDb, environment = process.env) {
     if (!existing) return res.status(404).json({ error: 'Fuente no encontrada' });
     try {
       const input = validateSourceInput({ ...existing, ...req.body, config: req.body.config }, existing);
-      if (isOffline(req) && input.type !== 'local') return res.status(403).json({ error: 'El modo offline solo admite archivos locales.' });
+      if ((offlineOnly || isOffline(req)) && input.type !== 'local') return res.status(403).json({ error: 'El modo offline solo admite archivos locales.' });
       db.run('UPDATE sources SET name = ?, type = ?, config_json = ?, status = ?, last_error = NULL WHERE id = ?', input.name, input.type, JSON.stringify(input.config), 'pending', req.params.id);
       res.json(sourceResponse(db, existing));
     } catch (error) {
@@ -525,6 +557,7 @@ function installRoutes(app, db, authDb, environment = process.env) {
   app.post('/api/sources/:id/test', async (req, res) => {
     const source = sourceRow(db, req.params.id, { localOnly: isOffline(req) });
     if (!source) return res.status(404).json({ error: 'Fuente no encontrada' });
+    if (offlineOnly && source.type !== 'local') return res.status(403).json({ error: 'El modo offline solo admite archivos locales.' });
     try {
       if (source.type === 'local') {
         const config = parseJson(source.config_json);
@@ -541,6 +574,7 @@ function installRoutes(app, db, authDb, environment = process.env) {
   app.post('/api/sources/:id/sync', async (req, res) => {
     const source = sourceRow(db, req.params.id, { localOnly: isOffline(req) });
     if (!source) return res.status(404).json({ error: 'Fuente no encontrada' });
+    if (offlineOnly && source.type !== 'local') return res.status(403).json({ error: 'El modo offline solo admite archivos locales.' });
     try {
       res.json(await syncSource(db, source));
     } catch (error) {
@@ -575,7 +609,8 @@ function installRoutes(app, db, authDb, environment = process.env) {
 
   app.get('/api/search', (req, res) => {
     const query = asText(req.query.q);
-    const results = searchDocuments(db, query, { source: req.query.source, type: req.query.type, tag: req.query.tag, collection: req.query.collection, updatedFrom: req.query.updatedFrom }, { localOnly: isOffline(req) });
+    const includeCommonPaths = ['1', 'true', 'yes'].includes(String(req.query.includeCommonPaths || '').toLowerCase());
+    const results = searchDocuments(db, query, { source: req.query.source, type: req.query.type, tag: req.query.tag, collection: req.query.collection, updatedFrom: req.query.updatedFrom }, { localOnly: isOffline(req), includeCommonPaths });
     res.json({ query, total: results.length, results });
   });
 

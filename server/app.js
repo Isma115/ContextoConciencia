@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 require('dotenv').config();
 const { openDatabase } = require('./database/db');
 const { createAuthDatabase } = require('./database/mysql');
+const { createOfflineAuthDatabase } = require('./auth');
 const { installRoutes } = require('./routes');
 
 function resolveEnvironment(environment = process.env) {
@@ -16,19 +17,26 @@ function resolveEnvironment(environment = process.env) {
   return resolved;
 }
 
-function createApp({ dbPath, authDb, environment = process.env } = {}) {
+function offlineModeEnabled(value, environment) {
+  if (typeof value === 'boolean') return value;
+  return String(environment?.OFFLINE_ONLY ?? 'true').toLowerCase() !== 'false';
+}
+
+function createApp({ dbPath, authDb, environment = process.env, offlineOnly = null } = {}) {
   const resolvedEnvironment = resolveEnvironment(environment);
+  const useOfflineOnly = offlineModeEnabled(offlineOnly, resolvedEnvironment);
   const app = express();
   const db = openDatabase(dbPath);
-  const resolvedAuthDb = authDb || createAuthDatabase(resolvedEnvironment);
+  const resolvedAuthDb = authDb || (useOfflineOnly ? createOfflineAuthDatabase() : createAuthDatabase(resolvedEnvironment));
   app.disable('x-powered-by');
   app.locals.db = db;
   app.locals.authDb = resolvedAuthDb;
   app.locals.dbPath = db.path;
+  app.locals.offlineOnly = useOfflineOnly;
 
   app.use(cookieParser());
   app.use(express.json({ limit: '30mb' }));
-  installRoutes(app, db, resolvedAuthDb, resolvedEnvironment);
+  installRoutes(app, db, resolvedAuthDb, resolvedEnvironment, { offlineOnly: useOfflineOnly });
   app.use(express.static(path.join(__dirname, '..', 'desktop'), { index: 'index.html' }));
   app.use((req, res) => res.status(404).json({ error: 'Ruta no encontrada' }));
   app.use((error, req, res, next) => {
@@ -39,8 +47,8 @@ function createApp({ dbPath, authDb, environment = process.env } = {}) {
   return app;
 }
 
-function startServer({ port = 3000, host = '127.0.0.1', dbPath, authDb, environment } = {}) {
-  const app = createApp({ dbPath, authDb, environment });
+function startServer({ port = 3000, host = '127.0.0.1', dbPath, authDb, environment, offlineOnly = null } = {}) {
+  const app = createApp({ dbPath, authDb, environment, offlineOnly });
   const server = http.createServer(app);
   return new Promise((resolve, reject) => {
     server.once('error', reject);

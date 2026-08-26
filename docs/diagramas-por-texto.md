@@ -20,7 +20,7 @@ Un archivo puede contener tres instrucciones:
 diagram "Flujo de acceso"
 
 node inicio "Inicio" start at 100, 180
-node validar "Validar credenciales" decision at 420, 180
+node validar "Validar credenciales" decision at 430, 180
 node panel "Panel principal" end at 760, 180
 
 edge inicio -> validar "Enviar datos" forward
@@ -69,9 +69,9 @@ Ejemplos:
 
 ```text
 node recibir "Recibir solicitud"
-node revisar "¿Está completa?" decision at 360, 260
-node corregir "Pedir corrección" paso at 650, 390
-node terminado "Proceso terminado" fin at 650, 130
+node revisar "¿Está completa?" decision at 430, 260
+node corregir "Pedir corrección" paso at 800, 430
+node terminado "Proceso terminado" fin at 800, 80
 ```
 
 Si no se indica `at`, NexusData coloca los nodos automáticamente en una cuadrícula. Las posiciones negativas o fuera del lienzo se ajustan a sus límites.
@@ -128,10 +128,10 @@ diagram "Registro de usuario"
 
 # Entradas y validaciones
 node formulario "Completar formulario" start at 100, 300
-node validar "Validar datos" decision at 380, 300
-node guardar "Guardar usuario" step at 680, 180
-node error "Mostrar errores" step at 680, 430
-node fin "Cuenta creada" end at 980, 180
+node validar "Validar datos" decision at 430, 300
+node guardar "Guardar usuario" step at 800, 140
+node error "Mostrar errores" step at 800, 500
+node fin "Cuenta creada" end at 1170, 140
 
 edge formulario -> validar "Enviar" forward
 edge validar -> guardar "Correctos" forward

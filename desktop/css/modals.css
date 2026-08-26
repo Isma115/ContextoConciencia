@@ -38,7 +38,7 @@
 
 .app-hidden { display: none; }
 .auth-screen { position: fixed; inset: 0; z-index: 100; display: none; place-items: center; padding: 24px; background: radial-gradient(circle at 20% 15%, #182c42 0, #101820 35%, #09111f 100%); }
-.auth-screen.visible { display: grid; }
+.auth-screen.visible { display: none; }
 .auth-card { width: min(410px, 100%); padding: 30px; border: 1px solid #3c4c5c; border-radius: 8px; background: #1e252d; box-shadow: 0 22px 60px rgba(0,0,0,.45); }
 .auth-brand { display: grid; gap: 4px; margin-bottom: 28px; }
 .auth-brand strong { color: #e7f2ff; font-size: 18px; }

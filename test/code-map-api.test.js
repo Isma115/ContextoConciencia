@@ -43,6 +43,7 @@ before(async () => {
     port: 0,
     dbPath: path.join(root, 'nexusdata.db'),
     authDb: new MemoryAuthStore(),
+    offlineOnly: false,
     environment: { JWT_SECRET: 'code-map-api-test-secret-that-is-long-enough', NODE_ENV: 'test' }
   });
   const registered = await request('/auth/register', { method: 'POST', body: JSON.stringify({ username: 'map.test', password: 'contraseña-segura' }) });
@@ -60,11 +61,17 @@ test('expone descubrimiento, análisis parcial y apertura segura de código', as
   const files = await request('/code-map/files');
   assert.equal(files.response.status, 200);
   assert.deepEqual(files.body.files.map((file) => file.path), ['src/entry.js', 'src/helper.js']);
+  assert.deepEqual(files.body.folders, ['src']);
 
   const analysed = await request('/code-map/analyze', { method: 'POST', body: JSON.stringify({ scope: 'entry', entryFile: 'src/entry.js' }) });
   assert.equal(analysed.response.status, 200);
   assert.deepEqual(analysed.body.files.map((file) => file.path), ['src/entry.js', 'src/helper.js']);
   assert.ok(analysed.body.relations.some((relation) => relation.kind === 'imports' && relation.resolved));
+
+  const folder = await request('/code-map/analyze', { method: 'POST', body: JSON.stringify({ scope: 'folder', entryFolder: 'src' }) });
+  assert.equal(folder.response.status, 200);
+  assert.deepEqual(folder.body.files.map((file) => file.path), ['src/entry.js', 'src/helper.js']);
+  assert.equal(folder.body.project.entryFolder, 'src');
 
   const source = await request('/code-map/file?path=src%2Fentry.js&line=2');
   assert.equal(source.response.status, 200);

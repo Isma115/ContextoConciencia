@@ -86,8 +86,12 @@ export function buildHtmlPreview(project) {
     if (meta.getAttribute('http-equiv')?.toLowerCase() === 'content-security-policy') meta.remove();
   });
   parsed.querySelectorAll('link[href]').forEach((link) => {
-    const asset = files.get(resolveHtmlAsset(link.getAttribute('href'), entry.relativePath));
-    if (!asset || asset.type !== 'css') return;
+    const reference = link.getAttribute('href');
+    const asset = files.get(resolveHtmlAsset(reference, entry.relativePath));
+    if (!asset || asset.type !== 'css') {
+      if (reference && !reference.startsWith('#')) link.remove();
+      return;
+    }
     const style = parsed.createElement('style');
     style.setAttribute('data-nexus-file', asset.relativePath);
     style.textContent = inlineCssImports(asset.content, asset.relativePath, files);
@@ -97,6 +101,10 @@ export function buildHtmlPreview(project) {
     if (!isExecutableScript(script)) return;
     const reference = script.getAttribute('src');
     const asset = reference ? files.get(resolveHtmlAsset(reference, entry.relativePath)) : null;
+    if (reference && !asset) {
+      script.remove();
+      return;
+    }
     const content = asset?.type === 'javascript' ? asset.content : script.textContent;
     if (!content) return;
     const replacement = parsed.createElement('script');

@@ -20,6 +20,61 @@ export function configureCodeMap({ onNavigate } = {}) {
 
 function codeMapState() { return state.codeMap; }
 function formatBytes(value) { return value > 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : value > 1024 ? `${Math.round(value / 1024)} KB` : `${value || 0} B`; }
+function deriveFolders(files = []) {
+  const folders = new Set();
+  files.forEach((file) => {
+    const parts = String(file.path || '').split('/');
+    parts.pop();
+    let current = '';
+    parts.forEach((part) => {
+      current = current ? `${current}/${part}` : part;
+      folders.add(current);
+    });
+  });
+  return [...folders].sort((first, second) => first.localeCompare(second));
+}
+
+function optionMarkup(value, label, selected) {
+  return `<option value="${escapeHtml(value)}"${selected ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+}
+
+function scopeDescription(codeMap) {
+  if (codeMap.scope === 'entry') {
+    return codeMap.entryFile
+      ? `Desde ${codeMap.entryFile}, siguiendo sus dependencias locales.`
+      : 'Elige un fichero de código como punto de entrada.';
+  }
+  if (codeMap.scope === 'folder') {
+    return codeMap.entryFolder
+      ? `Todos los ficheros compatibles de ${codeMap.entryFolder}, incluidos sus subdirectorios.`
+      : 'Elige una carpeta del proyecto para construir el diagrama.';
+  }
+  return 'Todos los ficheros compatibles del proyecto cargado.';
+}
+
+function scopeLabel(codeMap) {
+  if (codeMap.scope === 'entry') return 'el fichero seleccionado';
+  if (codeMap.scope === 'folder') return 'la carpeta seleccionada';
+  return 'el proyecto completo';
+}
+
+function scopeReady(codeMap) {
+  return codeMap.scope === 'project' || (codeMap.scope === 'entry' && Boolean(codeMap.entryFile)) || (codeMap.scope === 'folder' && Boolean(codeMap.entryFolder));
+}
+
+function scopeControlsMarkup() {
+  const codeMap = codeMapState();
+  const scope = ['project', 'entry', 'folder'].includes(codeMap.scope) ? codeMap.scope : 'project';
+  const folders = codeMap.folders?.length ? codeMap.folders : deriveFolders(codeMap.files);
+  const targetMarkup = scope === 'entry'
+    ? [optionMarkup('', 'Selecciona un fichero…', !codeMap.entryFile), ...codeMap.files.map((file) => optionMarkup(file.path, file.path, file.path === codeMap.entryFile))].join('')
+    : scope === 'folder'
+      ? [optionMarkup('', 'Selecciona una carpeta…', !codeMap.entryFolder), ...folders.map((folder) => optionMarkup(folder, folder, folder === codeMap.entryFolder))].join('')
+      : '';
+  const disabled = codeMap.loading || codeMap.filesLoading ? ' disabled' : '';
+  return `<div class="code-map-config"><label class="code-map-field"><span>Alcance</span><select class="select code-map-select" data-code-map-scope${disabled} aria-label="Alcance del mapa">${optionMarkup('project', 'Proyecto completo', scope === 'project')}${optionMarkup('entry', 'Desde un fichero', scope === 'entry')}${optionMarkup('folder', 'Desde una carpeta', scope === 'folder')}</select></label>${scope !== 'project' ? `<label class="code-map-field"><span>${scope === 'entry' ? 'Fichero de entrada' : 'Carpeta de entrada'}</span><select class="select code-map-select code-map-target" data-code-map-target${disabled} aria-label="${scope === 'entry' ? 'Fichero de entrada' : 'Carpeta de entrada'}">${targetMarkup}</select></label>` : ''}</div>`;
+}
+
 function fileById(id) { return codeMapState().result?.files?.find((file) => file.id === id) || null; }
 function fileBySymbolId(id) { return codeMapState().result?.files?.find((file) => file.symbols.some((symbol) => symbol.id === id)) || null; }
 function selectedFile() {
@@ -33,7 +88,7 @@ function selectedSymbol() {
 }
 
 function projectEmptyMarkup() {
-  return `<div class="code-map-empty panel"><div class="code-map-empty-icon">⌘</div><h1>Mapa de código</h1><p>Carga un proyecto global para descubrir sus ficheros, símbolos y dependencias locales.</p><button type="button" class="btn btn-primary" data-code-map-go-global>Ir a Buscador Global</button></div>`;
+  return `<div class="code-map-empty panel"><div class="code-map-empty-icon">⌘</div><h1>Mapa de código</h1><p>Carga un proyecto global para descubrir sus ficheros, símbolos y dependencias locales.</p><button type="button" class="btn btn-primary" data-code-map-go-global>Ir a Buscar</button></div>`;
 }
 
 function noFilesMarkup() {
@@ -46,12 +101,18 @@ function noFilesMarkup() {
 function toolbarMarkup() {
   const codeMap = codeMapState();
   const loading = codeMap.loading;
-  return `<div class="code-map-toolbar"><div class="code-map-title-wrap"><h1>Mapa de código</h1></div><div class="code-map-actions"><button type="button" class="btn ${loading ? 'btn-secondary' : 'btn-primary'} code-map-generate" data-code-map-generate ${loading ? 'disabled' : ''}>${loading ? 'Analizando…' : codeMap.result ? '↻ Actualizar mapa' : 'Generar mapa'}</button>${loading ? '<button type="button" class="btn btn-danger" data-code-map-cancel>Cancelar</button>' : ''}</div></div>`;
+  const ready = scopeReady(codeMap);
+  const disabled = loading || !ready ? 'disabled' : '';
+  return `<div class="code-map-toolbar"><div class="code-map-title-wrap"><h1>Mapa de código</h1><p>${escapeHtml(scopeDescription(codeMap))}</p></div>${scopeControlsMarkup()}<div class="code-map-actions"><button type="button" class="btn ${loading ? 'btn-secondary' : 'btn-primary'} code-map-generate" data-code-map-generate ${disabled}>${loading ? 'Analizando…' : codeMap.result ? '↻ Actualizar mapa' : 'Generar mapa'}</button>${loading ? '<button type="button" class="btn btn-danger" data-code-map-cancel>Cancelar</button>' : ''}</div></div>`;
 }
 
 function beforeMapMarkup() {
   const codeMap = codeMapState();
-  return `<div class="code-map-before panel"><div class="code-map-empty-icon">⌁</div><div><h2>Listo para generar</h2><p><strong>${codeMap.files.length} fichero${codeMap.files.length === 1 ? '' : 's'} compatible${codeMap.files.length === 1 ? '' : 's'}</strong> detectado${codeMap.files.length === 1 ? '' : 's'}.</p></div></div>`;
+  return `<div class="code-map-before panel"><div class="code-map-empty-icon">⌁</div><div><h2>Listo para generar</h2><p><strong>${codeMap.files.length} fichero${codeMap.files.length === 1 ? '' : 's'} compatible${codeMap.files.length === 1 ? '' : 's'}</strong> detectado${codeMap.files.length === 1 ? '' : 's'}. ${escapeHtml(scopeDescription(codeMap))}</p></div></div>`;
+}
+
+function staleMarkup() {
+  return codeMapState().stale ? '<div class="code-map-stale panel">La selección o los ficheros del proyecto han cambiado. Genera de nuevo el mapa para actualizar el diagrama.</div>' : '';
 }
 
 function folderMarkup() {
@@ -138,8 +199,9 @@ export function renderCodeMap() {
     bindCodeMapEvents($('#view-code-map'));
     return;
   }
-  $('#view-code-map').innerHTML = `<div class="code-map-shell">${toolbarMarkup()}${codeMap.error ? `<div class="code-map-error panel">${escapeHtml(codeMap.error)}</div>` : ''}${codeMap.loading ? '<div class="code-map-progress panel"><span class="spinner"></span><span>Analizando el proyecto sin ejecutar su código…</span></div>' : ''}${codeMap.result ? `<div class="code-map-workspace">${folderMarkup()}<section class="code-map-canvas-wrap panel"><div class="code-map-canvas-toolbar"><div><button type="button" class="btn btn-secondary btn-small" data-code-map-zoom="out" aria-label="Alejar">−</button><span class="code-map-zoom-value">${Math.round(codeMap.zoom * 100)}%</span><button type="button" class="btn btn-secondary btn-small" data-code-map-zoom="in" aria-label="Acercar">＋</button><button type="button" class="btn btn-secondary btn-small" data-code-map-fit>Ajustar</button></div></div><div id="code-map-graph" class="code-map-graph" tabindex="0"></div><div id="code-map-minimap-wrap">${minimapMarkup(codeMap.result, codeMap.filters, codeMap.expanded, codeMap.groupByFolder)}</div></section></div>` : beforeMapMarkup()}</div>`;
+  $('#view-code-map').innerHTML = `<div class="code-map-shell">${toolbarMarkup()}${codeMap.error ? `<div class="code-map-error panel">${escapeHtml(codeMap.error)}</div>` : ''}${staleMarkup()}${codeMap.loading ? '<div class="code-map-progress panel"><span class="spinner"></span><span>Analizando el alcance seleccionado sin ejecutar su código…</span></div>' : ''}${codeMap.result ? `<div class="code-map-workspace">${folderMarkup()}<section class="code-map-canvas-wrap panel"><div class="code-map-canvas-toolbar"><div><button type="button" class="btn btn-secondary btn-small" data-code-map-zoom="out" aria-label="Alejar">−</button><span class="code-map-zoom-value">${Math.round(codeMap.zoom * 100)}%</span><button type="button" class="btn btn-secondary btn-small" data-code-map-zoom="in" aria-label="Acercar">＋</button><button type="button" class="btn btn-secondary btn-small" data-code-map-fit>Ajustar</button></div></div><div id="code-map-graph" class="code-map-graph" tabindex="0"></div><div id="code-map-minimap-wrap">${minimapMarkup(codeMap.result, codeMap.filters, codeMap.expanded, codeMap.groupByFolder)}</div></section></div>` : beforeMapMarkup()}</div>`;
   bindCodeMapEvents($('#view-code-map'));
+  if (codeMap.result) renderGraphAndDetails();
 }
 
 async function loadCodeMapFiles() {
@@ -155,10 +217,12 @@ async function loadCodeMapFiles() {
     if (result.loaded === false) throw new Error('No hay un proyecto global cargado');
     const previousFingerprint = codeMap.filesFingerprint;
     codeMap.files = result.files || [];
+    codeMap.folders = result.folders || deriveFolders(codeMap.files);
     codeMap.filesWarnings = result.warnings || [];
     codeMap.filesFingerprint = result.project?.fingerprint || '';
-    codeMap.stale = Boolean(codeMap.result && previousFingerprint && previousFingerprint !== codeMap.filesFingerprint);
+    codeMap.stale = Boolean(codeMap.result && (codeMap.stale || (previousFingerprint && previousFingerprint !== codeMap.filesFingerprint)));
     if (codeMap.entryFile && !codeMap.files.some((file) => file.path === codeMap.entryFile)) codeMap.entryFile = '';
+    if (codeMap.entryFolder && !codeMap.folders.includes(codeMap.entryFolder)) codeMap.entryFolder = '';
   } catch (error) {
     if (requestId === filesRequestId) codeMap.error = error.message;
   } finally {
@@ -172,8 +236,17 @@ async function loadCodeMapFiles() {
 async function generateCodeMap() {
   const codeMap = codeMapState();
   if (codeMap.loading) return;
-  codeMap.scope = 'project';
-  codeMap.entryFile = '';
+  const scope = ['project', 'entry', 'folder'].includes(codeMap.scope) ? codeMap.scope : 'project';
+  if (scope === 'entry' && !codeMap.entryFile) {
+    codeMap.error = 'Selecciona un fichero de código antes de generar el mapa';
+    renderCodeMap();
+    return;
+  }
+  if (scope === 'folder' && !codeMap.entryFolder) {
+    codeMap.error = 'Selecciona una carpeta antes de generar el mapa';
+    renderCodeMap();
+    return;
+  }
   const requestId = ++analysisRequestId;
   const controller = new AbortController();
   analysisController = controller;
@@ -187,8 +260,9 @@ async function generateCodeMap() {
       method: 'POST',
       signal: controller.signal,
       body: JSON.stringify({
-        scope: 'project',
-        entryFile: '',
+        scope,
+        entryFile: scope === 'entry' ? codeMap.entryFile : '',
+        entryFolder: scope === 'folder' ? codeMap.entryFolder : '',
         includeExternalPackages: codeMap.includeExternalPackages,
         excludes: codeMap.excludes,
         maxFiles: codeMap.maxFiles,
@@ -199,7 +273,7 @@ async function generateCodeMap() {
     codeMap.result = result;
     codeMap.stale = false;
     codeMap.error = '';
-    showToast(`Mapa generado: ${result.summary.files} fichero${result.summary.files === 1 ? '' : 's'}`);
+    showToast(`Mapa generado desde ${scopeLabel(codeMap)}: ${result.summary.files} fichero${result.summary.files === 1 ? '' : 's'}`);
   } catch (error) {
     if (requestId === analysisRequestId && error.name !== 'AbortError') codeMap.error = error.message;
   } finally {
@@ -233,6 +307,34 @@ function selectFile(id) {
   renderGraphAndDetails();
 }
 
+function updateAnalysisScope(value) {
+  const codeMap = codeMapState();
+  if (codeMap.loading) return;
+  const scope = ['project', 'entry', 'folder'].includes(value) ? value : 'project';
+  codeMap.scope = scope;
+  if (scope === 'project') {
+    codeMap.entryFile = '';
+    codeMap.entryFolder = '';
+  } else if (scope === 'entry') {
+    codeMap.entryFolder = '';
+  } else {
+    codeMap.entryFile = '';
+  }
+  codeMap.error = '';
+  codeMap.stale = Boolean(codeMap.result);
+  renderCodeMap();
+}
+
+function updateAnalysisTarget(value) {
+  const codeMap = codeMapState();
+  if (codeMap.loading) return;
+  if (codeMap.scope === 'entry') codeMap.entryFile = value;
+  if (codeMap.scope === 'folder') codeMap.entryFolder = value;
+  codeMap.error = '';
+  codeMap.stale = Boolean(codeMap.result);
+  renderCodeMap();
+}
+
 function bindCodeMapEvents(container) {
   if (!container) return;
   if (container.dataset.codeMapBound !== 'true') {
@@ -241,7 +343,7 @@ function bindCodeMapEvents(container) {
     const target = event.target.closest('[data-code-map-go-global], [data-code-map-refresh-files], [data-code-map-generate], [data-code-map-cancel], [data-code-map-file], [data-code-map-file-select], [data-code-map-tree-file], [data-code-map-toggle], [data-code-map-symbol], [data-code-map-relation], [data-code-map-open], [data-code-map-zoom], [data-code-map-fit], [data-code-map-close-modal]');
     if (!target) return;
     if (target.matches('[data-code-map-go-global]')) { navigateToView('global-search'); return; }
-    if (target.matches('[data-code-map-refresh-files]')) { codeMapState().files = []; await loadCodeMapFiles(); return; }
+    if (target.matches('[data-code-map-refresh-files]')) { codeMapState().files = []; codeMapState().folders = []; await loadCodeMapFiles(); return; }
     if (target.matches('[data-code-map-generate]')) { await generateCodeMap(); return; }
     if (target.matches('[data-code-map-cancel]')) { analysisController?.abort(); return; }
     if (target.matches('[data-code-map-toggle]')) { const id = target.dataset.codeMapToggle; codeMapState().expanded[id] = !codeMapState().expanded[id]; renderGraphAndDetails(); return; }
@@ -253,6 +355,12 @@ function bindCodeMapEvents(container) {
     if (target.matches('[data-code-map-close-modal]')) { closeModal(); return; }
     if (target.matches('[data-code-map-zoom]')) { codeMapState().zoom = Math.max(.35, Math.min(2, codeMapState().zoom + (target.dataset.codeMapZoom === 'in' ? .1 : -.1))); renderGraphAndDetails(); return; }
     if (target.matches('[data-code-map-fit]')) { codeMapState().zoom = 1; renderGraphAndDetails(); $('#code-map-graph')?.scrollTo({ left: 0, top: 0, behavior: 'smooth' }); }
+    });
+    container.addEventListener('change', (event) => {
+      const target = event.target.closest('[data-code-map-scope], [data-code-map-target]');
+      if (!target) return;
+      if (target.matches('[data-code-map-scope]')) updateAnalysisScope(target.value);
+      if (target.matches('[data-code-map-target]')) updateAnalysisTarget(target.value);
     });
     container.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && $('#code-map-code-modal')) { closeModal(); return; }

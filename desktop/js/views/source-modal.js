@@ -1,6 +1,6 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
-import { state } from '../core/state.js';
+import { OFFLINE_ONLY, state } from '../core/state.js';
 import { showToast } from '../ui/notifications.js';
 import { closeModal, bindModalClose } from '../ui/modals.js';
 
@@ -13,7 +13,7 @@ export function configureSourceModal({ onRefresh, onSync } = {}) {
 }
 
 export function openSourceModal(existing = null, forcedType = null, initialPaths = [], initialName = '', returnView = 'sources') {
-  const offline = state.user?.offline === true;
+  const offline = OFFLINE_ONLY || state.user?.offline === true;
   const type = offline ? 'local' : (forcedType || existing?.type || 'local');
   const config = existing?.config || {};
   const paths = [...(initialPaths.length ? initialPaths : (config.paths || []))];

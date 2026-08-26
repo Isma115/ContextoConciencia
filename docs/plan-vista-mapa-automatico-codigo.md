@@ -4,10 +4,11 @@
 
 Crear una nueva vista de NexusData, independiente del editor de diagramas de flujo existente, capaz de analizar automáticamente el código del proyecto global y representarlo como un grafo navegable.
 
-La vista deberá admitir dos alcances:
+La vista deberá admitir tres alcances:
 
 1. **Proyecto completo**: analiza todos los ficheros de código compatibles situados dentro de la carpeta del proyecto global.
 2. **Desde un fichero**: toma un fichero como raíz y sigue de forma transitiva sus dependencias locales hasta alcanzar todos los ficheros conectados desde él.
+3. **Desde una carpeta**: analiza recursivamente todos los ficheros de código compatibles de la carpeta seleccionada y sus subdirectorios.
 
 Cada fichero se mostrará como un nodo que pueda desplegar sus símbolos: variables, constantes, funciones, clases, métodos, propiedades, importaciones y exportaciones. Las conexiones indicarán relaciones como importación, llamada, herencia o uso.
 
@@ -20,7 +21,7 @@ Cada fichero se mostrará como un nodo que pueda desplegar sus símbolos: variab
 - Trabajar únicamente con rutas contenidas en el proyecto global cargado en NexusData.
 - Excluir automáticamente dependencias, artefactos generados y carpetas técnicas: `node_modules`, `.git`, `dist`, `build`, `coverage`, cachés y binarios.
 - Permitir reglas adicionales de exclusión mediante patrones configurables.
-- Generar el mapa completo o el subgrafo alcanzable desde un fichero.
+- Generar el mapa completo, el subgrafo alcanzable desde un fichero o el mapa de una carpeta seleccionada.
 - Detectar y representar ciclos sin entrar en recursión infinita.
 - Mostrar referencias no resueltas como advertencias, sin cancelar todo el análisis.
 - Navegar desde un nodo hasta el fichero y la línea del símbolo en un panel de detalle o en el visor de código existente.
@@ -54,13 +55,13 @@ El recorrido solo incluirá destinos dentro de la raíz del proyecto, mantendrá
 ### Acceso y estado vacío
 
 - Añadir una opción **Mapa de código** en la navegación principal y una sección `#view-code-map` en `desktop/index.html`.
-- Si no hay proyecto global cargado, mostrar una explicación y un acceso para ir a **Buscador Global** y cargarlo.
+- Si no hay proyecto global cargado, mostrar una explicación y un acceso para ir a **Buscar** y cargarlo.
 - Si el proyecto existe pero no contiene ficheros compatibles, mostrar las extensiones admitidas y los patrones excluidos.
 
 ### Barra de herramientas
 
-- Selector de alcance: **Proyecto completo** / **Desde un fichero**.
-- Selector de fichero raíz con búsqueda por ruta.
+- Selector de alcance: **Proyecto completo** / **Desde un fichero** / **Desde una carpeta**.
+- Selector del fichero o carpeta de entrada con la ruta relativa al proyecto.
 - Acción **Generar mapa** o **Actualizar mapa**.
 - Controles de profundidad visual, agrupación por carpeta, ajuste automático, zoom y centrado.
 - Filtros de ficheros, símbolos y relaciones.
@@ -135,8 +136,8 @@ Integrar la vista en `desktop/js/app.js` y `desktop/index.html`. El editor actua
 
 Añadir rutas autenticadas:
 
-- `GET /api/code-map/files`: devuelve los ficheros analizables del proyecto global para el selector de raíz.
-- `POST /api/code-map/analyze`: genera un mapa completo o desde un fichero.
+- `GET /api/code-map/files`: devuelve los ficheros y carpetas analizables del proyecto global para el selector de alcance.
+- `POST /api/code-map/analyze`: genera un mapa completo, desde un fichero o desde una carpeta.
 - `GET /api/code-map/status/:jobId`: informa del progreso si el análisis se implementa como trabajo asíncrono.
 - `DELETE /api/code-map/jobs/:jobId`: cancela un análisis en curso.
 - `GET /api/code-map/file?path=...&line=...`: opcional, reutilizando preferentemente el servicio de visor existente para abrir el código.
@@ -147,6 +148,7 @@ Ejemplo de solicitud:
 {
   "scope": "entry",
   "entryFile": "desktop/js/app.js",
+  "entryFolder": "",
   "includeExternalPackages": true,
   "excludes": ["catalogo-frontends-experimentales/**"],
   "maxFiles": 2000
@@ -165,7 +167,8 @@ El contrato no debe contener objetos AST completos. Solo transportará informaci
   "project": {
     "root": "/ruta/proyecto",
     "scope": "entry",
-    "entryFile": "desktop/js/app.js"
+    "entryFile": "desktop/js/app.js",
+    "entryFolder": null
   },
   "files": [
     {
@@ -367,4 +370,3 @@ Usar rutas relativas en identificadores y respuestas normales. La ruta absoluta 
 - Estrategia de caché: memoria durante la sesión o persistencia local versionada.
 - Si **Abrir código** amplía el visor HTML actual o se crea un visor de código compartido.
 - Patrones de exclusión configurables por proyecto y ubicación de esa preferencia.
-

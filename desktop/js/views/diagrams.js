@@ -9,6 +9,9 @@ const BOARD_HEIGHT = 900;
 const NODE_WIDTH = 190;
 const NODE_HEIGHT = 88;
 const NODE_MARGIN = 20;
+const AUTO_LAYOUT_COLUMNS = 4;
+const AUTO_LAYOUT_COLUMN_GAP = 140;
+const AUTO_LAYOUT_ROW_GAP = 120;
 const ARROW_INSET = 0;
 const DIAGRAM_ZOOM_MIN = 0.2;
 const DIAGRAM_ZOOM_MAX = 3;
@@ -76,16 +79,24 @@ function createDiagram(title = 'Nuevo diagrama') {
   return { id: makeId('diagram'), title, nodes: [], edges: [] };
 }
 
+function defaultNodePosition(index) {
+  return {
+    x: 100 + (index % AUTO_LAYOUT_COLUMNS) * (NODE_WIDTH + AUTO_LAYOUT_COLUMN_GAP),
+    y: 100 + Math.floor(index / AUTO_LAYOUT_COLUMNS) * (NODE_HEIGHT + AUTO_LAYOUT_ROW_GAP)
+  };
+}
+
 function normaliseNode(raw, index, usedIds) {
   const requestedId = typeof raw?.id === 'string' && raw.id ? raw.id : makeId('node');
   const id = usedIds.has(requestedId) ? makeId('node') : requestedId;
+  const fallbackPosition = defaultNodePosition(index);
   usedIds.add(id);
   return {
     id,
     label: typeof raw?.label === 'string' && raw.label.trim() ? raw.label.slice(0, 160) : `Paso ${index + 1}`,
     type: validNodeType(raw?.type),
-    x: clamp(Number.isFinite(Number(raw?.x)) ? Number(raw.x) : 100 + (index % 4) * 250, NODE_MARGIN, BOARD_WIDTH - NODE_WIDTH - NODE_MARGIN),
-    y: clamp(Number.isFinite(Number(raw?.y)) ? Number(raw.y) : 100 + Math.floor(index / 4) * 150, NODE_MARGIN, BOARD_HEIGHT - NODE_HEIGHT - NODE_MARGIN)
+    x: clamp(Number.isFinite(Number(raw?.x)) ? Number(raw.x) : fallbackPosition.x, NODE_MARGIN, BOARD_WIDTH - NODE_WIDTH - NODE_MARGIN),
+    y: clamp(Number.isFinite(Number(raw?.y)) ? Number(raw.y) : fallbackPosition.y, NODE_MARGIN, BOARD_HEIGHT - NODE_HEIGHT - NODE_MARGIN)
   };
 }
 

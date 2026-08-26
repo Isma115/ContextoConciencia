@@ -28,7 +28,7 @@
 .pill.syncing { border-color: rgba(220,220,170,.35); color: var(--amber); background: rgba(220,220,170,.08); }
 .result-list { display: grid; gap: 6px; }
 .result-card { padding: 12px 13px; border: 1px solid #373737; border-left: 2px solid #3d3d3d; border-radius: 3px; background: #252526; }
-.result-card:hover { border-left-color: var(--blue); background: #29292a; }
+.result-card:hover { background: #29292a; }
 .result-head { display: flex; align-items: start; gap: 10px; }
 .result-head .doc-icon { flex: 0 0 29px; }
 .result-title-wrap { min-width: 0; flex: 1; }

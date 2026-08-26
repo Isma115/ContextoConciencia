@@ -1,6 +1,8 @@
 export const DEFAULT_FILTERS = Object.freeze({ source: '', type: '', tag: '', collection: '', date: '' });
+export const OFFLINE_ONLY = true;
 
 const SEARCH_PREFERENCES_VERSION = 1;
+const SIDEBAR_SEARCH_PREFERENCE_KEY = 'nexusdata.sidebar-search-expanded';
 const SEARCH_QUERY_MAX_LENGTH = 500;
 const FILTER_VALUE_MAX_LENGTH = 200;
 const FILTER_KEYS = Object.keys(DEFAULT_FILTERS);
@@ -14,8 +16,8 @@ export const state = {
   stats: { documents: 0, sources: 0, collections: 0, lastSyncAt: null },
   searchQuery: '',
   filters: { ...DEFAULT_FILTERS },
-  globalSearchQuery: '',
-  globalFilters: { ...DEFAULT_FILTERS },
+  includeCommonPaths: false,
+  sidebarSearchExpanded: false,
   globalProject: null,
   htmlViewer: {
     paths: [],
@@ -28,11 +30,13 @@ export const state = {
   },
   codeMap: {
     files: [],
+    folders: [],
     filesLoading: false,
     filesWarnings: [],
     filesFingerprint: '',
     scope: 'project',
     entryFile: '',
+    entryFolder: '',
     includeExternalPackages: false,
     excludes: [],
     maxFiles: 2000,
@@ -56,6 +60,28 @@ export function resetFilters() {
   return { ...DEFAULT_FILTERS };
 }
 
+export function loadSidebarSearchPreference() {
+  try {
+    return typeof window !== 'undefined' && window.localStorage
+      ? window.localStorage.getItem(SIDEBAR_SEARCH_PREFERENCE_KEY) === 'true'
+      : false;
+  } catch {
+    return false;
+  }
+}
+
+export function persistSidebarSearchPreference(expanded) {
+  state.sidebarSearchExpanded = Boolean(expanded);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(SIDEBAR_SEARCH_PREFERENCE_KEY, String(state.sidebarSearchExpanded));
+    }
+  } catch {
+    // La búsqueda rápida sigue funcionando aunque no esté disponible el almacenamiento local.
+  }
+  return state.sidebarSearchExpanded;
+}
+
 function normaliseString(value, maxLength, trim = false) {
   if (typeof value !== 'string') return '';
   const normalised = value.slice(0, maxLength);
@@ -67,6 +93,10 @@ function normaliseFilters(filters) {
     result[key] = normaliseString(filters?.[key], FILTER_VALUE_MAX_LENGTH);
     return result;
   }, resetFilters());
+}
+
+function hasActiveFilters(filters) {
+  return FILTER_KEYS.some((key) => Boolean(filters?.[key]));
 }
 
 function normaliseSearchPreferences(preferences) {
@@ -89,11 +119,13 @@ function browserSearchPreferences() {
 }
 
 export function getSearchPreferences() {
+  const query = state.searchQuery;
+  const filters = state.filters;
   return normaliseSearchPreferences({
-    searchQuery: state.searchQuery,
-    filters: state.filters,
-    globalSearchQuery: state.globalSearchQuery,
-    globalFilters: state.globalFilters
+    searchQuery: query,
+    filters,
+    globalSearchQuery: query,
+    globalFilters: filters
   });
 }
 
@@ -112,10 +144,10 @@ export async function loadSearchPreferences() {
   if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) return false;
 
   const restored = normaliseSearchPreferences(preferences);
-  state.searchQuery = restored.searchQuery;
-  state.filters = restored.filters;
-  state.globalSearchQuery = restored.globalSearchQuery;
-  state.globalFilters = restored.globalFilters;
+  const unifiedQuery = restored.globalSearchQuery || restored.searchQuery;
+  const unifiedFilters = hasActiveFilters(restored.globalFilters) ? restored.globalFilters : restored.filters;
+  state.searchQuery = unifiedQuery;
+  state.filters = { ...unifiedFilters };
   return true;
 }
 

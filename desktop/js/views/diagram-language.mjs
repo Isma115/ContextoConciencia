@@ -3,6 +3,9 @@ const BOARD_HEIGHT = 900;
 const NODE_WIDTH = 190;
 const NODE_HEIGHT = 88;
 const NODE_MARGIN = 20;
+const AUTO_LAYOUT_COLUMNS = 4;
+const AUTO_LAYOUT_COLUMN_GAP = 140;
+const AUTO_LAYOUT_ROW_GAP = 120;
 const NODE_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
 const TYPE_ALIASES = Object.freeze({
@@ -48,8 +51,8 @@ function clamp(value, minimum, maximum) {
 
 function defaultPosition(index) {
   return {
-    x: 100 + (index % 4) * 250,
-    y: 100 + Math.floor(index / 4) * 150
+    x: 100 + (index % AUTO_LAYOUT_COLUMNS) * (NODE_WIDTH + AUTO_LAYOUT_COLUMN_GAP),
+    y: 100 + Math.floor(index / AUTO_LAYOUT_COLUMNS) * (NODE_HEIGHT + AUTO_LAYOUT_ROW_GAP)
   };
 }
 

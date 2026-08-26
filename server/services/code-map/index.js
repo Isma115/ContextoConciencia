@@ -30,8 +30,8 @@ function safeRoot(projectRoot) {
 }
 
 function optionsFrom(input = {}) {
-  if (input.scope != null && !['project', 'entry'].includes(input.scope)) throw new Error('El alcance del mapa no es válido');
-  const scope = input.scope === 'entry' ? 'entry' : 'project';
+  if (input.scope != null && !['project', 'entry', 'folder'].includes(input.scope)) throw new Error('El alcance del mapa no es válido');
+  const scope = ['entry', 'folder'].includes(input.scope) ? input.scope : 'project';
   const excludes = Array.isArray(input.excludes)
     ? input.excludes.filter((value) => typeof value === 'string' && value.trim()).slice(0, MAX_EXCLUDES).map((value) => value.trim())
     : [];
@@ -41,6 +41,7 @@ function optionsFrom(input = {}) {
   return {
     scope,
     entryFile: normaliseRelative(input.entryFile),
+    entryFolder: normaliseRelative(input.entryFolder),
     includeExternalPackages: input.includeExternalPackages === true,
     excludes,
     maxFiles,
@@ -48,6 +49,43 @@ function optionsFrom(input = {}) {
     maxRelations,
     maxDepth: Math.min(Math.max(Number(input.maxDepth) || 80, 1), 200)
   };
+}
+
+function resolveScopePath(root, requestedPath, expectedType) {
+  const raw = String(requestedPath || '').trim();
+  const relative = normaliseRelative(raw);
+  if (!relative || path.isAbsolute(raw) || path.win32.isAbsolute(raw) || relative.split('/').includes('..')) {
+    throw new Error(`La ruta de ${expectedType === 'file' ? 'fichero' : 'carpeta'} no es válida`);
+  }
+  const candidate = path.resolve(root, relative);
+  if (!insideRoot(root, candidate)) throw new Error('La ruta queda fuera del proyecto global');
+  let realPath;
+  try { realPath = fs.realpathSync(candidate); } catch { throw new Error(`La ${expectedType === 'file' ? 'ruta del fichero' : 'carpeta'} indicada no existe`); }
+  if (!insideRoot(root, realPath)) throw new Error('La ruta queda fuera del proyecto global');
+  let stats;
+  try { stats = fs.statSync(realPath); } catch { throw new Error('La ruta seleccionada no se puede leer'); }
+  if (expectedType === 'file' && !stats.isFile()) throw new Error('La ruta seleccionada no es un fichero');
+  if (expectedType === 'directory' && !stats.isDirectory()) throw new Error('La ruta seleccionada no es una carpeta');
+  return normaliseRelative(path.relative(root, realPath));
+}
+
+function isPathInFolder(filePath, folderPath) {
+  const folder = normaliseRelative(folderPath).replace(/\/$/, '');
+  return !folder || filePath === folder || filePath.startsWith(`${folder}/`);
+}
+
+function folderPaths(files) {
+  const folders = new Set();
+  for (const file of files) {
+    const parts = file.path.split('/');
+    parts.pop();
+    let current = '';
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part;
+      folders.add(current);
+    }
+  }
+  return [...folders].sort((first, second) => first.localeCompare(second));
 }
 
 function listCodeMapFiles(projectRoot, input = {}) {
@@ -58,6 +96,7 @@ function listCodeMapFiles(projectRoot, input = {}) {
     schemaVersion: CODE_MAP_SCHEMA_VERSION,
     project: { root, fingerprint: createFingerprint(discovery.files) },
     files: discovery.files.map((file) => ({ path: file.path, language: file.language, extension: file.extension, size: file.size, modifiedAt: file.modifiedAt })),
+    folders: folderPaths(discovery.files),
     warnings: discovery.warnings,
     excludedDirectories: discovery.excludedDirectories,
     limits: discovery.limits,
@@ -69,7 +108,16 @@ function analyzeCodeMap(projectRoot, input = {}) {
   const root = safeRoot(projectRoot);
   const options = optionsFrom(input);
   if (options.scope === 'entry' && !options.entryFile) throw new Error('Selecciona un fichero raíz para el análisis parcial');
+  if (options.scope === 'folder' && !options.entryFolder) throw new Error('Selecciona una carpeta raíz para el análisis');
   const discovery = discoverFiles(root, options);
+  if (options.scope === 'entry') {
+    options.entryFile = resolveScopePath(root, options.entryFile, 'file');
+    if (!discovery.files.some((file) => file.path === options.entryFile)) throw new Error('El fichero seleccionado no es compatible o supera los límites del análisis');
+  }
+  if (options.scope === 'folder') {
+    options.entryFolder = resolveScopePath(root, options.entryFolder, 'directory');
+    if (!discovery.files.some((file) => isPathInFolder(file.path, options.entryFolder))) throw new Error('La carpeta seleccionada no contiene ficheros compatibles');
+  }
   const result = buildCodeMap({ root, discovery, ...options });
   result.schemaVersion = CODE_MAP_SCHEMA_VERSION;
   return result;

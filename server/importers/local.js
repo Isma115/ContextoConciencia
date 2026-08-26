@@ -22,18 +22,40 @@ const DOCUMENT_SUPPORTED = new Map([...SUPPORTED].filter(([, type]) => !['css', 
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 2000;
 
-function collectFiles(inputPath, files = []) {
+function collectFiles(inputPath, files = [], options = {}) {
+  const scanOptions = options.skipDirectories instanceof Set
+    ? options
+    : { ...options, skipDirectories: new Set((options.skipDirectories || []).map((value) => String(value).toLowerCase())) };
   if (files.length >= MAX_FILES) return files;
   const absolute = path.resolve(inputPath);
-  const stats = fs.statSync(absolute);
+  let stats;
+  try {
+    stats = fs.statSync(absolute);
+  } catch (error) {
+    if (scanOptions.ignoreErrors) return files;
+    throw error;
+  }
   if (stats.isFile()) {
     if (DOCUMENT_SUPPORTED.has(path.extname(absolute).toLowerCase())) files.push(absolute);
     return files;
   }
   if (!stats.isDirectory()) return files;
-  for (const entry of fs.readdirSync(absolute, { withFileTypes: true })) {
+  let entries;
+  try {
+    entries = fs.readdirSync(absolute, { withFileTypes: true });
+  } catch (error) {
+    if (scanOptions.ignoreErrors) return files;
+    throw error;
+  }
+  for (const entry of entries) {
     if (entry.name.startsWith('.')) continue;
-    collectFiles(path.join(absolute, entry.name), files);
+    if (entry.isDirectory() && scanOptions.skipDirectories.has(entry.name.toLowerCase())) continue;
+    if (entry.isSymbolicLink() && scanOptions.followSymlinks === false) continue;
+    try {
+      collectFiles(path.join(absolute, entry.name), files, scanOptions);
+    } catch (error) {
+      if (!scanOptions.ignoreErrors) throw error;
+    }
     if (files.length >= MAX_FILES) break;
   }
   return files;
@@ -84,9 +106,14 @@ function importLocalSource(db, source, { prune = false } = {}) {
   const inputs = Array.isArray(config.paths) ? config.paths : [];
   const files = [];
   const errors = [];
+  const scanOptions = {
+    skipDirectories: config.excludeDirectories,
+    ignoreErrors: config.ignoreErrors === true,
+    followSymlinks: config.followSymlinks
+  };
   for (const input of inputs) {
     try {
-      collectFiles(input, files);
+      collectFiles(input, files, scanOptions);
     } catch (error) {
       errors.push({ path: input, message: error.message });
     }

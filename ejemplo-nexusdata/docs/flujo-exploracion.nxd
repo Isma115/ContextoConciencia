@@ -1,0 +1,15 @@
+diagram "Flujo de exploración local"
+
+node abrir "Abrir NexusData" start at 100, 300
+node cargar "Cargar carpeta local" step at 400, 300
+node indexar "Indexar documentos" step at 700, 300
+node buscar "Buscar contexto" decision at 1000, 180
+node consultar "Consultar documento" step at 1000, 500
+node terminar "Contexto encontrado" end at 1000, 760
+
+edge abrir -> cargar "Seleccionar carpeta" forward
+edge cargar -> indexar "Leer archivos" forward
+edge indexar -> buscar "Preparar índice" forward
+edge buscar -> consultar "Sí" forward
+edge buscar -> indexar "Refinar búsqueda" backward
+edge consultar -> terminar "Abrir resultado" forward

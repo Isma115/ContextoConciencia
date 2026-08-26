@@ -9,6 +9,7 @@ const PROMPTS_MENU_NAME = 'Prompts';
 const SEARCH_PREFERENCES_FILENAME = 'search-preferences.json';
 const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DESKTOP_PORT = Number(process.env.PORT) || 3000;
+const OFFLINE_ONLY = true;
 const closeConfirmationStates = new WeakMap();
 
 function searchPreferencesPath() {
@@ -223,7 +224,8 @@ app.whenReady().then(async () => {
   try {
     apiServer = await startServer({
       port: DESKTOP_PORT,
-      dbPath: path.join(app.getPath('userData'), 'nexusdata.db')
+      dbPath: path.join(app.getPath('userData'), 'nexusdata.db'),
+      offlineOnly: OFFLINE_ONLY
     });
     createWindow(`http://${apiServer.host}:${apiServer.port}`);
   } catch (error) {

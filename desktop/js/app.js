@@ -1,10 +1,10 @@
 import { $ } from './core/dom.js';
 import { configureApi, api } from './core/api.js';
-import { loadSearchPreferences, state } from './core/state.js';
+import { loadSearchPreferences, loadSidebarSearchPreference, persistSidebarSearchPreference, state } from './core/state.js';
 import { setConnection, showToast } from './ui/notifications.js';
-import { showApplication, showAuthentication } from './views/auth.js';
+import { showApplication } from './views/auth.js';
 import { configureDocuments, openDocument } from './views/documents.js';
-import { configureSearch, performGlobalSearch, performSearch, renderGlobalSearch, renderSearch } from './views/search.js';
+import { bindSidebarSearch, configureSearch, performGlobalSearch, performSearch, renderGlobalSearch, renderSearch } from './views/search.js';
 import { configureSources, renderSources, syncSource } from './views/sources.js';
 import { configureSourceModal } from './views/source-modal.js';
 import { bindHtmlViewerMenu, configureHtmlViewer, openPersistedHtmlSource, renderHtmlViewer } from './views/html-viewer.js';
@@ -14,8 +14,9 @@ import { configureSettings, renderSettings } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 
 let nativeMenuView = null;
+let offlineSessionRecovery = null;
 
-configureApi({ onUnauthorized: () => showAuthentication('', { onAuthenticated }) });
+configureApi({ onUnauthorized: () => { void recoverOfflineSession(); } });
 
 async function refreshData() {
   try {
@@ -32,19 +33,23 @@ async function refreshData() {
     state.globalProject = globalProject.project || null;
     if (previousProjectPath !== (state.globalProject?.path || '')) {
       state.codeMap.files = [];
+      state.codeMap.folders = [];
       state.codeMap.filesWarnings = [];
       state.codeMap.filesFingerprint = '';
+      state.codeMap.scope = 'project';
+      state.codeMap.entryFile = '';
+      state.codeMap.entryFolder = '';
       state.codeMap.result = null;
       state.codeMap.selectedId = null;
       state.codeMap.selectedRelationId = null;
       state.codeMap.stale = false;
     }
-    setConnection('online', 'API local conectada');
+    setConnection('offline', 'Modo offline · Solo archivos locales');
     renderView();
     if (state.view === 'search') await performSearch();
-    if (state.view === 'global-search' && state.globalProject) await performGlobalSearch();
+    if (state.view === 'global-search') await performGlobalSearch();
   } catch (error) {
-    setConnection('error', 'API no disponible');
+    setConnection('error', 'Aplicación local no disponible');
     showToast(error.message, true);
   }
 }
@@ -65,19 +70,24 @@ function renderView() {
   if (state.view === 'settings') renderSettings();
 }
 
-async function onAuthenticated() {
+async function initialiseSession() {
+  state.user = { id: 'offline', username: 'Modo offline', offline: true };
   showApplication();
-  await refreshData();
+  try {
+    const result = await api('/auth/offline', { method: 'POST' });
+    state.user = result.user;
+    await refreshData();
+  } catch (error) {
+    setConnection('error', 'Aplicación local no disponible');
+    showToast(error.message, true);
+  }
 }
 
-async function initialiseSession() {
-  try {
-    const result = await api('/auth/me');
-    state.user = result.user;
-    await onAuthenticated();
-  } catch (error) {
-    showAuthentication(error.status === 503 ? error.message : '', { onAuthenticated });
+function recoverOfflineSession() {
+  if (!offlineSessionRecovery) {
+    offlineSessionRecovery = initialiseSession().finally(() => { offlineSessionRecovery = null; });
   }
+  return offlineSessionRecovery;
 }
 
 function bindNavigation() {
@@ -87,15 +97,35 @@ function bindNavigation() {
     if (state.view === 'search') performSearch();
     if (state.view === 'global-search') performGlobalSearch();
   }));
-  $('#logout-button').addEventListener('click', async () => {
-    try { await api('/auth/logout', { method: 'POST' }); } catch { /* La vista se cierra aunque el servidor ya no esté disponible. */ }
-    showAuthentication('', { onAuthenticated });
+}
+
+function renderSidebarSearch() {
+  const toggle = $('#sidebar-search-toggle');
+  const field = $('#sidebar-search-field');
+  const input = $('#sidebar-search-input');
+  if (!toggle || !field || !input) return;
+  const expanded = state.sidebarSearchExpanded;
+  field.hidden = !expanded;
+  input.value = state.searchQuery;
+  toggle.setAttribute('aria-expanded', String(expanded));
+  toggle.setAttribute('aria-label', expanded ? 'Ocultar búsqueda rápida' : 'Mostrar búsqueda rápida');
+  toggle.title = expanded ? 'Ocultar búsqueda rápida' : 'Mostrar búsqueda rápida';
+  toggle.textContent = expanded ? '‹' : '›';
+}
+
+function bindSidebarSearchToggle() {
+  state.sidebarSearchExpanded = loadSidebarSearchPreference();
+  renderSidebarSearch();
+  $('#sidebar-search-toggle')?.addEventListener('click', () => {
+    persistSidebarSearchPreference(!state.sidebarSearchExpanded);
+    renderSidebarSearch();
+    if (state.sidebarSearchExpanded) $('#sidebar-search-input')?.focus();
   });
 }
 
 function showCloseConfirmation() {
   if ($('#close-confirmation')) return;
-  document.body.insertAdjacentHTML('beforeend', `<div id="close-confirmation" class="modal-backdrop close-confirmation-backdrop"><div class="modal close-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="close-confirmation-title" aria-describedby="close-confirmation-description"><div class="modal-head"><div><h2 id="close-confirmation-title">Cerrar NexusData</h2><p>Se cerrará la ventana y el servidor local.</p></div></div><div class="modal-body"><p id="close-confirmation-description">¿Quieres cerrar la aplicación?</p></div><div class="modal-actions"><button id="close-confirmation-cancel" class="btn btn-primary close-confirmation-cancel" type="button">Cancelar</button><button id="close-confirmation-submit" class="btn btn-secondary" type="button">Cerrar</button></div></div></div>`);
+  document.body.insertAdjacentHTML('beforeend', `<div id="close-confirmation" class="modal-backdrop close-confirmation-backdrop"><div class="modal close-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="close-confirmation-title" aria-describedby="close-confirmation-description"><div class="modal-head"><div><h2 id="close-confirmation-title">Cerrar aplicación</h2></div></div><div class="modal-body"><p id="close-confirmation-description">¿Quieres salir?</p></div><div class="modal-actions"><button id="close-confirmation-cancel" class="btn btn-primary close-confirmation-cancel" type="button">Cancelar</button><button id="close-confirmation-submit" class="btn btn-secondary" type="button">Cerrar</button></div></div></div>`);
   const modal = $('#close-confirmation');
   const resolve = (confirmed) => {
     modal.remove();
@@ -123,19 +153,22 @@ configureDocuments({
     openDiagramDocument(diagramDocument);
   }
 });
-configureSearch({ onRefresh: refreshData });
+configureSearch({ onRefresh: refreshData, onNavigate: (view) => { state.view = view; renderView(); } });
 configureSources({ onRefresh: refreshData });
 configureSourceModal({ onRefresh: refreshData, onSync: syncSource });
 configureSettings();
 configureCodeMap({ onNavigate: (view) => { state.view = view; renderView(); } });
 bindHtmlViewerMenu();
 bindNavigation();
+bindSidebarSearchToggle();
+bindSidebarSearch();
 bindCloseConfirmation();
 loadPalettePreference();
 
 async function startApplication() {
   await loadSearchPreferences();
-  await initialiseSession();
+  renderSidebarSearch();
+  await recoverOfflineSession();
 }
 
 startApplication();
