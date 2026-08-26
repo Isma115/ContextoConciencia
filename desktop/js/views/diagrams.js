@@ -10,6 +10,9 @@ const NODE_WIDTH = 190;
 const NODE_HEIGHT = 88;
 const NODE_MARGIN = 20;
 const ARROW_INSET = 0;
+const DIAGRAM_ZOOM_MIN = 0.2;
+const DIAGRAM_ZOOM_MAX = 3;
+const DIAGRAM_ZOOM_SENSITIVITY = 0.0015;
 const HISTORY_LIMIT = 100;
 const NODE_TYPES = Object.freeze({
   start: 'Inicio',
@@ -40,8 +43,17 @@ let dragState = null;
 let lastDraggedNode = { id: '', timestamp: 0 };
 let focusNodeId = null;
 let contextMenuEdgeId = '';
+let contextMenuNodeId = '';
 let undoStack = [];
 let redoStack = [];
+let diagramResizeObserver = null;
+let diagramViewport = {
+  zoom: 1,
+  offsetX: 0,
+  offsetY: 0,
+  initialized: false,
+  userZoomed: false
+};
 const pendingTextHistory = new WeakMap();
 
 function makeId(prefix) {
@@ -169,7 +181,7 @@ async function exportDiagramText(text, button = null) {
   }
 }
 
-function applyDiagramText(text) {
+function applyDiagramText(text, { successMessage = 'Diagrama generado desde texto' } = {}) {
   const parsed = parseDiagramText(text);
   const current = activeDiagram();
   const before = historySnapshot();
@@ -181,7 +193,15 @@ function applyDiagramText(text) {
   recordHistory(before);
   persistDiagrams();
   renderDiagrams();
-  showToast('Diagrama generado desde texto');
+  if (successMessage) showToast(successMessage);
+}
+
+export function openDiagramDocument(diagramDocument) {
+  if (!diagramDocument || typeof diagramDocument.content !== 'string') {
+    throw new Error('El contenido del diagrama no es válido');
+  }
+  applyDiagramText(diagramDocument.content, { successMessage: 'Diagrama abierto visualmente' });
+  closeModal();
 }
 
 function setDiagramCodeError(node, message = '') {
@@ -287,6 +307,7 @@ function resetDiagramInteraction() {
   connectionDrag = null;
   dragState = null;
   contextMenuEdgeId = '';
+  contextMenuNodeId = '';
   suppressedPortKeys.clear();
 }
 
@@ -348,6 +369,15 @@ function edgeById(diagram, id) {
   return diagram.edges.find((edge) => edge.id === id) || null;
 }
 
+function hideNodeContextMenu() {
+  const menu = $('#diagram-node-context-menu');
+  if (menu) {
+    menu.hidden = true;
+    menu.setAttribute('aria-hidden', 'true');
+  }
+  contextMenuNodeId = '';
+}
+
 function hideEdgeContextMenu() {
   const menu = $('#diagram-context-menu');
   if (menu) {
@@ -355,6 +385,7 @@ function hideEdgeContextMenu() {
     menu.setAttribute('aria-hidden', 'true');
   }
   contextMenuEdgeId = '';
+  hideNodeContextMenu();
 }
 
 function syncEdgeContextMenu() {
@@ -378,6 +409,7 @@ function showEdgeContextMenu(event, edgeId) {
   const menu = $('#diagram-context-menu');
   if (!edge || !menu) return;
 
+  hideNodeContextMenu();
   setSelection('edge', edge.id);
   contextMenuEdgeId = edge.id;
   menu.hidden = false;
@@ -428,9 +460,180 @@ function handleEdgeContextMenuAction(event) {
   changeEdgeDirection(option.dataset.edgeDirection);
 }
 
+function syncNodeContextMenu() {
+  const menu = $('#diagram-node-context-menu');
+  if (!menu || !contextMenuNodeId) return;
+  const node = nodeById(activeDiagram(), contextMenuNodeId);
+  if (!node) {
+    hideNodeContextMenu();
+    return;
+  }
+  menu.querySelectorAll('[data-node-type]').forEach((option) => {
+    const isCurrent = option.dataset.nodeType === validNodeType(node.type);
+    option.classList.toggle('is-current', isCurrent);
+    option.setAttribute('aria-checked', String(isCurrent));
+  });
+}
+
+function showNodeContextMenu(event, nodeId) {
+  const node = nodeById(activeDiagram(), nodeId);
+  const menu = $('#diagram-node-context-menu');
+  if (!node || !menu) return;
+
+  hideEdgeContextMenu();
+  setSelection('node', node.id);
+  contextMenuNodeId = node.id;
+  menu.hidden = false;
+  menu.setAttribute('aria-hidden', 'false');
+  syncNodeContextMenu();
+
+  const positionMenu = () => {
+    if (menu.hidden) return;
+    const margin = 8;
+    const rect = menu.getBoundingClientRect();
+    const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+    menu.style.left = `${clamp(event.clientX, margin, maxLeft)}px`;
+    menu.style.top = `${clamp(event.clientY, margin, maxTop)}px`;
+  };
+  positionMenu();
+  requestAnimationFrame(positionMenu);
+  menu.querySelector('[data-node-type].is-current')?.focus({ preventScroll: true });
+}
+
+function changeNodeType(type) {
+  const nodeId = contextMenuNodeId || (selection.type === 'node' ? selection.id : '');
+  const node = nodeById(activeDiagram(), nodeId);
+  if (!node) {
+    hideEdgeContextMenu();
+    return;
+  }
+  const nextType = validNodeType(type);
+  if (validNodeType(node.type) === nextType) {
+    hideEdgeContextMenu();
+    return;
+  }
+  const before = historySnapshot();
+  node.type = nextType;
+  recordHistory(before);
+  persistDiagrams();
+  hideEdgeContextMenu();
+  renderDiagrams();
+  showToast(`Tipo de tarjeta: ${NODE_TYPES[nextType]}`);
+}
+
+function focusNodeLabel(nodeId) {
+  const input = [...document.querySelectorAll('[data-node-label]')]
+    .find((element) => element.dataset.nodeLabel === nodeId);
+  if (!input) return;
+  input.focus();
+  input.select();
+}
+
+function handleNodeContextMenuAction(event) {
+  const option = event.target.closest?.('[data-node-type], [data-node-action]');
+  if (!option) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const nodeId = contextMenuNodeId || (selection.type === 'node' ? selection.id : '');
+  if (option.dataset.nodeType) {
+    changeNodeType(option.dataset.nodeType);
+    return;
+  }
+  if (option.dataset.nodeAction === 'focus-label') {
+    hideEdgeContextMenu();
+    setSelection('node', nodeId);
+    requestAnimationFrame(() => focusNodeLabel(nodeId));
+    return;
+  }
+  if (option.dataset.nodeAction === 'delete') {
+    const node = nodeById(activeDiagram(), nodeId);
+    hideEdgeContextMenu();
+    if (node) {
+      removeNode(node.id);
+      showToast('Tarjeta eliminada');
+    }
+  }
+}
+
 function findPortElement(nodeId, portName) {
   return [...document.querySelectorAll('[data-diagram-port]')]
     .find((port) => port.dataset.nodeId === nodeId && port.dataset.port === portName) || null;
+}
+
+function applyDiagramViewport() {
+  const board = $('#diagram-board');
+  if (!board) return;
+  board.style.transformOrigin = '0 0';
+  board.style.transform = `matrix(${diagramViewport.zoom}, 0, 0, ${diagramViewport.zoom}, ${diagramViewport.offsetX}, ${diagramViewport.offsetY})`;
+}
+
+function fitDiagramViewport() {
+  const canvas = $('#diagram-canvas');
+  if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
+  const zoom = clamp(Math.min(canvas.clientWidth / BOARD_WIDTH, canvas.clientHeight / BOARD_HEIGHT), DIAGRAM_ZOOM_MIN, 1);
+  diagramViewport = {
+    zoom,
+    offsetX: (canvas.clientWidth - BOARD_WIDTH * zoom) / 2,
+    offsetY: (canvas.clientHeight - BOARD_HEIGHT * zoom) / 2,
+    initialized: true,
+    userZoomed: false
+  };
+  applyDiagramViewport();
+}
+
+function ensureDiagramViewport() {
+  if (!diagramViewport.initialized) fitDiagramViewport();
+  else applyDiagramViewport();
+}
+
+function observeDiagramCanvas() {
+  diagramResizeObserver?.disconnect();
+  diagramResizeObserver = null;
+  const canvas = $('#diagram-canvas');
+  if (!canvas || typeof ResizeObserver === 'undefined') return;
+  diagramResizeObserver = new ResizeObserver(() => {
+    if (!diagramViewport.userZoomed) fitDiagramViewport();
+    else applyDiagramViewport();
+  });
+  diagramResizeObserver.observe(canvas);
+}
+
+function boardPointFromCanvasCoordinates(x, y) {
+  if (!diagramViewport.initialized) fitDiagramViewport();
+  const zoom = diagramViewport.zoom || 1;
+  return {
+    x: clamp((x - diagramViewport.offsetX) / zoom, 0, BOARD_WIDTH),
+    y: clamp((y - diagramViewport.offsetY) / zoom, 0, BOARD_HEIGHT)
+  };
+}
+
+function handleDiagramWheel(event) {
+  const canvas = event.currentTarget || $('#diagram-canvas');
+  if (!canvas) return;
+  ensureDiagramViewport();
+  const delta = event.deltaMode === 1
+    ? event.deltaY * 16
+    : event.deltaMode === 2
+      ? event.deltaY * canvas.clientHeight
+      : event.deltaY;
+  if (!Number.isFinite(delta) || delta === 0) return;
+
+  event.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const pointerX = event.clientX - rect.left;
+  const pointerY = event.clientY - rect.top;
+  const boardX = (pointerX - diagramViewport.offsetX) / diagramViewport.zoom;
+  const boardY = (pointerY - diagramViewport.offsetY) / diagramViewport.zoom;
+  const factor = Math.exp(clamp(-delta * DIAGRAM_ZOOM_SENSITIVITY, -0.35, 0.35));
+  const zoom = clamp(diagramViewport.zoom * factor, DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX);
+  if (zoom === diagramViewport.zoom) return;
+
+  diagramViewport.zoom = zoom;
+  diagramViewport.offsetX = pointerX - boardX * zoom;
+  diagramViewport.offsetY = pointerY - boardY * zoom;
+  diagramViewport.userZoomed = true;
+  applyDiagramViewport();
 }
 
 function nodePoint(node, portName) {
@@ -665,7 +868,9 @@ export function renderDiagrams() {
   if (!root) return;
   hideEdgeContextMenu();
   const diagram = activeDiagram();
-  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><button id="diagram-code" class="btn btn-secondary" type="button">⌘ Código</button><button id="diagram-import" class="btn btn-secondary" type="button">⇧ Importar</button><button id="diagram-export" class="btn btn-secondary" type="button">⇩ Exportar</button><div class="diagram-history-actions"><button id="diagram-undo" class="btn btn-secondary" type="button" title="Deshacer (⌘/Ctrl+Z)" aria-label="Deshacer (⌘/Ctrl+Z)" disabled>↶ Deshacer</button><button id="diagram-redo" class="btn btn-secondary" type="button" title="Rehacer (⌘/Ctrl+Shift+Z)" aria-label="Rehacer (⌘/Ctrl+Shift+Z)" disabled>↷ Rehacer</button></div><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4ec9b0"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div><aside class="diagram-side-panel"><div class="diagram-side-heading"><div><span class="diagram-eyebrow">EDITOR SIMPLE</span><h2>Mapa de flujo</h2></div><span id="diagram-count" class="diagram-count"></span></div><div id="diagram-status" class="diagram-status"></div><div id="diagram-inspector"></div><div class="diagram-help"><strong>Cómo usarlo</strong><p>1. Añade nodos y arrástralos por el lienzo.</p><p>2. Activa “Conectar” y pulsa dos puntos de unión, o arrastra de uno al otro.</p><p>3. Selecciona una línea para escribir una etiqueta o eliminarla.</p><p>4. Usa Deshacer/Rehacer o ⌘/Ctrl+Z, ⌘/Ctrl+Shift+Z.</p><p>5. Pulsa “Código” para generar el diagrama escribiendo texto.</p></div></aside></div></div>`;
+  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><button id="diagram-code" class="btn btn-secondary" type="button">⌘ Código</button><button id="diagram-import" class="btn btn-secondary" type="button">⇧ Importar</button><button id="diagram-export" class="btn btn-secondary" type="button">⇩ Exportar</button><div class="diagram-history-actions"><button id="diagram-undo" class="btn btn-secondary" type="button" title="Deshacer (⌘/Ctrl+Z)" aria-label="Deshacer (⌘/Ctrl+Z)" disabled>↶ Deshacer</button><button id="diagram-redo" class="btn btn-secondary" type="button" title="Rehacer (⌘/Ctrl+Shift+Z)" aria-label="Rehacer (⌘/Ctrl+Shift+Z)" disabled>↷ Rehacer</button></div><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4ec9b0"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
+  ensureDiagramViewport();
+  observeDiagramCanvas();
   const arrowMarker = root.querySelector('#diagram-arrow');
   if (arrowMarker) {
     arrowMarker.setAttribute('orient', 'auto-start-reverse');
@@ -684,7 +889,7 @@ export function renderDiagrams() {
     previewArrowMarker.setAttribute('refY', '5');
     previewArrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
   }
-  root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Dirección de la conexión" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div>');
+  root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Dirección de la conexión" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div><div id="diagram-node-context-menu" class="diagram-context-menu" role="menu" aria-label="Modificar tarjeta" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Tarjeta</div><button type="button" role="menuitem" data-node-action="focus-label">Editar etiqueta</button><div class="diagram-context-menu-heading">Tipo</div><button type="button" role="menuitemradio" data-node-type="start" aria-checked="false">Inicio</button><button type="button" role="menuitemradio" data-node-type="step" aria-checked="false">Paso</button><button type="button" role="menuitemradio" data-node-type="decision" aria-checked="false">Decisión</button><button type="button" role="menuitemradio" data-node-type="end" aria-checked="false">Fin</button><button type="button" role="menuitem" data-node-action="delete">Eliminar tarjeta</button></div>');
   bindDiagramEvents(root);
   renderDiagramCanvas();
   updateSelectionUI();
@@ -702,13 +907,11 @@ function setSelection(type = '', id = '') {
 }
 
 function boardPoint(event) {
-  const board = $('#diagram-board');
-  if (!board) return { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
-  const rect = board.getBoundingClientRect();
-  return {
-    x: clamp((event.clientX - rect.left) * BOARD_WIDTH / rect.width, 0, BOARD_WIDTH),
-    y: clamp((event.clientY - rect.top) * BOARD_HEIGHT / rect.height, 0, BOARD_HEIGHT)
-  };
+  const canvas = $('#diagram-canvas');
+  if (!canvas) return { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
+  ensureDiagramViewport();
+  const rect = canvas.getBoundingClientRect();
+  return boardPointFromCanvasCoordinates(event.clientX - rect.left, event.clientY - rect.top);
 }
 
 function nodePositionIsFree(diagram, x, y) {
@@ -919,6 +1122,14 @@ function handleNodePointerDown(event) {
   element.setPointerCapture?.(event.pointerId);
 }
 
+function handleNodeContextMenu(event) {
+  const element = event.target.closest?.('.diagram-node');
+  if (!element) return;
+  event.preventDefault();
+  event.stopPropagation();
+  showNodeContextMenu(event, element.dataset.nodeId);
+}
+
 function handleNodeClick(event) {
   const port = event.target.closest('[data-diagram-port]');
   if (port) {
@@ -1058,7 +1269,7 @@ function handleKeydown(event) {
     redoDiagramChange();
     return;
   }
-  if (event.key === 'Escape' && contextMenuEdgeId) {
+  if (event.key === 'Escape' && (contextMenuEdgeId || contextMenuNodeId)) {
     event.preventDefault();
     hideEdgeContextMenu();
     return;
@@ -1104,7 +1315,9 @@ function bindDiagramEvents(root) {
   });
   $('#diagram-add-node').addEventListener('click', () => {
     const canvas = $('#diagram-canvas');
-    const point = canvas ? { x: canvas.scrollLeft + canvas.clientWidth / 2, y: canvas.scrollTop + canvas.clientHeight / 2 } : { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
+    const point = canvas
+      ? boardPointFromCanvasCoordinates(canvas.clientWidth / 2, canvas.clientHeight / 2)
+      : { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
     addNodeAt(point);
   });
   $('#diagram-code').addEventListener('click', () => openDiagramCodeModal());
@@ -1121,16 +1334,20 @@ function bindDiagramEvents(root) {
   const nodeLayer = $('#diagram-node-layer');
   nodeLayer.addEventListener('pointerdown', handleNodePointerDown);
   nodeLayer.addEventListener('click', handleNodeClick);
+  nodeLayer.addEventListener('contextmenu', handleNodeContextMenu);
   nodeLayer.addEventListener('input', handleNodeInput);
   const edgeLayer = $('#diagram-edge-layer');
   edgeLayer.addEventListener('click', handleEdgeClick);
   edgeLayer.addEventListener('contextmenu', handleEdgeContextMenu);
   $('#diagram-context-menu').addEventListener('click', handleEdgeContextMenuAction);
+  $('#diagram-node-context-menu').addEventListener('click', handleNodeContextMenuAction);
+  const canvas = $('#diagram-canvas');
+  canvas.addEventListener('wheel', handleDiagramWheel, { passive: false });
   const board = $('#diagram-board');
   board.addEventListener('pointerdown', handleBoardPointerDown);
   board.addEventListener('dblclick', handleBoardDoubleClick);
   root.addEventListener('pointerdown', (event) => {
-    if (!event.target.closest('#diagram-context-menu')) hideEdgeContextMenu();
+    if (!event.target.closest('.diagram-context-menu')) hideEdgeContextMenu();
   });
   root.addEventListener('pointermove', handlePointerMove);
   root.addEventListener('pointerup', handlePointerUp);

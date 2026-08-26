@@ -8,8 +8,10 @@ import { configureSearch, performGlobalSearch, performSearch, renderGlobalSearch
 import { configureSources, renderSources, syncSource } from './views/sources.js';
 import { configureSourceModal } from './views/source-modal.js';
 import { bindHtmlViewerMenu, configureHtmlViewer, openPersistedHtmlSource, renderHtmlViewer } from './views/html-viewer.js';
-import { renderDiagrams } from './views/diagrams.js';
+import { openDiagramDocument, renderDiagrams } from './views/diagrams.js';
+import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { configureSettings, renderSettings } from './views/settings.js';
+import { loadPalettePreference } from './core/theme.js';
 
 let nativeMenuView = null;
 
@@ -17,18 +19,26 @@ configureApi({ onUnauthorized: () => showAuthentication('', { onAuthenticated })
 
 async function refreshData() {
   try {
-    const [sources, collections, tags, globalProject, stats] = await Promise.all([
+    const [sources, collections, tags, globalProject] = await Promise.all([
       api('/sources'),
       api('/collections'),
       api('/tags'),
-      api('/global-project'),
-      api('/stats')
+      api('/global-project')
     ]);
+    const previousProjectPath = state.globalProject?.path || '';
     state.sources = sources;
     state.collections = collections;
     state.tags = tags;
     state.globalProject = globalProject.project || null;
-    state.stats = stats;
+    if (previousProjectPath !== (state.globalProject?.path || '')) {
+      state.codeMap.files = [];
+      state.codeMap.filesWarnings = [];
+      state.codeMap.filesFingerprint = '';
+      state.codeMap.result = null;
+      state.codeMap.selectedId = null;
+      state.codeMap.selectedRelationId = null;
+      state.codeMap.stale = false;
+    }
     setConnection('online', 'API local conectada');
     renderView();
     if (state.view === 'search') await performSearch();
@@ -50,6 +60,7 @@ function renderView() {
   if (state.view === 'global-search') renderGlobalSearch();
   if (state.view === 'html-viewer') renderHtmlViewer();
   if (state.view === 'diagrams') renderDiagrams();
+  if (state.view === 'code-map') renderCodeMap();
   if (state.view === 'sources') renderSources();
   if (state.view === 'settings') renderSettings();
 }
@@ -103,14 +114,24 @@ function bindCloseConfirmation() {
 }
 
 configureHtmlViewer({ onNavigate: (view) => { state.view = view; renderView(); } });
-configureDocuments({ onRefresh: refreshData, onOpenHtmlViewer: openPersistedHtmlSource });
+configureDocuments({
+  onRefresh: refreshData,
+  onOpenHtmlViewer: openPersistedHtmlSource,
+  onOpenDiagram: (diagramDocument) => {
+    state.view = 'diagrams';
+    renderView();
+    openDiagramDocument(diagramDocument);
+  }
+});
 configureSearch({ onRefresh: refreshData });
 configureSources({ onRefresh: refreshData });
 configureSourceModal({ onRefresh: refreshData, onSync: syncSource });
-configureSettings({ onRefresh: refreshData });
+configureSettings();
+configureCodeMap({ onNavigate: (view) => { state.view = view; renderView(); } });
 bindHtmlViewerMenu();
 bindNavigation();
 bindCloseConfirmation();
+loadPalettePreference();
 
 async function startApplication() {
   await loadSearchPreferences();

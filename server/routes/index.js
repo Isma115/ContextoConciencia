@@ -7,9 +7,56 @@ const { importLocalSource } = require('../importers/local');
 const { syncRestSource, testRestSource } = require('../services/rest');
 const { inspectHtmlProject } = require('../services/html-viewer');
 const { createHtmlPreview, getHtmlPreview } = require('../services/html-viewer-preview');
+const { analyzeCodeMap, getCodeMapFile, listCodeMapFiles } = require('../services/code-map');
+const { Worker } = require('node:worker_threads');
 const { installAuthRoutes, requireAuth } = require('../auth');
 
 const ID = (prefix) => `${prefix}_${crypto.randomUUID()}`;
+const CODE_MAP_JOBS = new Map();
+const CODE_MAP_WORKER_PATH = path.join(__dirname, '..', 'services', 'code-map', 'worker.js');
+
+function publicCodeMapJob(job) {
+  return {
+    jobId: job.id,
+    status: job.status,
+    progress: job.progress,
+    ...(job.result ? { result: job.result } : {}),
+    ...(job.error ? { error: job.error } : {})
+  };
+}
+
+function runCodeMapJob(root, options, job) {
+  if (job.status === 'cancelled') return;
+  job.status = 'running';
+  job.progress = { phase: 'analysing', percent: 10 };
+  let settled = false;
+  const worker = new Worker(CODE_MAP_WORKER_PATH);
+  job.worker = worker;
+  const fail = (message) => {
+    if (settled || job.status === 'cancelled') return;
+    settled = true;
+    job.error = message;
+    job.progress = { phase: 'error', percent: 100 };
+    job.status = 'failed';
+  };
+  worker.on('message', (message) => {
+    if (settled || job.status === 'cancelled') return;
+    if (message.type === 'complete') {
+      settled = true;
+      job.result = message.result;
+      job.progress = { phase: 'complete', percent: 100 };
+      job.status = 'completed';
+    } else {
+      fail(message.error || 'El análisis no se pudo completar');
+    }
+    worker.terminate().catch(() => {});
+  });
+  worker.on('error', (error) => fail(error.message));
+  worker.on('exit', (code) => {
+    if (!settled && job.status !== 'cancelled' && code !== 0) fail(`El proceso de análisis terminó con código ${code}`);
+  });
+  worker.postMessage({ root, options });
+}
 
 function asText(value, fallback = '') {
   return typeof value === 'string' ? value.trim() : fallback;
@@ -45,6 +92,13 @@ function globalProjectResponse(db) {
       source
     }
   };
+}
+
+function globalProjectRoot(db) {
+  const row = globalProjectRow(db);
+  if (!row) return null;
+  const config = parseJson(row.config_json);
+  return Array.isArray(config.paths) && typeof config.paths[0] === 'string' ? config.paths[0] : null;
 }
 
 function validateGlobalProjectPath(value) {
@@ -336,6 +390,83 @@ function installRoutes(app, db, authDb, environment = process.env) {
     if (!project) return res.status(404).json({ error: 'No hay un proyecto global cargado' });
     db.run('DELETE FROM sources WHERE id = ?', project.id);
     res.status(204).end();
+  });
+
+  app.get('/api/code-map/files', (req, res) => {
+    const project = globalProjectResponse(db).project;
+    const root = globalProjectRoot(db);
+    if (!project || !root) {
+      return res.json({ loaded: false, project: null, files: [], warnings: [], excludedDirectories: [], limits: {} });
+    }
+    try {
+      const result = listCodeMapFiles(root, {
+        excludes: req.query.excludes ? String(req.query.excludes).split(',').slice(0, 100) : [],
+        maxFiles: req.query.maxFiles,
+        maxFileBytes: req.query.maxFileBytes
+      });
+      return res.json({ loaded: true, project: { ...project, fingerprint: result.project.fingerprint }, ...result });
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.post('/api/code-map/analyze', (req, res) => {
+    const project = globalProjectResponse(db).project;
+    const root = globalProjectRoot(db);
+    if (!project || !root) return res.status(409).json({ error: 'Carga un proyecto global antes de generar el mapa' });
+    try {
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      if (body.async === true || body.mode === 'async') {
+        const job = {
+          id: ID('code-map-job'),
+          status: 'queued',
+          progress: { phase: 'queued', percent: 0 },
+          result: null,
+          error: null
+        };
+        CODE_MAP_JOBS.set(job.id, job);
+        setImmediate(() => runCodeMapJob(root, body, job));
+        setTimeout(() => {
+          if (CODE_MAP_JOBS.get(job.id) === job) {
+            job.worker?.terminate().catch(() => {});
+            CODE_MAP_JOBS.delete(job.id);
+          }
+        }, 10 * 60 * 1000).unref?.();
+        return res.status(202).json(publicCodeMapJob(job));
+      }
+      const result = analyzeCodeMap(root, body);
+      return res.json(result);
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/code-map/file', (req, res) => {
+    const root = globalProjectRoot(db);
+    if (!root) return res.status(409).json({ error: 'Carga un proyecto global antes de abrir código' });
+    try {
+      return res.json(getCodeMapFile(root, req.query.path, req.query.line));
+    } catch (error) {
+      return res.status(400).json({ error: error.message });
+    }
+  });
+
+  app.get('/api/code-map/status/:jobId', (req, res) => {
+    const job = CODE_MAP_JOBS.get(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Análisis no encontrado o caducado' });
+    return res.json(publicCodeMapJob(job));
+  });
+  app.delete('/api/code-map/jobs/:jobId', (req, res) => {
+    const job = CODE_MAP_JOBS.get(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Análisis no encontrado o caducado' });
+    if (job.status === 'queued' || job.status === 'running') {
+      job.status = 'cancelled';
+      job.progress = { phase: 'cancelled', percent: job.progress.percent || 0 };
+      job.worker?.terminate().catch(() => {});
+      return res.json(publicCodeMapJob(job));
+    }
+    CODE_MAP_JOBS.delete(job.id);
+    return res.status(204).end();
   });
 
   app.get('/api/stats', (req, res) => {

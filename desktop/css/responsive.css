@@ -14,11 +14,18 @@
   .diagram-toolbar { align-items: stretch; gap: 9px; padding: 10px 12px; }
   .diagram-title-wrap { min-width: 180px; flex-basis: 100%; }
   .diagram-title { width: 100%; }
-  .diagram-toolbar-actions { width: 100%; align-items: end; overflow-x: auto; flex-wrap: nowrap; padding-bottom: 1px; }
-  .diagram-main { grid-template-columns: 1fr; grid-template-rows: minmax(0, 1fr) auto; }
-  .diagram-side-panel { max-height: 210px; border-top: 1px solid var(--line); border-left: 0; }
+  .diagram-toolbar-actions { width: 100%; align-items: end; overflow: visible; flex-wrap: wrap; padding-bottom: 1px; }
   .diagram-code-modal .modal-actions { flex-wrap: wrap; }
   .global-project-row { align-items: start; flex-direction: column; }
   .global-project-actions { width: 100%; justify-content: flex-start; }
   .global-sources-panel .panel-header { align-items: start; flex-direction: column; }
+  .code-map-toolbar { align-items: start; flex-direction: column; gap: 10px; padding: 11px 12px 9px; }
+  .code-map-actions { width: 100%; justify-content: flex-start; }
+  .code-map-workspace { grid-template-columns: minmax(0, 1fr); overflow: auto; }
+  .code-map-tree { max-height: 180px; }
+}
+
+@media (max-width: 520px) {
+  .code-map-actions .btn { flex: 1 1 auto; }
+  .code-map-before { grid-template-columns: 1fr; justify-items: center; margin: 18px 12px; text-align: center; }
 }

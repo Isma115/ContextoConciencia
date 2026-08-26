@@ -75,7 +75,7 @@ SELECT id, usuario, creado_en, actualizado_en FROM usuarios;
 
 ## Funcionalidades
 
-- Importación de archivos y carpetas JSON, CSV, TXT, Markdown, HTML, CSS y JavaScript.
+- Importación de archivos y carpetas JSON, CSV, TXT, Markdown, diagramas NexusData `.nxd`, HTML, CSS y JavaScript.
 - Visor HTML para previsualizar proyectos locales con sus hojas de estilo y scripts enlazados.
 - Proyecto global persistente: crea o carga una carpeta para definir los recursos principales que iterará la aplicación.
 - Buscador Global con los mismos filtros que Buscar y gestión de fuentes externas adicionales desde la misma vista.

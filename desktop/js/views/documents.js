@@ -7,10 +7,12 @@ import { typeLabel, shortDate } from '../core/format.js';
 
 let refreshData = async () => {};
 let openHtmlViewer = null;
+let openDiagram = null;
 
-export function configureDocuments({ onRefresh, onOpenHtmlViewer } = {}) {
+export function configureDocuments({ onRefresh, onOpenHtmlViewer, onOpenDiagram } = {}) {
   refreshData = onRefresh || refreshData;
   openHtmlViewer = onOpenHtmlViewer || openHtmlViewer;
+  openDiagram = onOpenDiagram || openDiagram;
 }
 
 function bindHtmlSourceOpeners(container) {
@@ -61,6 +63,10 @@ export async function openDocument(id) {
     const htmlTypes = new Set(['html', 'css', 'javascript']);
     if (source?.config?.role === 'html-viewer' && htmlTypes.has(doc.type) && openHtmlViewer) {
       await openHtmlViewer(source, doc.path);
+      return;
+    }
+    if (doc.type === 'diagram' && openDiagram) {
+      await openDiagram(doc);
       return;
     }
     const isMarkdown = doc.type === 'markdown';

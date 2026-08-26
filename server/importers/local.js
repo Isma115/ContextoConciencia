@@ -11,6 +11,7 @@ const SUPPORTED = new Map([
   ['.markdown', 'markdown'],
   ['.html', 'html'],
   ['.htm', 'html'],
+  ['.nxd', 'diagram'],
   // Estos tipos se conservan para el visor HTML, pero no se importan como documentación.
   ['.css', 'css'],
   ['.js', 'javascript'],

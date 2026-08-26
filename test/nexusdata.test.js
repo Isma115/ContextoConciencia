@@ -47,6 +47,7 @@ before(async () => {
   fs.writeFileSync(path.join(fixtureDir, 'README.md'), '# Authentication service\nConfiguration and deployment notes.');
   fs.writeFileSync(path.join(fixtureDir, 'config.json'), JSON.stringify({ DATABASE_URL: 'sqlite://local', service: 'auth-service' }));
   fs.writeFileSync(path.join(fixtureDir, 'routes.csv'), 'method,path\nGET,/health\n');
+  fs.writeFileSync(path.join(fixtureDir, 'registro-de-usuario.nxd'), 'diagram "Registro de usuario"\nnode inicio "Inicio" start');
   externalServer = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ data: [{ id: 1, title: 'Remote incident', description: 'API response from REST source' }] }));
@@ -95,11 +96,14 @@ after(async () => {
 test('importa fuentes locales y conserva el origen', async () => {
   const source = await request('/sources', { method: 'POST', body: JSON.stringify({ name: 'Fixtures locales', type: 'local', config: { paths: [fixtureDir] } }) });
   const synced = await request(`/sources/${source.id}/sync`, { method: 'POST' });
-  assert.equal(synced.total, 3);
+  assert.equal(synced.total, 4);
   const docs = await request('/documents');
-  assert.equal(docs.total, 3);
+  assert.equal(docs.total, 4);
   assert.ok(docs.documents.every((doc) => doc.source === 'Fixtures locales'));
   assert.ok(docs.documents.some((doc) => doc.path.endsWith('README.md')));
+  const diagram = docs.documents.find((doc) => doc.path.endsWith('registro-de-usuario.nxd'));
+  assert.equal(diagram.type, 'diagram');
+  assert.match(diagram.content, /diagram "Registro de usuario"/);
   const readme = docs.documents.find((doc) => doc.path.endsWith('README.md'));
   const detail = await request(`/documents/${readme.id}`);
   assert.equal(detail.id, readme.id);

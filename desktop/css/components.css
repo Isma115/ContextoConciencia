@@ -16,6 +16,10 @@
 .doc-row.document-hit:hover { background: #29292a; }
 .document-hit:focus-visible { outline: 1px solid var(--blue); outline-offset: -1px; }
 .source-logo { width: 27px; height: 27px; display: grid; place-items: center; border: 1px solid #444; border-radius: 3px; color: #84bdf1; background: #2a2d2e; font-size: 13px; }
+.source-logo svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.7; }
+.source-logo-local { color: #9fc7a8; background: #25372b; border-color: #42644d; }
+.source-logo-rest { color: #9bceff; background: #203448; border-color: #365c7b; }
+.source-logo-generic { color: #c4b3df; background: #332b3f; border-color: #594b6d; }
 .source-name { overflow: hidden; color: #d0d0d0; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .source-meta { margin-top: 3px; color: #777; font-family: var(--mono); font-size: 9px; }
 .pill { padding: 3px 6px; border: 1px solid #494949; border-radius: 3px; color: #999; background: #2b2b2c; font-family: var(--mono); font-size: 9px; }

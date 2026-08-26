@@ -46,7 +46,7 @@
 .auth-card h1 { font-size: 22px; }
 .auth-card > p { margin: 8px 0 22px; color: #9ba9b7; line-height: 1.5; }
 .auth-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 5px; background: #151b21; }
-.auth-tab { border: 0; border-radius: 3px; padding: 8px; color: #9aa7b4; background: transparent; font-size: 11px; }
+.auth-tab { border: 0; border-radius: 0; padding: 8px; color: #9aa7b4; background: transparent; font-size: 11px; }
 .auth-tab.active { color: #e8f3ff; background: #264561; }
 .auth-form { display: grid; gap: 13px; margin-top: 20px; }
 .auth-error { min-height: 16px; margin: 0; color: #ffb4a8; font-size: 10px; line-height: 1.4; }

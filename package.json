@@ -13,7 +13,7 @@
     "db:down": "docker compose down",
     "db:logs": "docker compose logs -f mysql",
     "test": "node --test",
-    "check": "node --check server/app.js && node --check server/auth.js && node --check server/database/mysql.js && node --check server/services/html-viewer.js && node --check server/services/html-viewer-preview.js && node --check test-source-server/server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/js/markdown.js && node --check desktop/js/app.js && node --check desktop/js/views/diagram-language.mjs && for file in desktop/js/core/*.js desktop/js/ui/*.js desktop/js/views/*.js; do node --check \"$file\"; done"
+    "check": "node --check server/app.js && node --check server/auth.js && node --check server/database/mysql.js && node --check server/services/html-viewer.js && node --check server/services/html-viewer-preview.js && for file in server/services/code-map/*.js server/services/code-map/analyzers/*.js; do node --check \"$file\"; done && node --check test-source-server/server.js && node --check desktop/main.js && node --check desktop/preload.js && node --check desktop/js/markdown.js && node --check desktop/js/app.js && node --check desktop/js/views/diagram-language.mjs && for file in desktop/js/core/*.js desktop/js/ui/*.js desktop/js/views/*.js; do node --check \"$file\"; done"
   },
   "engines": {
     "node": ">=22.5.0"

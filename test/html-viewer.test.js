@@ -39,6 +39,19 @@ test('el importador local reconoce HTML, CSS y JavaScript', () => {
   }
 });
 
+test('el importador local reconoce diagramas NexusData .nxd como documentación', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nexusdata-diagram-files-'));
+  try {
+    const filePath = path.join(root, 'registro-de-usuario.nxd');
+    fs.writeFileSync(filePath, 'diagram "Registro de usuario"\nnode inicio "Inicio" start');
+    const document = readFileDocument(filePath);
+    assert.equal(document.type, 'diagram');
+    assert.equal(document.content.includes('diagram "Registro de usuario"'), true);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('mantiene una previsualización HTML temporal para el iframe aislado', () => {
   const content = '<!doctype html><html><body><h1>Vista</h1></body></html>';
   const token = createHtmlPreview(content);

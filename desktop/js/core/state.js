@@ -26,6 +26,29 @@ export const state = {
     loading: false,
     error: ''
   },
+  codeMap: {
+    files: [],
+    filesLoading: false,
+    filesWarnings: [],
+    filesFingerprint: '',
+    scope: 'project',
+    entryFile: '',
+    includeExternalPackages: false,
+    excludes: [],
+    maxFiles: 2000,
+    maxFileBytes: 2 * 1024 * 1024,
+    result: null,
+    loading: false,
+    error: '',
+    selectedId: null,
+    selectedRelationId: null,
+    expanded: {},
+    filters: { query: '', language: '', symbolKind: '', relationKind: '' },
+    groupByFolder: true,
+    depth: 'files',
+    zoom: 1,
+    stale: false
+  },
   user: null
 };
 

@@ -156,6 +156,7 @@ El editor indica la línea del primer error encontrado. Corrige ese error y vuel
 El formato `.nxd` es texto plano UTF-8. Por eso puede:
 
 - guardarse en Git junto al código del proyecto;
+- detectarse e indexarse automáticamente cuando se sincroniza una carpeta local de documentación;
 - generarse desde un script o una respuesta de un agente de IA;
 - copiarse y pegarse en el botón **Código**;
 - editarse con cualquier editor de texto;

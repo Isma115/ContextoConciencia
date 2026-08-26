@@ -1,0 +1,86 @@
+html[data-palette="ocean"] {
+  --bg: #0d1b26;
+  --sidebar: #09141e;
+  --surface: #142a38;
+  --surface-raised: #1d3a4c;
+  --surface-hover: #24495d;
+  --input: #214254;
+  --line: #294b5d;
+  --line-soft: #1e3543;
+  --text: #d2e5ed;
+  --strong: #f2fbff;
+  --muted: #86a6b4;
+  --muted-2: #63818f;
+  --blue: #55c7ff;
+  --blue-soft: rgba(85, 199, 255, .14);
+  --green: #7edbb7;
+  --amber: #f0d27a;
+  --red: #ff9e8c;
+  --purple: #c5a8ea;
+  --cyan: #65e7d2;
+  --canvas: #0a1821;
+  --grid-line: rgba(112, 207, 246, .08);
+  --nav-active: #1b3a4b;
+  --nav-icon-active: #b7e7ff;
+  --button-secondary: #203c4d;
+  --button-secondary-border: #376078;
+  --button-secondary-hover: #2b5065;
+}
+
+html[data-palette="forest"] {
+  --bg: #18201b;
+  --sidebar: #101711;
+  --surface: #243027;
+  --surface-raised: #304036;
+  --surface-hover: #384b3d;
+  --input: #35483a;
+  --line: #3a5140;
+  --line-soft: #2c3c31;
+  --text: #d6e1d7;
+  --strong: #f4faf4;
+  --muted: #94a89a;
+  --muted-2: #728376;
+  --blue: #82c7a5;
+  --blue-soft: rgba(130, 199, 165, .15);
+  --green: #9edb82;
+  --amber: #e0c777;
+  --red: #ef9a83;
+  --purple: #c7a9df;
+  --cyan: #6fd1b1;
+  --canvas: #121a14;
+  --grid-line: rgba(153, 211, 168, .07);
+  --nav-active: #2a4430;
+  --nav-icon-active: #c4e9c4;
+  --button-secondary: #304238;
+  --button-secondary-border: #4f6c55;
+  --button-secondary-hover: #3c5141;
+}
+
+html[data-palette="plum"] {
+  --bg: #211b26;
+  --sidebar: #17111c;
+  --surface: #2d2333;
+  --surface-raised: #3a2c43;
+  --surface-hover: #473653;
+  --input: #493953;
+  --line: #4a3853;
+  --line-soft: #362941;
+  --text: #e1d6e6;
+  --strong: #fff7ff;
+  --muted: #ad99b5;
+  --muted-2: #88738f;
+  --blue: #c4a2ff;
+  --blue-soft: rgba(196, 162, 255, .15);
+  --green: #9ed68f;
+  --amber: #e3c77d;
+  --red: #f49b9c;
+  --purple: #e0a5df;
+  --cyan: #7bd8c7;
+  --canvas: #18131d;
+  --grid-line: rgba(218, 172, 230, .08);
+  --nav-active: #452e50;
+  --nav-icon-active: #f0c8ff;
+  --button-secondary: #3a2d43;
+  --button-secondary-border: #5a4666;
+  --button-secondary-hover: #493856;
+}
