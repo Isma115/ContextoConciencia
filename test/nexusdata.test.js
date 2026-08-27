@@ -8,6 +8,7 @@ const { startServer } = require('../server/app');
 
 let api;
 let fixtureDir;
+let sourceFixtureDir;
 let externalServer;
 let sessionCookie = '';
 let authStore;
@@ -44,10 +45,13 @@ async function request(route, options = {}, { expectedStatus = null } = {}) {
 
 before(async () => {
   fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nexusdata-'));
-  fs.writeFileSync(path.join(fixtureDir, 'README.md'), '# Authentication service\nConfiguration and deployment notes.');
-  fs.writeFileSync(path.join(fixtureDir, 'config.json'), JSON.stringify({ DATABASE_URL: 'sqlite://local', service: 'auth-service' }));
-  fs.writeFileSync(path.join(fixtureDir, 'routes.csv'), 'method,path\nGET,/health\n');
-  fs.writeFileSync(path.join(fixtureDir, 'registro-de-usuario.nxd'), 'diagram "Registro de usuario"\nnode inicio "Inicio" start');
+  sourceFixtureDir = path.join(fixtureDir, 'source-fixtures');
+  fs.mkdirSync(sourceFixtureDir);
+  fs.writeFileSync(path.join(sourceFixtureDir, 'README.md'), '# Authentication service\nConfiguration and deployment notes.');
+  fs.writeFileSync(path.join(sourceFixtureDir, 'config.json'), JSON.stringify({ DATABASE_URL: 'sqlite://local', service: 'auth-service' }));
+  fs.writeFileSync(path.join(sourceFixtureDir, 'routes.csv'), 'method,path\nGET,/health\n');
+  fs.writeFileSync(path.join(sourceFixtureDir, 'registro-de-usuario.nxd'), 'diagram "Registro de usuario"\nnode inicio "Inicio" start');
+  fs.writeFileSync(path.join(sourceFixtureDir, 'foto.png'), Buffer.from([137, 80, 78, 71, 13, 10, 26, 10, 0, 1, 2, 3]));
   externalServer = http.createServer((req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.end(JSON.stringify({ data: [{ id: 1, title: 'Remote incident', description: 'API response from REST source' }] }));
@@ -95,13 +99,17 @@ after(async () => {
 });
 
 test('importa fuentes locales y conserva el origen', async () => {
-  const source = await request('/sources', { method: 'POST', body: JSON.stringify({ name: 'Fixtures locales', type: 'local', config: { paths: [fixtureDir] } }) });
+  const source = await request('/sources', { method: 'POST', body: JSON.stringify({ name: 'Fixtures locales', type: 'local', config: { paths: [sourceFixtureDir] } }) });
   const synced = await request(`/sources/${source.id}/sync`, { method: 'POST' });
-  assert.equal(synced.total, 4);
+  assert.equal(synced.total, 5);
   const docs = await request('/documents');
-  assert.equal(docs.total, 4);
+  assert.equal(docs.total, 5);
   assert.ok(docs.documents.every((doc) => doc.source === 'Fixtures locales'));
   assert.ok(docs.documents.some((doc) => doc.path.endsWith('README.md')));
+  const media = docs.documents.find((doc) => doc.path.endsWith('foto.png'));
+  assert.equal(media.content, '');
+  assert.equal(media.metadata.binary, true);
+  assert.equal(media.metadata.searchTitleOnly, true);
   const diagram = docs.documents.find((doc) => doc.path.endsWith('registro-de-usuario.nxd'));
   assert.equal(diagram.type, 'diagram');
   assert.match(diagram.content, /diagram "Registro de usuario"/);
@@ -185,6 +193,8 @@ test('busca coincidencias aproximadas y filtra por tipo', async () => {
   const result = await request('/search?q=configruation&type=markdown');
   assert.ok(result.total >= 1);
   assert.match(result.results[0].content, /Configuration/);
+  const anyType = await request('/search?q=foto&type=any');
+  assert.ok(anyType.results.some((doc) => doc.title === 'foto' && doc.content === ''));
   const exact = await request('/search?q=DATABASE_URL');
   assert.ok(exact.results.some((doc) => doc.type === 'json'));
 });

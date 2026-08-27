@@ -8,9 +8,9 @@ import { bindSidebarSearch, configureSearch, performGlobalSearch, performSearch,
 import { configureSources, renderSources, syncSource } from './views/sources.js';
 import { configureSourceModal } from './views/source-modal.js';
 import { bindHtmlViewerMenu, configureHtmlViewer, openPersistedHtmlSource, renderHtmlViewer } from './views/html-viewer.js';
-import { openDiagramDocument, renderDiagrams } from './views/diagrams.js';
+import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/diagrams.js';
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
-import { configureSettings, renderSettings } from './views/settings.js';
+import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 
 let nativeMenuView = null;
@@ -67,7 +67,6 @@ function renderView() {
   if (state.view === 'diagrams') renderDiagrams();
   if (state.view === 'code-map') renderCodeMap();
   if (state.view === 'sources') renderSources();
-  if (state.view === 'settings') renderSettings();
 }
 
 async function initialiseSession() {
@@ -156,9 +155,10 @@ configureDocuments({
 configureSearch({ onRefresh: refreshData, onNavigate: (view) => { state.view = view; renderView(); } });
 configureSources({ onRefresh: refreshData });
 configureSourceModal({ onRefresh: refreshData, onSync: syncSource });
-configureSettings();
 configureCodeMap({ onNavigate: (view) => { state.view = view; renderView(); } });
 bindHtmlViewerMenu();
+bindDiagramMenu();
+bindPreferencesMenu();
 bindNavigation();
 bindSidebarSearchToggle();
 bindSidebarSearch();

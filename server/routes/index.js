@@ -1,7 +1,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const Fuse = require('fuse.js');
 const { now, parseJson, sourceForResponse, withDocumentShape, documentSelect } = require('../database/db');
 const { importLocalSource } = require('../importers/local');
 const { syncRestSource, testRestSource } = require('../services/rest');
@@ -9,6 +8,8 @@ const { inspectHtmlProject } = require('../services/html-viewer');
 const { createHtmlPreview, getHtmlPreview } = require('../services/html-viewer-preview');
 const { analyzeCodeMap, getCodeMapFile, listCodeMapFiles } = require('../services/code-map');
 const { commonPathsConfig, isCommonPathsConfig, listCommonDirectories, COMMON_PATHS_ROLE, COMMON_PATHS_SOURCE_NAME } = require('../services/common-paths');
+const { documentRows, searchDocuments } = require('../services/search');
+const { createSearchWorker } = require('../services/search/runner');
 const { Worker } = require('node:worker_threads');
 const { installAuthRoutes, requireAuth } = require('../auth');
 
@@ -123,10 +124,6 @@ function isOffline(req) {
   return req.user?.offline === true;
 }
 
-function localDocumentClause(localOnly) {
-  return localOnly ? "s.type = 'local'" : '';
-}
-
 function offlineCollectionClause() {
   return `(
     NOT EXISTS (SELECT 1 FROM collection_items ci_all WHERE ci_all.collection_id = c.id)
@@ -208,7 +205,10 @@ async function syncSource(db, source) {
   try {
     const config = source.type === 'local' ? parseJson(source.config_json) : {};
     const result = source.type === 'local'
-      ? importLocalSource(db, source, { prune: ['global-project', COMMON_PATHS_ROLE].includes(config.role) })
+      ? importLocalSource(db, source, {
+        prune: ['global-project', COMMON_PATHS_ROLE].includes(config.role),
+        includeUnsupported: !['global-project', 'html-viewer', COMMON_PATHS_ROLE].includes(config.role)
+      })
       : await syncRestSource(db, source);
     const syncAt = now();
     db.run('UPDATE sources SET status = ?, last_sync_at = ?, last_error = NULL WHERE id = ?', 'ready', syncAt, source.id);
@@ -220,89 +220,9 @@ async function syncSource(db, source) {
   }
 }
 
-function documentRows(db, query = {}, { localOnly = false, includeCommonPaths = true } = {}) {
-  const clauses = [];
-  const params = [];
-  if (localOnly) clauses.push(localDocumentClause(true));
-  if (!includeCommonPaths) clauses.push(`s.config_json NOT LIKE '%"role":"${COMMON_PATHS_ROLE}"%'`);
-  if (query.source) {
-    clauses.push('d.source_id = ?');
-    params.push(query.source);
-  }
-  if (query.type) {
-    clauses.push('d.type = ?');
-    params.push(query.type);
-  }
-  if (query.tag) {
-    clauses.push('EXISTS (SELECT 1 FROM document_tags dt JOIN tags t ON t.id = dt.tag_id WHERE dt.document_id = d.id AND lower(t.name) = lower(?))');
-    params.push(query.tag);
-  }
-  if (query.collection) {
-    clauses.push('EXISTS (SELECT 1 FROM collection_items ci WHERE ci.document_id = d.id AND ci.collection_id = ?)');
-    params.push(query.collection);
-  }
-  if (query.updatedFrom) {
-    clauses.push('d.updated_at >= ?');
-    params.push(query.updatedFrom);
-  }
-  const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
-  const limit = Math.min(Math.max(Number(query.limit) || 200, 1), 500);
-  const rows = db.all(`${documentSelect()}${where} ORDER BY LOWER(COALESCE(d.path, d.title)) ASC, LOWER(d.title) ASC, d.id ASC LIMIT ${limit}`, ...params);
-  return rows.map((row) => withDocumentShape(db, row));
-}
-
-function snippet(content, query) {
-  const clean = String(content || '').replace(/\s+/g, ' ').trim();
-  if (!clean) return '';
-  if (!query) return clean.slice(0, 220);
-  const index = clean.toLocaleLowerCase().indexOf(query.toLocaleLowerCase());
-  if (index < 0) return clean.slice(0, 220);
-  const start = Math.max(0, index - 75);
-  const end = Math.min(clean.length, index + query.length + 145);
-  return `${start ? '…' : ''}${clean.slice(start, end)}${end < clean.length ? '…' : ''}`;
-}
-
-function compareStableDocuments(first, second) {
-  const firstKey = `${first.path || first.title}\u0000${first.title}\u0000${first.id}`.toLocaleLowerCase();
-  const secondKey = `${second.path || second.title}\u0000${second.title}\u0000${second.id}`.toLocaleLowerCase();
-  return firstKey.localeCompare(secondKey);
-}
-
-function searchDocuments(db, query, filters, options = {}) {
-  const docs = documentRows(db, { ...filters, limit: 500 }, options);
-  if (!query.trim()) {
-    return docs.slice(0, 50).map((doc) => ({ ...doc, score: 0, snippet: snippet(doc.content, '') }));
-  }
-  const searchItems = docs.map((doc) => ({ ...doc, tagsText: doc.tags.join(' '), metadataText: JSON.stringify(doc.metadata) }));
-  const fuse = new Fuse(searchItems, {
-    includeScore: true,
-    threshold: 0.62,
-    ignoreLocation: true,
-    minMatchCharLength: 2,
-    keys: [
-      { name: 'title', weight: 0.42 },
-      { name: 'content', weight: 0.28 },
-      { name: 'path', weight: 0.12 },
-      { name: 'type', weight: 0.05 },
-      { name: 'tagsText', weight: 0.08 },
-      { name: 'metadataText', weight: 0.05 }
-    ]
-  });
-  const results = fuse.search(query).map(({ item, score }) => {
-    const lowerQuery = query.toLocaleLowerCase();
-    const titleHit = item.title.toLocaleLowerCase().includes(lowerQuery);
-    const contentHit = item.content.toLocaleLowerCase().includes(lowerQuery);
-    return {
-      ...item,
-      score: Math.round((1 - (score ?? 1)) * 100) / 100,
-      snippet: snippet(item.content, query),
-      _rank: titleHit ? 3 : contentHit ? 2 : 1
-    };
-  }).sort((a, b) => b._rank - a._rank || b.score - a.score || compareStableDocuments(a, b));
-  return results.map(({ _rank, tagsText, metadataText, ...result }) => result).slice(0, 100);
-}
-
 function installRoutes(app, db, authDb, environment = process.env, { offlineOnly = false } = {}) {
+  const searchWorker = createSearchWorker(db.path);
+  app.locals.searchWorker = searchWorker;
   app.get('/api/health', (req, res) => res.json({ ok: true, name: 'NexusData API', timestamp: now() }));
   installAuthRoutes(app, authDb, environment, { offlineOnly });
   app.use('/api', requireAuth(authDb, environment, { offlineOnly }));
@@ -607,11 +527,15 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
     res.json(withDocumentShape(db, updated));
   });
 
-  app.get('/api/search', (req, res) => {
+  app.get('/api/search', async (req, res) => {
     const query = asText(req.query.q);
     const includeCommonPaths = ['1', 'true', 'yes'].includes(String(req.query.includeCommonPaths || '').toLowerCase());
-    const results = searchDocuments(db, query, { source: req.query.source, type: req.query.type, tag: req.query.tag, collection: req.query.collection, updatedFrom: req.query.updatedFrom }, { localOnly: isOffline(req), includeCommonPaths });
-    res.json({ query, total: results.length, results });
+    try {
+      const results = await searchWorker.search(query, { source: req.query.source, type: req.query.type, tag: req.query.tag, collection: req.query.collection, updatedFrom: req.query.updatedFrom }, { localOnly: isOffline(req), includeCommonPaths });
+      res.json({ query, total: results.length, results });
+    } catch (error) {
+      res.status(500).json({ error: error.message || 'La búsqueda no se pudo completar' });
+    }
   });
 
   app.get('/api/tags', (req, res) => {

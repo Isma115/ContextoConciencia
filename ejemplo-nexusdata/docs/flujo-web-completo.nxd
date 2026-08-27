@@ -1,0 +1,94 @@
+diagram "Flujo completo de Atlas Local"
+
+node abrir_index "Abrir index.html" start
+node cargar_local "Cargar solo styles.css y app.js (defer)" step
+node construir_dom "Construir DOM: hero, recursos, recorrido, acerca y footer" step
+node aplicar_estilos "Aplicar tema CSS y layout responsive" step
+node ejecutar_app "Ejecutar app.js tras parsear el DOM" step
+node registrar_listeners "Registrar listeners de filtro, tema, botones, teclado y navegación" step
+node recursos_memoria "Usar resources[] embebido con 6 recursos" step
+node leer_tema "¿Se puede leer localStorage?" decision
+node tema_leido "Leer atlas-local-theme o usar dark" step
+node tema_fallback "Usar dark tras error de lectura" step
+node tema_es_light "¿El valor es exactamente light?" decision
+node aplicar_light_inicial "Aplicar light, icono, etiqueta y aria-pressed" step
+node aplicar_dark_inicial "Aplicar dark, icono, etiqueta y aria-pressed" step
+node render_inicial "renderResources() con consulta vacía" step
+node pintar_inicial "Escapar HTML, pintar grid y actualizar contador" step
+node pagina_lista "Mostrar recursos y ocultar empty-state" step
+node elegir_interaccion "¿Qué interacción ocurre?" decision
+node iniciar_filtro "Escribir o cambiar el filtro" step
+node buscar_recursos "Normalizar y buscar en tipo, textos, archivo y tags" step
+node escapar_tarjetas "Escapar HTML, crear tarjetas y actualizar contador" step
+node hay_coincidencias "¿Hay coincidencias?" decision
+node resultados_filtro "Resultados filtrados visibles" end
+node sin_coincidencias "Mostrar aviso: no hay recursos" end
+node limpiar_filtro "Vaciar input, renderizar de nuevo y enfocar" end
+node alternar_tema "Calcular tema opuesto y aplicar setTheme" step
+node tema_actual_light "¿El tema actual es light?" decision
+node aplicar_dark_evento "Aplicar dark, icono, etiqueta y aria-pressed" step
+node aplicar_light_evento "Aplicar light, icono, etiqueta y aria-pressed" step
+node guardar_tema "¿Se puede guardar en localStorage?" decision
+node tema_persistido "Tema cambiado y persistido" end
+node tema_sesion "Tema cambiado solo durante esta sesión" end
+node explorar_recursos "Desplazar a #recursos, esperar 500 ms y enfocar" end
+node completar_recorrido "Marcar los 3 pasos, ambos textos y el botón" end
+node atajo_filtro "¿La tecla / se pulsa fuera del filtro?" decision
+node foco_atajo "Cancelar acción y enfocar filtro" end
+node sin_atajo "Sin cambio" end
+node navegar "¿El clic es un nav-link?" decision
+node actualizar_nav "Marcar enlace activo y seguir el ancla" end
+node ir_inicio "Seguir #inicio; el activo no cambia" end
+
+edge abrir_index -> cargar_local "Abrir la página" forward
+edge cargar_local -> construir_dom "Parsear HTML" forward
+edge construir_dom -> aplicar_estilos "Mostrar estructura" forward
+edge aplicar_estilos -> ejecutar_app "DOM listo; script defer" forward
+edge ejecutar_app -> registrar_listeners "Preparar eventos" forward
+edge registrar_listeners -> recursos_memoria "Declarar datos locales" forward
+edge recursos_memoria -> leer_tema "Inicializar estado" forward
+edge leer_tema -> tema_leido "Sí" forward
+edge leer_tema -> tema_fallback "No / error" forward
+edge tema_leido -> tema_es_light "Valor leído" forward
+edge tema_fallback -> tema_es_light "dark" forward
+edge tema_es_light -> aplicar_light_inicial "Sí" forward
+edge tema_es_light -> aplicar_dark_inicial "No" forward
+edge aplicar_light_inicial -> render_inicial "Tema inicial aplicado" forward
+edge aplicar_dark_inicial -> render_inicial "Tema inicial aplicado" forward
+edge render_inicial -> pintar_inicial "Consulta vacía: pasan los 6 recursos" forward
+edge pintar_inicial -> pagina_lista "6 tarjetas; empty-state oculto" forward
+edge pagina_lista -> elegir_interaccion "Esperar eventos del usuario" forward
+
+edge elegir_interaccion -> iniciar_filtro "Input del filtro" forward
+edge iniciar_filtro -> buscar_recursos "event.target.value" forward
+edge buscar_recursos -> escapar_tarjetas "Coincidencias por includes" forward
+edge escapar_tarjetas -> hay_coincidencias "Actualizar grid y estado" forward
+edge hay_coincidencias -> resultados_filtro "Sí" forward
+edge hay_coincidencias -> sin_coincidencias "No" forward
+
+edge elegir_interaccion -> limpiar_filtro "Pulsar Limpiar" forward
+edge elegir_interaccion -> alternar_tema "Pulsar tema" forward
+edge alternar_tema -> tema_actual_light "Consultar dataset.theme" forward
+edge tema_actual_light -> aplicar_dark_evento "Sí: cambiar a dark" forward
+edge tema_actual_light -> aplicar_light_evento "No: cambiar a light" forward
+edge aplicar_dark_evento -> guardar_tema "Tema aplicado" forward
+edge aplicar_light_evento -> guardar_tema "Tema aplicado" forward
+edge guardar_tema -> tema_persistido "Sí" forward
+edge guardar_tema -> tema_sesion "No / error" forward
+
+edge elegir_interaccion -> explorar_recursos "Pulsar Explorar recursos" forward
+edge elegir_interaccion -> completar_recorrido "Marcar recorrido" forward
+edge elegir_interaccion -> completar_recorrido "Completar demo" forward
+edge elegir_interaccion -> atajo_filtro "keydown /" forward
+edge atajo_filtro -> foco_atajo "Sí" forward
+edge atajo_filtro -> sin_atajo "No" forward
+edge elegir_interaccion -> navegar "Pulsar un ancla" forward
+edge navegar -> actualizar_nav "nav-link" forward
+edge navegar -> ir_inicio "Marca Atlas" forward
+
+# La web no usa fetch, API, login, CDN, fuentes remotas, servicios externos ni base de datos.
+# data/recursos.json y la documentación aparecen como referencias de resources[], pero no se leen en ejecución: la lista visible está en app.js.
+# Si localStorage falla al leer, se usa dark; si falla al guardar, el tema queda solo en la sesión y la demo continúa.
+# No hay validación de esquema ni comprobación de nodos DOM; un id esperado ausente puede provocar un error no capturado al registrar listeners.
+# styles.css solo presenta la interfaz y refluye el layout en viewport <= 800 y <= 540.
+# Las tarjetas de recursos son informativas: no tienen enlace ni listener de apertura.

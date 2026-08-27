@@ -13,6 +13,15 @@ let navigateToView = () => {};
 let filesRequestId = 0;
 let analysisRequestId = 0;
 let analysisController = null;
+const CODE_MAP_TREE_WIDTH_KEY = 'nexusdata.code-map-tree-width.v1';
+const CODE_MAP_TREE_WIDTH_DEFAULT = 210;
+const CODE_MAP_TREE_WIDTH_MIN = 180;
+const CODE_MAP_TREE_WIDTH_MAX = 720;
+const CODE_MAP_CANVAS_WIDTH_MIN = 320;
+const CODE_MAP_RESIZER_WIDTH = 10;
+let codeMapTreeWidth = loadCodeMapTreeWidth();
+let codeMapResizeState = null;
+let codeMapResizeEventsBound = false;
 
 export function configureCodeMap({ onNavigate } = {}) {
   navigateToView = onNavigate || navigateToView;
@@ -20,6 +29,103 @@ export function configureCodeMap({ onNavigate } = {}) {
 
 function codeMapState() { return state.codeMap; }
 function formatBytes(value) { return value > 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : value > 1024 ? `${Math.round(value / 1024)} KB` : `${value || 0} B`; }
+
+function normaliseCodeMapTreeWidth(value) {
+  if (value == null || value === '') return CODE_MAP_TREE_WIDTH_DEFAULT;
+  const width = Number(value);
+  if (!Number.isFinite(width)) return CODE_MAP_TREE_WIDTH_DEFAULT;
+  return Math.max(CODE_MAP_TREE_WIDTH_MIN, Math.min(CODE_MAP_TREE_WIDTH_MAX, width));
+}
+
+function loadCodeMapTreeWidth() {
+  if (typeof window === 'undefined') return CODE_MAP_TREE_WIDTH_DEFAULT;
+  try {
+    return normaliseCodeMapTreeWidth(window.localStorage?.getItem(CODE_MAP_TREE_WIDTH_KEY));
+  } catch {
+    return CODE_MAP_TREE_WIDTH_DEFAULT;
+  }
+}
+
+function persistCodeMapTreeWidth(width) {
+  codeMapTreeWidth = Math.round(normaliseCodeMapTreeWidth(width));
+  try {
+    if (typeof window !== 'undefined') window.localStorage?.setItem(CODE_MAP_TREE_WIDTH_KEY, String(codeMapTreeWidth));
+  } catch {
+    // El divisor sigue funcionando aunque el almacenamiento local no esté disponible.
+  }
+}
+
+function codeMapTreeWidthLimits(workspace) {
+  const styles = window.getComputedStyle(workspace);
+  const padding = (Number.parseFloat(styles.paddingLeft) || 0) + (Number.parseFloat(styles.paddingRight) || 0);
+  const columnGap = Number.parseFloat(styles.columnGap) || 0;
+  const available = workspace.clientWidth - padding - (CODE_MAP_RESIZER_WIDTH + columnGap * 2);
+  return {
+    min: CODE_MAP_TREE_WIDTH_MIN,
+    max: Math.max(CODE_MAP_TREE_WIDTH_MIN, Math.min(CODE_MAP_TREE_WIDTH_MAX, available - CODE_MAP_CANVAS_WIDTH_MIN))
+  };
+}
+
+function applyCodeMapTreeWidth(workspace, width) {
+  if (!workspace) return codeMapTreeWidth;
+  const limits = codeMapTreeWidthLimits(workspace);
+  const candidate = Number.isFinite(Number(width)) ? Number(width) : codeMapTreeWidth;
+  const nextWidth = Math.round(Math.max(limits.min, Math.min(limits.max, candidate)));
+  workspace.style.setProperty('--code-map-tree-width', `${nextWidth}px`);
+  return nextWidth;
+}
+
+function resizeHandleMarkup() {
+  return '<button type="button" class="code-map-resizer" data-code-map-resize aria-label="Ajustar el ancho de la lista de ficheros" title="Arrastra para ajustar el ancho de la lista de ficheros"><span aria-hidden="true"></span></button>';
+}
+
+function startCodeMapResize(event) {
+  const handle = event.target.closest?.('[data-code-map-resize]');
+  if (!handle || (event.button !== 0 && event.pointerType !== 'touch')) return;
+  const workspace = handle.closest('[data-code-map-workspace]');
+  const tree = workspace?.querySelector('.code-map-tree');
+  if (!workspace || !tree) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  codeMapResizeState = {
+    handle,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startWidth: tree.getBoundingClientRect().width,
+    width: tree.getBoundingClientRect().width,
+    workspace
+  };
+  workspace.classList.add('is-resizing');
+  document.body?.classList.add('is-code-map-resizing');
+  handle.setPointerCapture?.(event.pointerId);
+}
+
+function moveCodeMapResize(event) {
+  const resize = codeMapResizeState;
+  if (!resize || event.pointerId !== resize.pointerId) return;
+  event.preventDefault();
+  resize.width = applyCodeMapTreeWidth(resize.workspace, resize.startWidth + event.clientX - resize.startX);
+}
+
+function finishCodeMapResize(event) {
+  const resize = codeMapResizeState;
+  if (!resize || (event?.pointerId != null && event.pointerId !== resize.pointerId)) return;
+  persistCodeMapTreeWidth(resize.width);
+  resize.workspace.classList.remove('is-resizing');
+  document.body?.classList.remove('is-code-map-resizing');
+  try { resize.handle.releasePointerCapture?.(resize.pointerId); } catch {}
+  codeMapResizeState = null;
+}
+
+function bindCodeMapResizeEvents() {
+  if (codeMapResizeEventsBound) return;
+  codeMapResizeEventsBound = true;
+  document.addEventListener('pointermove', moveCodeMapResize);
+  document.addEventListener('pointerup', finishCodeMapResize);
+  document.addEventListener('pointercancel', finishCodeMapResize);
+}
+
 function deriveFolders(files = []) {
   const folders = new Set();
   files.forEach((file) => {
@@ -199,7 +305,14 @@ export function renderCodeMap() {
     bindCodeMapEvents($('#view-code-map'));
     return;
   }
-  $('#view-code-map').innerHTML = `<div class="code-map-shell">${toolbarMarkup()}${codeMap.error ? `<div class="code-map-error panel">${escapeHtml(codeMap.error)}</div>` : ''}${staleMarkup()}${codeMap.loading ? '<div class="code-map-progress panel"><span class="spinner"></span><span>Analizando el alcance seleccionado sin ejecutar su código…</span></div>' : ''}${codeMap.result ? `<div class="code-map-workspace">${folderMarkup()}<section class="code-map-canvas-wrap panel"><div class="code-map-canvas-toolbar"><div><button type="button" class="btn btn-secondary btn-small" data-code-map-zoom="out" aria-label="Alejar">−</button><span class="code-map-zoom-value">${Math.round(codeMap.zoom * 100)}%</span><button type="button" class="btn btn-secondary btn-small" data-code-map-zoom="in" aria-label="Acercar">＋</button><button type="button" class="btn btn-secondary btn-small" data-code-map-fit>Ajustar</button></div></div><div id="code-map-graph" class="code-map-graph" tabindex="0"></div><div id="code-map-minimap-wrap">${minimapMarkup(codeMap.result, codeMap.filters, codeMap.expanded, codeMap.groupByFolder)}</div></section></div>` : beforeMapMarkup()}</div>`;
+  const treeMarkup = codeMap.result ? folderMarkup() : '';
+  const workspaceClass = treeMarkup ? 'code-map-workspace' : 'code-map-workspace code-map-workspace-single';
+  $('#view-code-map').innerHTML = `<div class="code-map-shell">${toolbarMarkup()}${codeMap.error ? `<div class="code-map-error panel">${escapeHtml(codeMap.error)}</div>` : ''}${staleMarkup()}${codeMap.loading ? '<div class="code-map-progress panel"><span class="spinner"></span><span>Analizando el alcance seleccionado sin ejecutar su código…</span></div>' : ''}${codeMap.result ? `<div id="code-map-workspace" class="${workspaceClass}" data-code-map-workspace style="--code-map-tree-width: ${Math.round(codeMapTreeWidth)}px">${treeMarkup}${treeMarkup ? resizeHandleMarkup() : ''}<section class="code-map-canvas-wrap panel"><div class="code-map-canvas-toolbar"><div><button type="button" class="btn btn-secondary btn-small" data-code-map-zoom="out" aria-label="Alejar">−</button><span class="code-map-zoom-value">${Math.round(codeMap.zoom * 100)}%</span><button type="button" class="btn btn-secondary btn-small" data-code-map-zoom="in" aria-label="Acercar">＋</button><button type="button" class="btn btn-secondary btn-small" data-code-map-fit>Ajustar</button></div></div><div id="code-map-graph" class="code-map-graph" tabindex="0"></div><div id="code-map-minimap-wrap">${minimapMarkup(codeMap.result, codeMap.filters, codeMap.expanded, codeMap.groupByFolder)}</div></section></div>` : beforeMapMarkup()}</div>`;
+  const workspace = $('#code-map-workspace');
+  const resizeHandle = workspace?.querySelector('[data-code-map-resize]');
+  if (workspace && resizeHandle && window.getComputedStyle(resizeHandle).display !== 'none') {
+    codeMapTreeWidth = applyCodeMapTreeWidth(workspace, codeMapTreeWidth);
+  }
   bindCodeMapEvents($('#view-code-map'));
   if (codeMap.result) renderGraphAndDetails();
 }
@@ -291,10 +404,30 @@ async function openCode(path, line = null) {
     if (line) query.set('line', line);
     const file = await api(`/code-map/file?${query}`);
     $('#modal-root').innerHTML = modalMarkup(file, line);
+    const modal = $('#code-map-code-modal');
+    modal?.addEventListener('click', (event) => {
+      if (event.target.closest?.('[data-code-map-close-modal]')) closeModal();
+    });
+    modal?.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      closeModal();
+    });
     const target = $('#modal-root .code-map-code-line.is-target');
     target?.scrollIntoView({ block: 'center' });
     $('#modal-root [data-code-map-close-modal]')?.focus();
   } catch (error) { showToast(error.message, true); }
+}
+
+async function openFileCode(fileId, line = null) {
+  const file = fileById(fileId);
+  if (file) await openCode(file.path, line);
+}
+
+async function openSymbolCode(symbolId) {
+  const file = fileBySymbolId(symbolId);
+  const symbol = file?.symbols.find((item) => item.id === symbolId);
+  if (file) await openCode(file.path, symbol?.range?.startLine || 1);
 }
 
 function closeModal() { $('#code-map-code-modal')?.remove(); }
@@ -337,8 +470,10 @@ function updateAnalysisTarget(value) {
 
 function bindCodeMapEvents(container) {
   if (!container) return;
+  bindCodeMapResizeEvents();
   if (container.dataset.codeMapBound !== 'true') {
     container.dataset.codeMapBound = 'true';
+    container.addEventListener('pointerdown', startCodeMapResize);
     container.addEventListener('click', async (event) => {
     const target = event.target.closest('[data-code-map-go-global], [data-code-map-refresh-files], [data-code-map-generate], [data-code-map-cancel], [data-code-map-file], [data-code-map-file-select], [data-code-map-tree-file], [data-code-map-toggle], [data-code-map-symbol], [data-code-map-relation], [data-code-map-open], [data-code-map-zoom], [data-code-map-fit], [data-code-map-close-modal]');
     if (!target) return;
@@ -347,9 +482,9 @@ function bindCodeMapEvents(container) {
     if (target.matches('[data-code-map-generate]')) { await generateCodeMap(); return; }
     if (target.matches('[data-code-map-cancel]')) { analysisController?.abort(); return; }
     if (target.matches('[data-code-map-toggle]')) { const id = target.dataset.codeMapToggle; codeMapState().expanded[id] = !codeMapState().expanded[id]; renderGraphAndDetails(); return; }
-    if (target.matches('[data-code-map-file]')) { selectFile(target.dataset.codeMapFile); return; }
-    if (target.matches('[data-code-map-file-select], [data-code-map-tree-file]')) { selectFile(target.dataset.codeMapFileSelect || target.dataset.codeMapTreeFile); return; }
-    if (target.matches('[data-code-map-symbol]')) { codeMapState().selectedId = target.dataset.codeMapSymbol; codeMapState().selectedRelationId = null; renderGraphAndDetails(); return; }
+    if (target.matches('[data-code-map-file]')) { selectFile(target.dataset.codeMapFile); await openFileCode(target.dataset.codeMapFile); return; }
+    if (target.matches('[data-code-map-file-select], [data-code-map-tree-file]')) { const fileId = target.dataset.codeMapFileSelect || target.dataset.codeMapTreeFile; selectFile(fileId); await openFileCode(fileId); return; }
+    if (target.matches('[data-code-map-symbol]')) { codeMapState().selectedId = target.dataset.codeMapSymbol; codeMapState().selectedRelationId = null; renderGraphAndDetails(); await openSymbolCode(target.dataset.codeMapSymbol); return; }
     if (target.matches('[data-code-map-relation]')) { codeMapState().selectedRelationId = target.dataset.codeMapRelation; codeMapState().selectedId = null; renderGraphAndDetails(); return; }
     if (target.matches('[data-code-map-open]')) { await openCode(target.dataset.codeMapOpen, target.dataset.codeMapLine); return; }
     if (target.matches('[data-code-map-close-modal]')) { closeModal(); return; }

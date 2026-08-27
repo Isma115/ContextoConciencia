@@ -1,10 +1,11 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
-import { OFFLINE_ONLY, persistSearchPreferences, state, resetFilters } from '../core/state.js';
-import { statusLabel, typeLabel } from '../core/format.js';
+import { persistSearchPreferences, state, resetFilters } from '../core/state.js';
+import { shortDate, sourceIcon, statusLabel, typeLabel } from '../core/format.js';
 import { showToast } from '../ui/notifications.js';
 import { bindDocumentOpeners } from './documents.js';
 import { openSourceModal } from './source-modal.js';
+import { deleteSource, syncSource } from './sources.js';
 
 const SEARCH_DEBOUNCE_MS = 500;
 let refreshData = async () => {};
@@ -60,6 +61,10 @@ function tagOptions(selected = '') {
   return `<option value="">Todas las etiquetas</option>${state.tags.map((item) => `<option value="${escapeHtml(item.name)}" ${item.name === selected ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}`;
 }
 
+function typeOptions(selected = '') {
+  return `<option value="">Tipo</option><option value="any" ${selected === 'any' ? 'selected' : ''}>Cualquier tipo de fichero</option><option value="markdown" ${selected === 'markdown' ? 'selected' : ''}>Markdown</option><option value="json" ${selected === 'json' ? 'selected' : ''}>JSON</option><option value="csv" ${selected === 'csv' ? 'selected' : ''}>CSV</option><option value="text" ${selected === 'text' ? 'selected' : ''}>TXT</option><option value="diagram" ${selected === 'diagram' ? 'selected' : ''}>Diagrama NexusData</option><option value="html" ${selected === 'html' ? 'selected' : ''}>HTML</option><option value="css" ${selected === 'css' ? 'selected' : ''}>CSS</option><option value="javascript" ${selected === 'javascript' ? 'selected' : ''}>JavaScript</option>`;
+}
+
 function commonPathsMarkup(prefix = '') {
   const id = prefix ? 'global-common-paths' : 'common-paths';
   const checked = state.includeCommonPaths ? ' checked' : '';
@@ -113,7 +118,7 @@ function bindCollectionAndTagActions(container, prefix = '') {
 
 function filterMarkup(prefix = '', filters = state.filters) {
   const id = (name) => prefix ? `global-filter-${name}` : `filter-${name}`;
-  return `<div class="filter-row"><select id="${id('source')}" class="select">${sourceOptions(filters.source)}</select><select id="${id('type')}" class="select"><option value="">Tipo</option><option value="markdown" ${filters.type === 'markdown' ? 'selected' : ''}>Markdown</option><option value="json" ${filters.type === 'json' ? 'selected' : ''}>JSON</option><option value="csv" ${filters.type === 'csv' ? 'selected' : ''}>CSV</option><option value="text" ${filters.type === 'text' ? 'selected' : ''}>TXT</option><option value="diagram" ${filters.type === 'diagram' ? 'selected' : ''}>Diagrama NexusData</option><option value="html" ${filters.type === 'html' ? 'selected' : ''}>HTML</option><option value="css" ${filters.type === 'css' ? 'selected' : ''}>CSS</option><option value="javascript" ${filters.type === 'javascript' ? 'selected' : ''}>JavaScript</option></select><select id="${id('tag')}" class="select">${tagOptions(filters.tag).replace('Todas las etiquetas', 'Etiqueta')}</select><select id="${id('collection')}" class="select">${collectionOptions(filters.collection).replace('Todas las colecciones', 'Colección')}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div>`;
+  return `<div class="filter-row"><select id="${id('source')}" class="select">${sourceOptions(filters.source)}</select><select id="${id('type')}" class="select">${typeOptions(filters.type)}</select><select id="${id('tag')}" class="select">${tagOptions(filters.tag).replace('Todas las etiquetas', 'Etiqueta')}</select><select id="${id('collection')}" class="select">${collectionOptions(filters.collection).replace('Todas las colecciones', 'Colección')}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div>`;
 }
 
 function resultMarkup(results, prefix = '') {
@@ -143,6 +148,7 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
   ['source', 'type', 'tag', 'collection', 'date'].forEach((name) => $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`).addEventListener('change', () => { cancel(); perform(); }));
   commonPaths?.addEventListener('change', async () => {
     state.includeCommonPaths = commonPaths.checked;
+    persistSearchPreferences();
     cancel();
     if (!state.includeCommonPaths) {
       commonPathsReady = false;
@@ -157,6 +163,7 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
     } catch (error) {
       state.includeCommonPaths = false;
       commonPaths.checked = false;
+      persistSearchPreferences();
       showToast(error.message, true);
     } finally {
       commonPaths.disabled = false;
@@ -255,17 +262,22 @@ export function performSearch() {
   return performSearchRequest({ view: 'search', renderResults: renderSearch });
 }
 
-function projectFolderName(value) { return String(value || '').split(/[\\/]/).filter(Boolean).pop() || 'Proyecto global'; }
+function globalSourceMarkup(sources) {
+  if (!sources.length) return '<div class="global-sources-empty">No hay fuentes cargadas. Añade una fuente local para empezar a buscar.</div>';
+  return sources.map((source) => {
+    const config = source.config || {};
+    const detail = source.type === 'rest' ? config.url : (config.paths || []).join(' · ');
+    const sourceKind = source.type === 'rest' ? 'rest' : source.type === 'local' ? 'local' : 'generic';
+    const sourceLabel = sourceKind === 'rest' ? 'API REST' : sourceKind === 'local' ? 'Archivos locales' : 'Fuente';
+    return `<article class="global-source-item"><div class="global-source-main"><div class="source-logo source-logo-${sourceKind}" role="img" aria-label="${sourceLabel}" title="${sourceLabel}">${sourceIcon(sourceKind)}</div><div class="global-source-copy"><strong>${escapeHtml(source.name)}</strong><span title="${escapeHtml(detail || 'Sin configuración')}">${escapeHtml(detail || 'Sin configuración')}</span></div><span class="pill ${escapeHtml(source.status)}">${escapeHtml(statusLabel(source.status))}</span></div><div class="global-source-footer"><span>${Number(source.documentCount) || 0} docs · ${escapeHtml(shortDate(source.lastSyncAt))}</span><div class="global-source-actions"><button class="btn btn-secondary btn-small" data-global-source-action="sync" data-global-source-id="${escapeHtml(source.id)}">↻ Actualizar</button><button class="btn btn-secondary btn-small" data-global-source-action="edit" data-global-source-id="${escapeHtml(source.id)}">Editar</button><button class="btn btn-danger btn-small" data-global-source-action="delete" data-global-source-id="${escapeHtml(source.id)}">Eliminar</button></div></div></article>`;
+  }).join('');
+}
 
 export function renderGlobalSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
-  const project = state.globalProject;
-  const offline = OFFLINE_ONLY || state.user?.offline === true;
-  const sourceActions = offline ? '<button class="btn btn-primary btn-small" data-global-source-action="new-local">＋ Carpeta local</button>' : '<button class="btn btn-secondary btn-small" data-global-source-action="new-rest">＋ API REST</button><button class="btn btn-primary btn-small" data-global-source-action="new-local">＋ Carpeta local</button>';
-  const projectPanel = project
-    ? `<div class="global-project-loaded"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>${escapeHtml(project.name)}</strong><span title="${escapeHtml(project.path || '')}">${escapeHtml(project.path || 'Sin ruta')}</span><small>${escapeHtml(statusLabel(project.source.status))}</small></div></div><div class="global-project-actions">${sourceActions}<button class="btn btn-secondary btn-small" data-global-project-action="sync">↻ Actualizar recursos</button><button class="btn btn-danger btn-small" data-global-project-action="close">Cerrar proyecto</button></div>`
-    : `<div class="global-project-loaded is-empty"><div class="global-project-icon">⌘</div><div class="global-project-copy"><strong>Ningún proyecto cargado</strong></div><div class="global-project-actions"><button class="btn btn-secondary" data-global-project-action="new">＋ Nuevo proyecto</button><button class="btn btn-primary" data-global-project-action="load">Cargar proyecto</button></div>`;
-  $('#view-global-search').innerHTML = '<div id="global-search-controls"></div><div class="panel global-project-panel"><div class="global-project-row">' + projectPanel + '</div></div><div id="global-search-surface"></div>';
-  bindGlobalProjectActions();
+  const sources = state.sources.filter((source) => source.config?.role !== 'common-paths');
+  const sourceCount = `${sources.length} fuente${sources.length === 1 ? '' : 's'} cargada${sources.length === 1 ? '' : 's'}`;
+  const sourcePanel = `<div class="panel global-sources-panel"><div class="panel-header"><div><h2>Fuentes</h2><p>${sourceCount}. Se pueden consultar juntas desde Buscar.</p></div><button class="btn btn-primary btn-small" data-global-source-action="load">＋ Cargar Fuente</button></div><div class="global-source-list">${globalSourceMarkup(sources)}</div></div>`;
+  $('#view-global-search').innerHTML = '<div id="global-search-controls"></div>' + sourcePanel + '<div id="global-search-surface"></div>';
   bindGlobalSourceActions();
   bindDocumentOpeners($('#view-global-search'));
   renderGlobalSearchControls({ restoreFocus, selectionStart, selectionEnd });
@@ -296,39 +308,9 @@ export function performGlobalSearch() {
   return performSearchRequest({ prefix: 'global', view: 'global-search', renderResults: renderGlobalSearchSurface });
 }
 
-function bindGlobalProjectActions() {
-  document.querySelectorAll('[data-global-project-action="new"], [data-global-project-action="load"]').forEach((button) => button.addEventListener('click', () => chooseGlobalProject(button.dataset.globalProjectAction)));
-  document.querySelectorAll('[data-global-project-action="sync"]').forEach((button) => button.addEventListener('click', syncGlobalProject));
-  document.querySelectorAll('[data-global-project-action="close"]').forEach((button) => button.addEventListener('click', closeGlobalProject));
-}
-
 function bindGlobalSourceActions() {
-  document.querySelectorAll('[data-global-source-action="new-local"]').forEach((button) => button.addEventListener('click', () => openSourceModal(null, 'local', [], '', 'global-search')));
-  document.querySelectorAll('[data-global-source-action="new-rest"]').forEach((button) => button.addEventListener('click', () => openSourceModal(null, 'rest', [], '', 'global-search')));
-}
-
-async function chooseGlobalProject(mode) {
-  try {
-    if (typeof window.nexusData?.selectLocalPaths !== 'function') throw new Error('El selector de carpetas no está disponible');
-    let projectPath = null;
-    if (mode === 'new' && typeof window.nexusData?.createProjectDirectory === 'function') projectPath = await window.nexusData.createProjectDirectory();
-    else projectPath = (await window.nexusData.selectLocalPaths({ directory: true }))[0] || null;
-    if (!projectPath) return;
-    const name = projectFolderName(projectPath);
-    const result = await api('/global-project', { method: 'POST', body: JSON.stringify({ path: projectPath, name }) });
-    state.globalProject = result.project;
-    showToast(`${result.sync?.total || 0} recursos indexados en ${name}`);
-    await refreshData();
-  } catch (error) { showToast(error.message, true); }
-}
-
-async function syncGlobalProject() {
-  const sourceId = state.globalProject?.source?.id;
-  if (!sourceId) return;
-  try { const result = await api(`/sources/${sourceId}/sync`, { method: 'POST' }); showToast(`${result.total || 0} recursos actualizados`); await refreshData(); } catch (error) { showToast(error.message, true); }
-}
-
-async function closeGlobalProject() {
-  if (!state.globalProject || !window.confirm(`¿Cerrar el proyecto global “${state.globalProject.name}” y retirar sus recursos del índice?`)) return;
-  try { await api('/global-project', { method: 'DELETE' }); state.globalProject = null; showToast('Proyecto global cerrado'); await refreshData(); } catch (error) { showToast(error.message, true); }
+  document.querySelectorAll('[data-global-source-action="load"]').forEach((button) => button.addEventListener('click', () => openSourceModal(null, 'local', [], '', 'global-search')));
+  document.querySelectorAll('[data-global-source-action="sync"]').forEach((button) => button.addEventListener('click', () => syncSource(button.dataset.globalSourceId)));
+  document.querySelectorAll('[data-global-source-action="edit"]').forEach((button) => button.addEventListener('click', () => openSourceModal(state.sources.find((source) => source.id === button.dataset.globalSourceId), null, [], '', 'global-search')));
+  document.querySelectorAll('[data-global-source-action="delete"]').forEach((button) => button.addEventListener('click', () => deleteSource(button.dataset.globalSourceId)));
 }

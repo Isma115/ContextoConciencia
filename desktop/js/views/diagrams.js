@@ -16,6 +16,8 @@ const ARROW_INSET = 0;
 const DIAGRAM_ZOOM_MIN = 0.2;
 const DIAGRAM_ZOOM_MAX = 3;
 const DIAGRAM_ZOOM_SENSITIVITY = 0.0015;
+const DIAGRAM_ZOOM_STEP = 1.15;
+const DIAGRAM_GRID_SIZE = 24;
 const HISTORY_LIMIT = 100;
 const NODE_TYPES = Object.freeze({
   start: 'Inicio',
@@ -50,6 +52,7 @@ let contextMenuNodeId = '';
 let undoStack = [];
 let redoStack = [];
 let diagramResizeObserver = null;
+let diagramKeyboardBound = false;
 let diagramViewport = {
   zoom: 1,
   offsetX: 0,
@@ -283,6 +286,16 @@ async function importDiagramFile() {
   }
 }
 
+export function bindDiagramMenu() {
+  window.nexusData?.onDiagramMenuAction?.((action) => {
+    if (!$('#view-diagrams')?.classList.contains('active')) return;
+    if (action === 'import') importDiagramFile();
+    if (action === 'export') exportDiagramText(serializeDiagram(activeDiagram()));
+    if (action === 'undo') undoDiagramChange();
+    if (action === 'redo') redoDiagramChange();
+  });
+}
+
 function cloneValue(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -339,7 +352,7 @@ function undoDiagramChange() {
   const current = historySnapshot();
   const previous = undoStack.pop();
   redoStack.push(current);
-  restoreHistory(previous, 'Cambio deshecho');
+  restoreHistory(previous);
 }
 
 function redoDiagramChange() {
@@ -347,7 +360,7 @@ function redoDiagramChange() {
   const current = historySnapshot();
   const next = redoStack.pop();
   undoStack.push(current);
-  restoreHistory(next, 'Cambio rehecho');
+  restoreHistory(next);
 }
 
 function beginTextHistory(element) {
@@ -574,9 +587,13 @@ function findPortElement(nodeId, portName) {
 
 function applyDiagramViewport() {
   const board = $('#diagram-board');
-  if (!board) return;
+  const canvas = $('#diagram-canvas');
+  if (!board || !canvas) return;
   board.style.transformOrigin = '0 0';
   board.style.transform = `matrix(${diagramViewport.zoom}, 0, 0, ${diagramViewport.zoom}, ${diagramViewport.offsetX}, ${diagramViewport.offsetY})`;
+  const gridSize = DIAGRAM_GRID_SIZE * diagramViewport.zoom;
+  canvas.style.backgroundSize = `${gridSize}px ${gridSize}px`;
+  canvas.style.backgroundPosition = `${diagramViewport.offsetX}px ${diagramViewport.offsetY}px`;
 }
 
 function fitDiagramViewport() {
@@ -619,6 +636,26 @@ function boardPointFromCanvasCoordinates(x, y) {
   };
 }
 
+function zoomDiagramAtPoint(pointerX, pointerY, factor) {
+  ensureDiagramViewport();
+  const boardX = (pointerX - diagramViewport.offsetX) / diagramViewport.zoom;
+  const boardY = (pointerY - diagramViewport.offsetY) / diagramViewport.zoom;
+  const zoom = clamp(diagramViewport.zoom * factor, DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX);
+  if (zoom === diagramViewport.zoom) return false;
+  diagramViewport.zoom = zoom;
+  diagramViewport.offsetX = pointerX - boardX * zoom;
+  diagramViewport.offsetY = pointerY - boardY * zoom;
+  diagramViewport.userZoomed = true;
+  applyDiagramViewport();
+  return true;
+}
+
+function zoomDiagramByFactor(factor) {
+  const canvas = $('#diagram-canvas');
+  if (!canvas) return;
+  zoomDiagramAtPoint(canvas.clientWidth / 2, canvas.clientHeight / 2, factor);
+}
+
 function handleDiagramWheel(event) {
   const canvas = event.currentTarget || $('#diagram-canvas');
   if (!canvas) return;
@@ -634,17 +671,8 @@ function handleDiagramWheel(event) {
   const rect = canvas.getBoundingClientRect();
   const pointerX = event.clientX - rect.left;
   const pointerY = event.clientY - rect.top;
-  const boardX = (pointerX - diagramViewport.offsetX) / diagramViewport.zoom;
-  const boardY = (pointerY - diagramViewport.offsetY) / diagramViewport.zoom;
   const factor = Math.exp(clamp(-delta * DIAGRAM_ZOOM_SENSITIVITY, -0.35, 0.35));
-  const zoom = clamp(diagramViewport.zoom * factor, DIAGRAM_ZOOM_MIN, DIAGRAM_ZOOM_MAX);
-  if (zoom === diagramViewport.zoom) return;
-
-  diagramViewport.zoom = zoom;
-  diagramViewport.offsetX = pointerX - boardX * zoom;
-  diagramViewport.offsetY = pointerY - boardY * zoom;
-  diagramViewport.userZoomed = true;
-  applyDiagramViewport();
+  zoomDiagramAtPoint(pointerX, pointerY, factor);
 }
 
 function nodePoint(node, portName) {
@@ -678,7 +706,7 @@ function curveGeometry(start, end, sourcePortName, targetPortName = 'left') {
     x: 0.125 * start.x + 0.375 * firstControl.x + 0.375 * secondControl.x + 0.125 * end.x,
     y: 0.125 * start.y + 0.375 * firstControl.y + 0.375 * secondControl.y + 0.125 * end.y
   };
-  return { path, midpoint };
+  return { path, midpoint, start, end };
 }
 
 function offsetFromPort(point, portName, distance = ARROW_INSET) {
@@ -764,8 +792,13 @@ function renderEdges(diagram) {
       : direction === 'backward'
         ? ' marker-start="url(#diagram-arrow)"'
         : '';
+    const endpointMarkup = direction === 'forward'
+      ? `<circle class="diagram-edge-endpoint diagram-edge-source" data-edge-role="source" cx="${geometry.start.x}" cy="${geometry.start.y}" r="5"></circle>`
+      : direction === 'backward'
+        ? `<circle class="diagram-edge-endpoint diagram-edge-target" data-edge-role="target" cx="${geometry.end.x}" cy="${geometry.end.y}" r="5"></circle>`
+        : `<circle class="diagram-edge-endpoint diagram-edge-source" data-edge-role="source" cx="${geometry.start.x}" cy="${geometry.start.y}" r="5"></circle><circle class="diagram-edge-endpoint diagram-edge-target" data-edge-role="target" cx="${geometry.end.x}" cy="${geometry.end.y}" r="5"></circle>`;
     const label = edge.label ? `<text class="diagram-edge-label" x="${geometry.midpoint.x}" y="${geometry.midpoint.y}" text-anchor="middle">${escapeHtml(edge.label)}</text>` : '';
-    return `<g class="diagram-edge-group"><path class="diagram-edge${selected}" d="${geometry.path}" data-edge-direction="${direction}"${marker}></path><path class="diagram-edge-hit" d="${geometry.path}" data-edge-id="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-label="Seleccionar conexión"></path>${label}</g>`;
+    return `<g class="diagram-edge-group${selected}" data-edge-direction="${direction}"><path class="diagram-edge-backplate" d="${geometry.path}"></path><path class="diagram-edge${selected}" d="${geometry.path}" data-edge-direction="${direction}"${marker}></path>${endpointMarkup}<path class="diagram-edge-hit" d="${geometry.path}" data-edge-id="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-label="Seleccionar conexión"></path>${label}</g>`;
   }).join('');
   const previewMarkup = connectionDrag?.moved && connectionDrag.current
     ? (() => {
@@ -836,7 +869,7 @@ function updateStatus() {
   } else if (selection.type === 'node') {
     status.textContent = 'Nodo seleccionado. Puedes editar su etiqueta o tipo.';
   } else if (selection.type === 'edge') {
-    status.textContent = 'Conexión seleccionada. Puedes editar su texto, cambiar la Dirección o eliminarla.';
+    status.textContent = 'Conexión seleccionada. Puedes editar su texto o cambiar la Dirección.';
   } else {
     status.textContent = 'Doble clic en un espacio vacío para añadir un nodo.';
   }
@@ -855,7 +888,7 @@ function updateSelectionUI() {
   });
   root.querySelectorAll('[data-diagram-port]').forEach((port) => port.classList.toggle('is-source', Boolean(connectionStart && connectionStart.nodeId === port.dataset.nodeId && connectionStart.port === port.dataset.port)));
   const deleteButton = $('#diagram-delete-selection');
-  if (deleteButton) deleteButton.disabled = !selection.id;
+  if (deleteButton) deleteButton.disabled = false;
   const connectButton = $('#diagram-connect');
   if (connectButton) {
     connectButton.classList.toggle('is-active', connectMode);
@@ -879,26 +912,26 @@ export function renderDiagrams() {
   if (!root) return;
   hideEdgeContextMenu();
   const diagram = activeDiagram();
-  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><button id="diagram-code" class="btn btn-secondary" type="button">⌘ Código</button><button id="diagram-import" class="btn btn-secondary" type="button">⇧ Importar</button><button id="diagram-export" class="btn btn-secondary" type="button">⇩ Exportar</button><div class="diagram-history-actions"><button id="diagram-undo" class="btn btn-secondary" type="button" title="Deshacer (⌘/Ctrl+Z)" aria-label="Deshacer (⌘/Ctrl+Z)" disabled>↶ Deshacer</button><button id="diagram-redo" class="btn btn-secondary" type="button" title="Rehacer (⌘/Ctrl+Shift+Z)" aria-label="Rehacer (⌘/Ctrl+Shift+Z)" disabled>↷ Rehacer</button></div><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth"><path d="M 0 0 L 8 4 L 0 8 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#4ec9b0"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
+  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><button id="diagram-code" class="btn btn-secondary" type="button">⌘ Código</button><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="#4ec9b0"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
   ensureDiagramViewport();
   observeDiagramCanvas();
   const arrowMarker = root.querySelector('#diagram-arrow');
   if (arrowMarker) {
     arrowMarker.setAttribute('orient', 'auto-start-reverse');
     arrowMarker.setAttribute('markerUnits', 'userSpaceOnUse');
-    arrowMarker.setAttribute('markerWidth', '12');
-    arrowMarker.setAttribute('markerHeight', '12');
-    arrowMarker.setAttribute('refX', '10');
-    arrowMarker.setAttribute('refY', '5');
-    arrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+    arrowMarker.setAttribute('markerWidth', '14');
+    arrowMarker.setAttribute('markerHeight', '14');
+    arrowMarker.setAttribute('refX', '12');
+    arrowMarker.setAttribute('refY', '7');
+    arrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 12 7 L 0 14 z');
   }
   const previewArrowMarker = root.querySelector('#diagram-arrow-preview');
   if (previewArrowMarker) {
-    previewArrowMarker.setAttribute('markerWidth', '12');
-    previewArrowMarker.setAttribute('markerHeight', '12');
-    previewArrowMarker.setAttribute('refX', '10');
-    previewArrowMarker.setAttribute('refY', '5');
-    previewArrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 10 5 L 0 10 z');
+    previewArrowMarker.setAttribute('markerWidth', '14');
+    previewArrowMarker.setAttribute('markerHeight', '14');
+    previewArrowMarker.setAttribute('refX', '12');
+    previewArrowMarker.setAttribute('refY', '7');
+    previewArrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 12 7 L 0 14 z');
   }
   root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Dirección de la conexión" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div><div id="diagram-node-context-menu" class="diagram-context-menu" role="menu" aria-label="Modificar tarjeta" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Tarjeta</div><button type="button" role="menuitem" data-node-action="focus-label">Editar etiqueta</button><div class="diagram-context-menu-heading">Tipo</div><button type="button" role="menuitemradio" data-node-type="start" aria-checked="false">Inicio</button><button type="button" role="menuitemradio" data-node-type="step" aria-checked="false">Paso</button><button type="button" role="menuitemradio" data-node-type="decision" aria-checked="false">Decisión</button><button type="button" role="menuitemradio" data-node-type="end" aria-checked="false">Fin</button><button type="button" role="menuitem" data-node-action="delete">Eliminar tarjeta</button></div>');
   bindDiagramEvents(root);
@@ -1010,6 +1043,40 @@ function removeSelection() {
     persistDiagrams();
     renderDiagrams();
   }
+}
+
+function deleteActiveDiagram() {
+  const current = activeDiagram();
+  const before = historySnapshot();
+  const deletedIndex = diagrams.findIndex((diagram) => diagram.id === current.id);
+  diagrams = diagrams.filter((diagram) => diagram.id !== current.id);
+  const nextDiagram = diagrams[deletedIndex] || diagrams[deletedIndex - 1] || createDiagram('Flujo principal');
+  if (!diagrams.length) diagrams = [nextDiagram];
+  activeDiagramId = nextDiagram.id;
+  resetDiagramInteraction();
+  recordHistory(before);
+  persistDiagrams();
+  renderDiagrams();
+  showToast(`Diagrama “${current.title}” eliminado`);
+}
+
+function openDeleteDiagramConfirmation() {
+  const diagram = activeDiagram();
+  $('#modal-root').innerHTML = `<div id="diagram-delete-confirmation" class="modal-backdrop"><div class="modal diagram-delete-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="diagram-delete-confirmation-title" aria-describedby="diagram-delete-confirmation-description"><div class="modal-head"><div><h2 id="diagram-delete-confirmation-title">Eliminar diagrama</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><p id="diagram-delete-confirmation-description">¿Quieres eliminar por completo el diagrama “${escapeHtml(diagram.title)}”? Se borrarán todos sus nodos y conexiones.</p></div><div class="modal-actions"><button id="diagram-delete-cancel" class="btn btn-secondary" data-close-modal type="button">No</button><button id="diagram-delete-confirm" class="btn btn-danger" type="button">Sí</button></div></div></div>`;
+  bindModalClose();
+  const modal = $('#diagram-delete-confirmation');
+  const cancelButton = $('#diagram-delete-cancel');
+  const confirmButton = $('#diagram-delete-confirm');
+  modal?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    closeModal();
+  });
+  confirmButton?.addEventListener('click', () => {
+    closeModal();
+    deleteActiveDiagram();
+  });
+  cancelButton?.focus();
 }
 
 function commitConnection(source, target) {
@@ -1269,6 +1336,18 @@ function handleKeydown(event) {
   const isTextControl = event.target.closest?.('input, textarea, select');
   const hasModifier = event.metaKey || event.ctrlKey;
   const key = event.key.toLowerCase();
+  const zoomIn = event.key === '+' || event.key === '=' || event.code === 'Equal';
+  const zoomOut = event.key === '-' || event.key === '_' || event.code === 'Minus';
+  if (hasModifier && !event.altKey && !isTextControl && zoomIn) {
+    event.preventDefault();
+    zoomDiagramByFactor(DIAGRAM_ZOOM_STEP);
+    return;
+  }
+  if (hasModifier && !event.altKey && !isTextControl && zoomOut) {
+    event.preventDefault();
+    zoomDiagramByFactor(1 / DIAGRAM_ZOOM_STEP);
+    return;
+  }
   if (hasModifier && !event.altKey && !isTextControl && key === 'z') {
     event.preventDefault();
     if (event.shiftKey) redoDiagramChange();
@@ -1332,16 +1411,12 @@ function bindDiagramEvents(root) {
     addNodeAt(point);
   });
   $('#diagram-code').addEventListener('click', () => openDiagramCodeModal());
-  $('#diagram-import').addEventListener('click', importDiagramFile);
-  $('#diagram-export').addEventListener('click', () => exportDiagramText(serializeDiagram(activeDiagram()), $('#diagram-export')));
   $('#diagram-connect').addEventListener('click', () => {
     connectMode = !connectMode;
     connectionStart = null;
     updateSelectionUI();
   });
-  $('#diagram-undo').addEventListener('click', undoDiagramChange);
-  $('#diagram-redo').addEventListener('click', redoDiagramChange);
-  $('#diagram-delete-selection').addEventListener('click', removeSelection);
+  $('#diagram-delete-selection').addEventListener('click', openDeleteDiagramConfirmation);
   const nodeLayer = $('#diagram-node-layer');
   nodeLayer.addEventListener('pointerdown', handleNodePointerDown);
   nodeLayer.addEventListener('click', handleNodeClick);
@@ -1364,5 +1439,10 @@ function bindDiagramEvents(root) {
   root.addEventListener('pointerup', handlePointerUp);
   root.addEventListener('pointercancel', handlePointerCancel);
   root.addEventListener('focusout', (event) => finishTextHistory(event.target));
-  root.addEventListener('keydown', handleKeydown);
+  if (!diagramKeyboardBound) {
+    diagramKeyboardBound = true;
+    document.addEventListener('keydown', (event) => {
+      if ($('#view-diagrams')?.classList.contains('active')) handleKeydown(event);
+    });
+  }
 }

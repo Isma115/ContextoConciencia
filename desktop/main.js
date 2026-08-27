@@ -5,6 +5,8 @@ const { startServer } = require('../server/app');
 
 let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
+const DIAGRAM_MENU_NAME = 'Diagrama';
+const PREFERENCES_MENU_NAME = 'Preferencias';
 const PROMPTS_MENU_NAME = 'Prompts';
 const SEARCH_PREFERENCES_FILENAME = 'search-preferences.json';
 const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -54,6 +56,35 @@ function setApplicationMenuForView(window, view) {
     }
   ];
 
+  template.push({
+    label: PREFERENCES_MENU_NAME,
+    submenu: [
+      { label: 'Preferencias de búsqueda: activas', enabled: false },
+      { type: 'separator' },
+      {
+        label: 'Paleta de colores',
+        submenu: [
+          {
+            label: 'Noche azul',
+            click: () => window.webContents.send('preferences-menu-action', 'palette', 'midnight')
+          },
+          {
+            label: 'Océano',
+            click: () => window.webContents.send('preferences-menu-action', 'palette', 'ocean')
+          },
+          {
+            label: 'Bosque',
+            click: () => window.webContents.send('preferences-menu-action', 'palette', 'forest')
+          },
+          {
+            label: 'Ciruela',
+            click: () => window.webContents.send('preferences-menu-action', 'palette', 'plum')
+          }
+        ]
+      }
+    ]
+  });
+
   if (view === 'html-viewer') {
     template.push({
       label: HTML_VIEW_MENU_NAME,
@@ -70,6 +101,31 @@ function setApplicationMenuForView(window, view) {
         {
           label: 'Cerrar documento',
           click: () => window.webContents.send('html-viewer-menu-action', 'close-document')
+        }
+      ]
+    });
+  }
+
+  if (view === 'diagrams') {
+    template.push({
+      label: DIAGRAM_MENU_NAME,
+      submenu: [
+        {
+          label: 'Importar',
+          click: () => window.webContents.send('diagram-menu-action', 'import')
+        },
+        {
+          label: 'Exportar',
+          click: () => window.webContents.send('diagram-menu-action', 'export')
+        },
+        { type: 'separator' },
+        {
+          label: 'Deshacer',
+          click: () => window.webContents.send('diagram-menu-action', 'undo')
+        },
+        {
+          label: 'Rehacer',
+          click: () => window.webContents.send('diagram-menu-action', 'redo')
         }
       ]
     });

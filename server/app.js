@@ -60,7 +60,7 @@ function startServer({ port = 3000, host = '127.0.0.1', dbPath, authDb, environm
         server,
         port: typeof address === 'object' && address ? address.port : port,
         host,
-        close: () => new Promise((done) => server.close(async () => { app.locals.db.close(); await app.locals.authDb.close(); done(); }))
+        close: () => new Promise((done) => server.close(async () => { await app.locals.searchWorker?.close(); app.locals.db.close(); await app.locals.authDb.close(); done(); }))
       }));
     });
   });

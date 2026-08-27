@@ -105,7 +105,8 @@ function normaliseSearchPreferences(preferences) {
     searchQuery: normaliseString(preferences?.searchQuery, SEARCH_QUERY_MAX_LENGTH, true),
     filters: normaliseFilters(preferences?.filters),
     globalSearchQuery: normaliseString(preferences?.globalSearchQuery, SEARCH_QUERY_MAX_LENGTH, true),
-    globalFilters: normaliseFilters(preferences?.globalFilters)
+    globalFilters: normaliseFilters(preferences?.globalFilters),
+    includeCommonPaths: preferences?.includeCommonPaths === true
   };
 }
 
@@ -125,7 +126,8 @@ export function getSearchPreferences() {
     searchQuery: query,
     filters,
     globalSearchQuery: query,
-    globalFilters: filters
+    globalFilters: filters,
+    includeCommonPaths: state.includeCommonPaths
   });
 }
 
@@ -148,6 +150,7 @@ export async function loadSearchPreferences() {
   const unifiedFilters = hasActiveFilters(restored.globalFilters) ? restored.globalFilters : restored.filters;
   state.searchQuery = unifiedQuery;
   state.filters = { ...unifiedFilters };
+  state.includeCommonPaths = restored.includeCommonPaths;
   return true;
 }
 

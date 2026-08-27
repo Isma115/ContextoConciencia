@@ -29,5 +29,7 @@ contextBridge.exposeInMainWorld('nexusData', {
   createProjectDirectory: () => ipcRenderer.invoke('create-project-directory'),
   revealFile: (filePath) => ipcRenderer.invoke('reveal-file', filePath),
   setViewMenu: (view) => ipcRenderer.invoke('set-view-menu', view),
-  onHtmlViewerMenuAction: (callback) => ipcRenderer.on('html-viewer-menu-action', (_event, action) => callback(action))
+  onHtmlViewerMenuAction: (callback) => ipcRenderer.on('html-viewer-menu-action', (_event, action) => callback(action)),
+  onDiagramMenuAction: (callback) => ipcRenderer.on('diagram-menu-action', (_event, action) => callback(action)),
+  onPreferencesMenuAction: (callback) => ipcRenderer.on('preferences-menu-action', (_event, action, value) => callback(action, value))
 });

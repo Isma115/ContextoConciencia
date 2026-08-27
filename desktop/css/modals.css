@@ -1,40 +1,42 @@
 .modal-backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 24px; background: rgba(0,0,0,.68); }
-.modal { width: min(590px, 100%); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid #4b4b4b; border-radius: 5px; background: #252526; box-shadow: 0 18px 50px rgba(0,0,0,.55); }
+.modal { width: min(590px, 100%); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid var(--line-strong); border-radius: 5px; background: var(--surface); box-shadow: 0 18px 50px rgba(0,0,0,.55); }
 .modal-head { display: flex; align-items: start; justify-content: space-between; padding: 15px 17px 12px; border-bottom: 1px solid var(--line); }
-.modal-head h2 { color: #e0e0e0; font-size: 14px; }
-.modal-head p { margin: 4px 0 0; color: #777; font-size: 10px; }
-.modal-close { border: 0; color: #999; background: transparent; font-size: 19px; line-height: 1; }
-.modal-close:hover { color: #fff; }
+.modal-head h2 { color: var(--strong); font-size: 14px; }
+.modal-head p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
+.modal-close { border: 0; color: var(--muted); background: transparent; font-size: 19px; line-height: 1; }
+.modal-close:hover { color: var(--strong); }
 .modal-body { padding: 16px 17px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 6px; padding: 12px 17px 15px; border-top: 1px solid var(--line); }
 .close-confirmation-backdrop { z-index: 200; }
 .close-confirmation-modal { width: min(430px, 100%); }
-.close-confirmation-modal .modal-body p { margin: 0; color: #c9c9c9; font-size: 11px; }
-.close-confirmation-cancel { border-color: #1177b8; color: #fff; background: #0e639c; }
-.close-confirmation-cancel:hover { border-color: #2a8ac8; color: #fff; background: #1177b8; }
+.close-confirmation-modal .modal-body p { margin: 0; color: var(--text); font-size: 11px; }
+.close-confirmation-cancel { border-color: var(--primary-border); color: var(--on-primary); background: var(--primary); }
+.close-confirmation-cancel:hover { border-color: var(--primary-hover-border); color: var(--on-primary); background: var(--primary-hover); }
+.diagram-delete-confirmation-modal { width: min(430px, 100%); }
+.diagram-delete-confirmation-modal .modal-body p { margin: 0; color: var(--text); font-size: 11px; line-height: 1.5; }
 .viewer-modal { width: min(1440px, calc(100vw - 48px)); height: min(900px, calc(100dvh - 48px)); max-height: calc(100dvh - 48px); display: flex; flex-direction: column; overflow: hidden; }
 .viewer-modal .modal-head, .viewer-modal .modal-actions { flex: 0 0 auto; }
 .viewer-title-wrap { min-width: 0; flex: 1; }
 .viewer-head-actions { display: flex; align-items: center; gap: 9px; margin-left: 16px; }
 .markdown-mode-button { min-width: 82px; }
-.viewer-title { width: min(680px, 100%); margin: -4px -5px 0; border: 1px solid transparent; border-radius: 3px; outline: 0; color: #e0e0e0; background: transparent; padding: 3px 5px; font-size: 14px; font-weight: 600; }
-.viewer-title:focus { border-color: var(--blue); background: #1e1e1e; }
-.viewer-subtitle { margin-top: 4px; color: #777; font-family: var(--mono); font-size: 9px; }
+.viewer-title { width: min(680px, 100%); margin: -4px -5px 0; border: 1px solid transparent; border-radius: 3px; outline: 0; color: var(--strong); background: transparent; padding: 3px 5px; font-size: 14px; font-weight: 600; }
+.viewer-title:focus { border-color: var(--blue); background: var(--surface-code); }
+.viewer-subtitle { margin-top: 4px; color: var(--muted); font-family: var(--mono); font-size: 9px; }
 .viewer-body { min-height: 0; flex: 1; display: flex; flex-direction: column; overflow: hidden; padding: 14px 17px; }
-.viewer-meta { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 10px; color: #888; font-family: var(--mono); font-size: 9px; }
+.viewer-meta { display: flex; align-items: center; gap: 10px; min-width: 0; margin-bottom: 10px; color: var(--muted); font-family: var(--mono); font-size: 9px; }
 .viewer-meta > span:first-child, .viewer-path { max-width: 55%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .viewer-path { display: block; overflow: hidden; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
-.viewer-path:hover { color: #c4dcf4; text-decoration: underline; }
+.viewer-path:hover { color: var(--accent-text); text-decoration: underline; }
 .viewer-path:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; }
 .viewer-path:disabled { opacity: .65; cursor: wait; }
 .viewer-tags { display: flex; gap: 4px; margin-left: auto; }
-.viewer-muted { color: #666; }
-.document-content { min-height: 0; flex: 1; overflow: auto; resize: none; margin: 0; padding: 15px; border: 1px solid #363636; border-radius: 3px; outline: 0; color: #d4d4d4; background: #1e1e1e; font-family: var(--mono); font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.viewer-muted { color: var(--muted-2); }
+.document-content { min-height: 0; flex: 1; overflow: auto; resize: none; margin: 0; padding: 15px; border: 1px solid var(--line-dark); border-radius: 3px; outline: 0; color: var(--text); background: var(--surface-code); font-family: var(--mono); font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
 .document-content:focus { border-color: var(--blue); }
 
 .toast-region { position: fixed; top: 18px; right: 18px; z-index: 20; display: grid; gap: 5px; }
-.toast { max-width: 330px; padding: 9px 11px; border: 1px solid rgba(137,209,133,.4); border-radius: 3px; color: #bde8b9; background: #263526; box-shadow: 0 8px 22px rgba(0,0,0,.35); font-family: var(--mono); font-size: 10px; }
-.toast.error { border-color: rgba(244,135,113,.4); color: #ffc3b6; background: #3a2926; }
+.toast { max-width: 330px; padding: 9px 11px; border: 1px solid var(--success-border); border-radius: 3px; color: var(--success-text); background: var(--success-surface); box-shadow: 0 8px 22px rgba(0,0,0,.35); font-family: var(--mono); font-size: 10px; }
+.toast.error { border-color: var(--error-border); color: var(--red); background: var(--error-surface); }
 
 .app-hidden { display: none; }
 .auth-screen { position: fixed; inset: 0; z-index: 100; display: none; place-items: center; padding: 24px; background: radial-gradient(circle at 20% 15%, #182c42 0, #101820 35%, #09111f 100%); }

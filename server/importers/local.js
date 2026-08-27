@@ -21,6 +21,7 @@ const SUPPORTED = new Map([
 const DOCUMENT_SUPPORTED = new Map([...SUPPORTED].filter(([, type]) => !['css', 'javascript'].includes(type)));
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 2000;
+const BINARY_SAMPLE_BYTES = 8192;
 
 function collectFiles(inputPath, files = [], options = {}) {
   const scanOptions = options.skipDirectories instanceof Set
@@ -36,7 +37,7 @@ function collectFiles(inputPath, files = [], options = {}) {
     throw error;
   }
   if (stats.isFile()) {
-    if (DOCUMENT_SUPPORTED.has(path.extname(absolute).toLowerCase())) files.push(absolute);
+    if (scanOptions.includeUnsupported || DOCUMENT_SUPPORTED.has(path.extname(absolute).toLowerCase())) files.push(absolute);
     return files;
   }
   if (!stats.isDirectory()) return files;
@@ -68,20 +69,41 @@ function parseCsvSummary(content) {
   return { columns, rows: Math.max(lines.length - 1, 0) };
 }
 
-function readFileDocument(filePath) {
+function isProbablyBinary(buffer) {
+  const sample = buffer.subarray(0, BINARY_SAMPLE_BYTES);
+  if (!sample.length) return false;
+  let controlBytes = 0;
+  for (const byte of sample) {
+    if (byte === 0) return true;
+    if ((byte < 7 || (byte > 14 && byte < 32)) && byte !== 9 && byte !== 10 && byte !== 13) controlBytes += 1;
+  }
+  return controlBytes / sample.length > 0.1;
+}
+
+function readFileDocument(filePath, { allowLargeMetadata = false } = {}) {
   const extension = path.extname(filePath).toLowerCase();
-  const type = SUPPORTED.get(extension);
+  const type = SUPPORTED.get(extension) || (extension ? extension.slice(1) : 'file');
   const stats = fs.statSync(filePath);
-  if (stats.size > MAX_FILE_BYTES) {
+  if (stats.size > MAX_FILE_BYTES && !allowLargeMetadata) {
     throw new Error(`El archivo supera el límite de ${MAX_FILE_BYTES / 1024 / 1024} MB`);
   }
-  const content = fs.readFileSync(filePath, 'utf8');
   const baseName = path.basename(filePath, extension);
   let metadata = {
     extension: extension.slice(1),
     size: stats.size,
     modifiedAt: stats.mtime.toISOString()
   };
+  let content = '';
+  if (stats.size > MAX_FILE_BYTES) {
+    metadata = { ...metadata, contentSkipped: 'too-large', searchTitleOnly: true };
+  } else {
+    const buffer = fs.readFileSync(filePath);
+    if (isProbablyBinary(buffer)) {
+      metadata = { ...metadata, binary: true, searchTitleOnly: true };
+    } else {
+      content = buffer.toString('utf8');
+    }
+  }
   if (type === 'json') {
     try {
       const parsed = JSON.parse(content);
@@ -101,7 +123,7 @@ function readFileDocument(filePath) {
   };
 }
 
-function importLocalSource(db, source, { prune = false } = {}) {
+function importLocalSource(db, source, { prune = false, includeUnsupported = true } = {}) {
   const config = parseJson(source.config_json);
   const inputs = Array.isArray(config.paths) ? config.paths : [];
   const files = [];
@@ -109,7 +131,8 @@ function importLocalSource(db, source, { prune = false } = {}) {
   const scanOptions = {
     skipDirectories: config.excludeDirectories,
     ignoreErrors: config.ignoreErrors === true,
-    followSymlinks: config.followSymlinks
+    followSymlinks: config.followSymlinks,
+    includeUnsupported
   };
   for (const input of inputs) {
     try {
@@ -124,7 +147,7 @@ function importLocalSource(db, source, { prune = false } = {}) {
   db.transaction(() => {
     for (const filePath of uniqueFiles) {
       try {
-        const result = upsertDocument(db, source.id, readFileDocument(filePath));
+        const result = upsertDocument(db, source.id, readFileDocument(filePath, { allowLargeMetadata: scanOptions.includeUnsupported }));
         if (result.updated) updated += 1;
         else created += 1;
       } catch (error) {
