@@ -260,14 +260,34 @@ function detailMarkup() {
   const symbol = selectedSymbol();
   const file = selectedFile();
   if (!file) return '<aside class="code-map-detail panel"><div class="code-map-detail-empty">Selecciona un fichero, símbolo o conexión.</div></aside>';
-  if (symbol) return `<aside class="code-map-detail panel"><div class="code-map-detail-head"><span class="code-map-detail-kicker">SÍMBOLO · ${escapeHtml(symbol.kind)}</span><h2>${escapeHtml(symbol.name)}</h2></div><dl class="code-map-detail-list"><div><dt>Fichero</dt><dd>${escapeHtml(file.path)}</dd></div><div><dt>Línea</dt><dd>${escapeHtml(`${symbol.range?.startLine || 1}${symbol.range?.endLine && symbol.range.endLine !== symbol.range.startLine ? `–${symbol.range.endLine}` : ''}`)}</dd></div><div><dt>Exportado</dt><dd>${symbol.exported ? 'Sí' : 'No'}</dd></div>${symbol.imported ? `<div><dt>Importa</dt><dd><code>${escapeHtml(symbol.imported)}</code></dd></div>` : ''}</dl><div class="code-map-detail-actions"><button type="button" class="btn btn-primary btn-small" data-code-map-open="${escapeHtml(file.path)}" data-code-map-line="${escapeHtml(symbol.range?.startLine || 1)}">Abrir código</button></div></aside>`;
+  if (symbol) {
+    const startLine = symbol.range?.startLine || 1;
+    const endLine = symbol.range?.endLine || startLine;
+    return `<aside class="code-map-detail panel"><div class="code-map-detail-head"><span class="code-map-detail-kicker">SÍMBOLO · ${escapeHtml(symbol.kind)}</span><h2>${escapeHtml(symbol.name)}</h2></div><dl class="code-map-detail-list"><div><dt>Fichero</dt><dd>${escapeHtml(file.path)}</dd></div><div><dt>Línea</dt><dd>${escapeHtml(`${startLine}${endLine !== startLine ? `–${endLine}` : ''}`)}</dd></div><div><dt>Exportado</dt><dd>${symbol.exported ? 'Sí' : 'No'}</dd></div>${symbol.imported ? `<div><dt>Importa</dt><dd><code>${escapeHtml(symbol.imported)}</code></dd></div>` : ''}</dl><div class="code-map-detail-actions"><button type="button" class="btn btn-primary btn-small" data-code-map-open="${escapeHtml(file.path)}" data-code-map-line="${escapeHtml(startLine)}" data-code-map-end-line="${escapeHtml(endLine)}" data-code-map-symbol-label="${escapeHtml(symbol.name)}">Abrir código</button></div></aside>`;
+  }
   return `<aside class="code-map-detail panel"><div class="code-map-detail-head"><span class="code-map-detail-kicker">FICHERO · ${escapeHtml(languageLabel(file.language))}</span><h2 title="${escapeHtml(file.path)}">${escapeHtml(file.path.split('/').pop())}</h2><p>${escapeHtml(file.path)}</p></div><dl class="code-map-detail-list"><div><dt>Tamaño</dt><dd>${escapeHtml(formatBytes(file.size))}</dd></div><div><dt>Símbolos</dt><dd>${escapeHtml(file.symbols.length)}</dd></div><div><dt>Conexiones</dt><dd>${escapeHtml(result.relations.filter((relation) => relation.from === file.id || relation.to === file.id).length)}</dd></div></dl>${file.warnings?.length ? `<div class="code-map-detail-warnings">${file.warnings.map((warning) => `<div><strong>Línea ${escapeHtml(warning.line || 1)}</strong><span>${escapeHtml(warning.message)}</span></div>`).join('')}</div>` : ''}<div class="code-map-detail-actions"><button type="button" class="btn btn-primary btn-small" data-code-map-open="${escapeHtml(file.path)}">Abrir código</button></div></aside>`;
 }
 
-function modalMarkup(file, line) {
+function normaliseCodeRange(range, lineCount) {
+  const start = Number(range?.startLine);
+  const end = Number(range?.endLine);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  const startLine = Math.max(1, Math.min(lineCount, Math.floor(start)));
+  const endLine = Math.max(startLine, Math.min(lineCount, Math.floor(end)));
+  return { startLine, endLine };
+}
+
+function modalMarkup(file, line, range = null, symbolName = '') {
   const lines = String(file.content || '').split(/\r?\n/);
-  const targetLine = Number(line) || file.line || 0;
-  return `<div id="code-map-code-modal" class="modal-backdrop"><div class="modal code-map-code-modal" role="dialog" aria-modal="true" aria-labelledby="code-map-code-title"><div class="modal-head"><div><h2 id="code-map-code-title">${escapeHtml(file.path)}</h2><p>${escapeHtml(languageLabel(file.language))} · ${escapeHtml(file.size)} bytes</p></div><button type="button" class="modal-close" data-code-map-close-modal aria-label="Cerrar">×</button></div><div class="code-map-code-body"><pre class="code-map-code-view">${lines.map((content, index) => `<span class="code-map-code-line${index + 1 === targetLine ? ' is-target' : ''}" data-line="${index + 1}"><b>${String(index + 1).padStart(String(lines.length).length, ' ')}</b>${escapeHtml(content) || ' '}</span>`).join('')}</pre></div></div></div>`;
+  const selectedRange = normaliseCodeRange(range, lines.length);
+  const visibleLines = selectedRange
+    ? lines.slice(selectedRange.startLine - 1, selectedRange.endLine).map((content, index) => ({ content, lineNumber: selectedRange.startLine + index }))
+    : lines.map((content, index) => ({ content, lineNumber: index + 1 }));
+  const targetLine = Number(line) || selectedRange?.startLine || file.line || 0;
+  const numberWidth = String(selectedRange?.endLine || lines.length).length;
+  const heading = symbolName ? `${file.path} · ${symbolName}` : file.path;
+  const scope = selectedRange ? ` · líneas ${selectedRange.startLine}–${selectedRange.endLine}` : '';
+  return `<div id="code-map-code-modal" class="modal-backdrop"><div class="modal code-map-code-modal" role="dialog" aria-modal="true" aria-labelledby="code-map-code-title"><div class="modal-head"><div><h2 id="code-map-code-title">${escapeHtml(heading)}</h2><p>${escapeHtml(languageLabel(file.language))} · ${escapeHtml(file.size)} bytes${scope}</p></div><button type="button" class="modal-close" data-code-map-close-modal aria-label="Cerrar">×</button></div><div class="code-map-code-body"><pre class="code-map-code-view">${visibleLines.map(({ content, lineNumber }) => `<span class="code-map-code-line${lineNumber === targetLine ? ' is-target' : ''}" data-line="${lineNumber}"><b>${String(lineNumber).padStart(numberWidth, ' ')}</b>${escapeHtml(content) || ' '}</span>`).join('')}</pre></div></div></div>`;
 }
 
 function renderGraphAndDetails() {
@@ -398,12 +418,12 @@ async function generateCodeMap() {
   }
 }
 
-async function openCode(path, line = null) {
+async function openCode(path, line = null, range = null, symbolName = '') {
   try {
     const query = new URLSearchParams({ path });
     if (line) query.set('line', line);
     const file = await api(`/code-map/file?${query}`);
-    $('#modal-root').innerHTML = modalMarkup(file, line);
+    $('#modal-root').innerHTML = modalMarkup(file, line, range, symbolName);
     const modal = $('#code-map-code-modal');
     modal?.addEventListener('click', (event) => {
       if (event.target.closest?.('[data-code-map-close-modal]')) closeModal();
@@ -427,7 +447,7 @@ async function openFileCode(fileId, line = null) {
 async function openSymbolCode(symbolId) {
   const file = fileBySymbolId(symbolId);
   const symbol = file?.symbols.find((item) => item.id === symbolId);
-  if (file) await openCode(file.path, symbol?.range?.startLine || 1);
+  if (file) await openCode(file.path, symbol?.range?.startLine || 1, symbol?.range, symbol?.name || '');
 }
 
 function closeModal() { $('#code-map-code-modal')?.remove(); }
@@ -486,7 +506,13 @@ function bindCodeMapEvents(container) {
     if (target.matches('[data-code-map-file-select], [data-code-map-tree-file]')) { const fileId = target.dataset.codeMapFileSelect || target.dataset.codeMapTreeFile; selectFile(fileId); await openFileCode(fileId); return; }
     if (target.matches('[data-code-map-symbol]')) { codeMapState().selectedId = target.dataset.codeMapSymbol; codeMapState().selectedRelationId = null; renderGraphAndDetails(); await openSymbolCode(target.dataset.codeMapSymbol); return; }
     if (target.matches('[data-code-map-relation]')) { codeMapState().selectedRelationId = target.dataset.codeMapRelation; codeMapState().selectedId = null; renderGraphAndDetails(); return; }
-    if (target.matches('[data-code-map-open]')) { await openCode(target.dataset.codeMapOpen, target.dataset.codeMapLine); return; }
+    if (target.matches('[data-code-map-open]')) {
+      const range = target.dataset.codeMapEndLine
+        ? { startLine: target.dataset.codeMapLine, endLine: target.dataset.codeMapEndLine }
+        : null;
+      await openCode(target.dataset.codeMapOpen, target.dataset.codeMapLine, range, target.dataset.codeMapSymbolLabel || '');
+      return;
+    }
     if (target.matches('[data-code-map-close-modal]')) { closeModal(); return; }
     if (target.matches('[data-code-map-zoom]')) { codeMapState().zoom = Math.max(.35, Math.min(2, codeMapState().zoom + (target.dataset.codeMapZoom === 'in' ? .1 : -.1))); renderGraphAndDetails(); return; }
     if (target.matches('[data-code-map-fit]')) { codeMapState().zoom = 1; renderGraphAndDetails(); $('#code-map-graph')?.scrollTo({ left: 0, top: 0, behavior: 'smooth' }); }
