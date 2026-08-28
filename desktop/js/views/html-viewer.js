@@ -1,6 +1,7 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { state } from '../core/state.js';
+import { sectionIconMarkup } from '../core/section-icons.js';
 import { showToast } from '../ui/notifications.js';
 import { copyGitDiffPrompt, openNewDiagramPromptModal } from './diagram-prompt-modal.js';
 
@@ -139,7 +140,7 @@ export function renderHtmlViewer() {
       ? `<pre class="html-code-view" aria-label="Contenido de ${escapeHtml(selected.relativePath)}"><code>${escapeHtml(selected.content)}</code></pre>`
       : '<div class="html-stage-empty">Sin archivo</div>';
   const errors = project?.errors?.length ? `<div class="html-viewer-warning">${project.errors.length} archivo${project.errors.length === 1 ? '' : 's'} no se pudo${project.errors.length === 1 ? '' : 'ieron'} leer.</div>` : '';
-  $('#view-html-viewer').innerHTML = `<div class="html-viewer-shell">${viewer.loading ? '<div class="panel html-viewer-loading">Leyendo…</div>' : `<div class="html-viewer-workspace"><section class="html-viewer-panel"><div class="html-viewer-stage ${!project ? 'is-empty' : mode === 'preview' ? 'is-preview' : 'is-code'}">${stage}</div></section></div>${errors}`}</div>`;
+  $('#view-html-viewer').innerHTML = `<div class="html-viewer-shell"><div class="html-viewer-decoration">${sectionIconMarkup('html')}</div>${viewer.loading ? '<div class="panel html-viewer-loading">Leyendo…</div>' : `<div class="html-viewer-workspace"><section class="html-viewer-panel"><div class="html-viewer-stage ${!project ? 'is-empty' : mode === 'preview' ? 'is-preview' : 'is-code'}">${stage}</div></section></div>${errors}`}</div>`;
   bindRecentHtmlViewerEntries($('#view-html-viewer'));
   if (mode === 'preview' && canPreview) {
     const frame = $('#html-preview-frame');

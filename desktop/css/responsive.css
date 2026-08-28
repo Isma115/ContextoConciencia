@@ -10,12 +10,15 @@
   .result-actions, .source-info { margin-left: 0; }
   .html-viewer-workspace { height: auto; min-height: 0; grid-template-columns: 1fr; }
   .html-viewer-panel { min-height: 520px; }
+  .document-collection-search { width: 100%; min-width: 0; flex-basis: 100%; }
+  .viewer-title-line { align-items: stretch; flex-direction: column; gap: 3px; }
+  .viewer-title { width: 100%; flex-basis: auto; }
+  .viewer-title-path { width: 100%; flex-basis: auto; }
   .diagram-toolbar { align-items: stretch; gap: 9px; padding: 10px 12px; }
   .diagram-title-wrap { min-width: 180px; flex-basis: 100%; }
   .diagram-title { width: 100%; }
   .diagram-toolbar-actions { width: 100%; align-items: end; overflow: visible; flex-wrap: wrap; padding-bottom: 1px; }
   .diagram-code-modal .modal-actions { flex-wrap: wrap; }
-  .global-sources-panel .panel-header { align-items: start; flex-direction: column; gap: 8px; }
   .global-source-main { align-items: start; }
   .global-source-footer { align-items: start; flex-direction: column; margin-left: 38px; }
   .global-source-actions { justify-content: flex-start; }

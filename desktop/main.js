@@ -10,6 +10,8 @@ const PREFERENCES_MENU_NAME = 'Preferencias';
 const PROMPTS_MENU_NAME = 'Prompts';
 const SEARCH_PREFERENCES_FILENAME = 'search-preferences.json';
 const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
+const DIAGRAM_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
+const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DESKTOP_PORT = Number(process.env.PORT) || 3000;
 const OFFLINE_ONLY = true;
 const closeConfirmationStates = new WeakMap();
@@ -118,6 +120,10 @@ function setApplicationMenuForView(window, view) {
           label: 'Exportar',
           click: () => window.webContents.send('diagram-menu-action', 'export')
         },
+        {
+          label: 'Exportar como imagen',
+          click: () => window.webContents.send('diagram-menu-action', 'export-image')
+        },
         { type: 'separator' },
         {
           label: 'Deshacer',
@@ -208,6 +214,36 @@ app.whenReady().then(async () => {
   ipcMain.handle('load-search-preferences', () => readSearchPreferences());
   ipcMain.handle('save-search-preferences', (_event, preferences) => writeSearchPreferences(preferences));
 
+  ipcMain.handle('select-workspace-file', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Importar espacio de trabajo',
+      properties: ['openFile'],
+      filters: [{ name: 'Espacio de trabajo NexusData', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = path.normalize(result.filePaths[0]);
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile()) throw new Error('La ubicación elegida no es un archivo');
+    if (stats.size > WORKSPACE_MAX_FILE_BYTES) throw new Error('El archivo del espacio de trabajo supera el límite de 50 MB');
+    return { path: filePath, content: fs.readFileSync(filePath, 'utf8') };
+  });
+
+  ipcMain.handle('save-workspace-file', async (_event, payload = {}) => {
+    if (!payload || typeof payload.content !== 'string') throw new Error('El contenido del espacio de trabajo no es válido');
+    if (Buffer.byteLength(payload.content, 'utf8') > WORKSPACE_MAX_FILE_BYTES) throw new Error('El espacio de trabajo supera el límite de 50 MB');
+    const result = await dialog.showSaveDialog({
+      title: 'Exportar espacio de trabajo',
+      defaultPath: path.join(app.getPath('documents'), 'nexusdata-workspace.json'),
+      filters: [{ name: 'Espacio de trabajo NexusData', extensions: ['json'] }]
+    });
+    if (result.canceled || !result.filePath) return null;
+    let filePath = path.normalize(result.filePath);
+    if (!path.extname(filePath)) filePath += '.json';
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) throw new Error('La ubicación elegida es una carpeta');
+    fs.writeFileSync(filePath, payload.content, { encoding: 'utf8', mode: 0o600 });
+    return filePath;
+  });
+
   ipcMain.handle('select-local-paths', async (_event, options = {}) => {
     const directory = Boolean(options.directory);
     const result = await dialog.showOpenDialog({
@@ -234,19 +270,38 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('save-diagram-file', async (_event, payload = {}) => {
     if (!payload || typeof payload.content !== 'string') throw new Error('El contenido del diagrama no es válido');
-    if (Buffer.byteLength(payload.content, 'utf8') > DIAGRAM_MAX_FILE_BYTES) throw new Error('El diagrama supera el límite de 2 MB');
-    const format = payload.format === 'json' ? 'json' : 'nxd';
+    const format = payload.format === 'json' ? 'json' : payload.format === 'png' ? 'png' : 'nxd';
+    let imageBuffer = null;
+    if (format === 'png') {
+      const match = /^data:image\/png;base64,([A-Za-z0-9+/]+={0,2})$/.exec(payload.content);
+      if (!match || match[1].length % 4 !== 0) throw new Error('La imagen del diagrama no es válida');
+      imageBuffer = Buffer.from(match[1], 'base64');
+      const pngSignature = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
+      if (!imageBuffer.length || imageBuffer.subarray(0, pngSignature.length).compare(pngSignature) !== 0) {
+        throw new Error('La imagen del diagrama no es válida');
+      }
+      if (imageBuffer.length > DIAGRAM_MAX_IMAGE_BYTES) throw new Error('La imagen del diagrama supera el límite de 50 MB');
+    } else if (Buffer.byteLength(payload.content, 'utf8') > DIAGRAM_MAX_FILE_BYTES) {
+      throw new Error('El diagrama supera el límite de 2 MB');
+    }
     const extension = `.${format}`;
     const result = await dialog.showSaveDialog({
       title: 'Exportar diagrama',
       defaultPath: path.join(app.getPath('documents'), `diagrama${extension}`),
-      filters: [{ name: format === 'json' ? 'JSON' : 'Diagrama por texto', extensions: [format] }]
+      filters: [{
+        name: format === 'png' ? 'Imagen PNG' : format === 'json' ? 'JSON' : 'Diagrama por texto',
+        extensions: [format]
+      }]
     });
     if (result.canceled || !result.filePath) return null;
     let filePath = path.normalize(result.filePath);
     if (!path.extname(filePath)) filePath += extension;
     if (fs.existsSync(filePath) && fs.statSync(filePath).isDirectory()) throw new Error('La ubicación elegida es una carpeta');
-    fs.writeFileSync(filePath, payload.content, { encoding: 'utf8', mode: 0o600 });
+    if (format === 'png') {
+      fs.writeFileSync(filePath, imageBuffer, { mode: 0o600 });
+    } else {
+      fs.writeFileSync(filePath, payload.content, { encoding: 'utf8', mode: 0o600 });
+    }
     return filePath;
   });
 

@@ -2,6 +2,7 @@ import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { OFFLINE_ONLY, state } from '../core/state.js';
 import { shortDate, sourceIcon, statusLabel } from '../core/format.js';
+import { sectionIconMarkup } from '../core/section-icons.js';
 import { showToast } from '../ui/notifications.js';
 import { openSourceModal } from './source-modal.js';
 
@@ -43,7 +44,7 @@ export function renderSources() {
     return `<article class="source-card"><div class="source-card-top"><div class="source-logo source-logo-${sourceKind}" role="img" aria-label="${sourceLabel}" title="${sourceLabel}">${sourceIcon(sourceKind)}</div><div class="source-details"><h3>${escapeHtml(source.name)}</h3><div class="source-url">${escapeHtml(detail || 'Sin configuración')}</div></div><span class="pill ${escapeHtml(source.status)}">${escapeHtml(statusLabel(source.status))}</span></div><div class="source-actions"><button class="btn btn-secondary btn-small" data-source-test="${escapeHtml(source.id)}">Probar</button><button class="btn btn-secondary btn-small" data-source-sync="${escapeHtml(source.id)}">↻ Sync</button><button class="btn btn-secondary btn-small" data-source-edit="${escapeHtml(source.id)}">Editar</button><button class="btn btn-danger btn-small" data-source-delete="${escapeHtml(source.id)}">Eliminar</button><span class="source-info">${source.documentCount} docs · ${escapeHtml(shortDate(source.lastSyncAt))}</span></div>${source.lastError ? `<p class="form-note source-error">${escapeHtml(source.lastError)}</p>` : ''}</article>`;
   }).join('');
   const actions = offline ? '<button class="btn btn-primary" data-action="new-local">＋ Local</button>' : '<button class="btn btn-secondary" data-action="new-rest">＋ API</button><button class="btn btn-primary" data-action="new-local">＋ Local</button>';
-  $('#view-sources').innerHTML = `<div class="section-top"><h1>Fuentes</h1><div class="hero-action">${actions}</div></div><div class="source-list">${cards || '<div class="empty">Sin fuentes</div>'}</div>`;
+  $('#view-sources').innerHTML = `<div class="section-top"><div class="section-heading-with-icon">${sectionIconMarkup('sources')}<h1>Fuentes</h1></div><div class="hero-action">${actions}</div></div><div class="source-list">${cards || '<div class="empty">Sin fuentes</div>'}</div>`;
   $('#view-sources').querySelectorAll('[data-action="new-local"]').forEach((button) => button.addEventListener('click', () => openSourceModal(null, 'local')));
   $('#view-sources').querySelectorAll('[data-action="new-rest"]').forEach((button) => button.addEventListener('click', () => openSourceModal(null, 'rest')));
   bindActionButtons($('#view-sources'), '[data-source-test]', (button) => testSource(button.dataset.sourceTest));

@@ -1,7 +1,9 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { state } from '../core/state.js';
+import { sectionIconMarkup } from '../core/section-icons.js';
 import { showToast } from '../ui/notifications.js';
+import { bindCopyPathActions, copyPathButtonMarkup } from './documents.js';
 import {
   languageLabel,
   minimapMarkup,
@@ -29,6 +31,57 @@ export function configureCodeMap({ onNavigate } = {}) {
 
 function codeMapState() { return state.codeMap; }
 function formatBytes(value) { return value > 1024 * 1024 ? `${(value / 1024 / 1024).toFixed(1)} MB` : value > 1024 ? `${Math.round(value / 1024)} KB` : `${value || 0} B`; }
+
+function codeMapSources() {
+  return state.sources.filter((source) => source.type === 'local' && source.config?.role !== 'common-paths' && Array.isArray(source.config?.paths) && source.config.paths.length);
+}
+
+function codeMapSourceSignature(source) {
+  return source ? JSON.stringify({ type: source.type, paths: source.config?.paths || [] }) : '';
+}
+
+function resetCodeMapForSource(codeMap, source) {
+  analysisRequestId += 1;
+  filesRequestId += 1;
+  analysisController?.abort();
+  analysisController = null;
+  codeMap.sourceId = source?.id || null;
+  codeMap.sourceSignature = codeMapSourceSignature(source);
+  codeMap.files = [];
+  codeMap.folders = [];
+  codeMap.filesLoading = false;
+  codeMap.filesWarnings = [];
+  codeMap.filesFingerprint = '';
+  codeMap.scope = 'project';
+  codeMap.entryFile = '';
+  codeMap.entryFolder = '';
+  codeMap.result = null;
+  codeMap.loading = false;
+  codeMap.error = '';
+  codeMap.selectedId = null;
+  codeMap.selectedRelationId = null;
+  codeMap.expanded = {};
+  codeMap.zoom = 1;
+  codeMap.stale = false;
+}
+
+function syncCodeMapSource() {
+  const codeMap = codeMapState();
+  const sources = codeMapSources();
+  const preferredId = state.globalProject?.id;
+  const source = sources.find((item) => item.id === codeMap.sourceId)
+    || sources.find((item) => item.id === preferredId)
+    || sources[0]
+    || null;
+  const sourceId = source?.id || null;
+  const signature = codeMapSourceSignature(source);
+  if (codeMap.sourceId !== sourceId || codeMap.sourceSignature !== signature) resetCodeMapForSource(codeMap, source);
+  return source;
+}
+
+function currentCodeMapSource() {
+  return codeMapSources().find((source) => source.id === codeMapState().sourceId) || null;
+}
 
 function normaliseCodeMapTreeWidth(value) {
   if (value == null || value === '') return CODE_MAP_TREE_WIDTH_DEFAULT;
@@ -145,17 +198,19 @@ function optionMarkup(value, label, selected) {
 }
 
 function scopeDescription(codeMap) {
+  const source = currentCodeMapSource();
+  const sourceLabel = source ? `Fuente «${source.name}»` : 'La fuente seleccionada';
   if (codeMap.scope === 'entry') {
     return codeMap.entryFile
-      ? `Desde ${codeMap.entryFile}, siguiendo sus dependencias locales.`
+      ? `${sourceLabel}: desde ${codeMap.entryFile}, siguiendo sus dependencias locales.`
       : 'Elige un fichero de código como punto de entrada.';
   }
   if (codeMap.scope === 'folder') {
     return codeMap.entryFolder
-      ? `Todos los ficheros compatibles de ${codeMap.entryFolder}, incluidos sus subdirectorios.`
+      ? `${sourceLabel}: todos los ficheros compatibles de ${codeMap.entryFolder}, incluidos sus subdirectorios.`
       : 'Elige una carpeta del proyecto para construir el diagrama.';
   }
-  return 'Todos los ficheros compatibles del proyecto cargado.';
+  return `${sourceLabel}: todos los ficheros compatibles de la fuente.`;
 }
 
 function scopeLabel(codeMap) {
@@ -170,6 +225,8 @@ function scopeReady(codeMap) {
 
 function scopeControlsMarkup() {
   const codeMap = codeMapState();
+  const source = currentCodeMapSource();
+  const sources = codeMapSources();
   const scope = ['project', 'entry', 'folder'].includes(codeMap.scope) ? codeMap.scope : 'project';
   const folders = codeMap.folders?.length ? codeMap.folders : deriveFolders(codeMap.files);
   const targetMarkup = scope === 'entry'
@@ -178,7 +235,8 @@ function scopeControlsMarkup() {
       ? [optionMarkup('', 'Selecciona una carpeta…', !codeMap.entryFolder), ...folders.map((folder) => optionMarkup(folder, folder, folder === codeMap.entryFolder))].join('')
       : '';
   const disabled = codeMap.loading || codeMap.filesLoading ? ' disabled' : '';
-  return `<div class="code-map-config"><label class="code-map-field"><span>Alcance</span><select class="select code-map-select" data-code-map-scope${disabled} aria-label="Alcance del mapa">${optionMarkup('project', 'Proyecto completo', scope === 'project')}${optionMarkup('entry', 'Desde un fichero', scope === 'entry')}${optionMarkup('folder', 'Desde una carpeta', scope === 'folder')}</select></label>${scope !== 'project' ? `<label class="code-map-field"><span>${scope === 'entry' ? 'Fichero de entrada' : 'Carpeta de entrada'}</span><select class="select code-map-select code-map-target" data-code-map-target${disabled} aria-label="${scope === 'entry' ? 'Fichero de entrada' : 'Carpeta de entrada'}">${targetMarkup}</select></label>` : ''}</div>`;
+  const sourceMarkup = sources.map((item) => optionMarkup(item.id, item.name, item.id === source?.id)).join('');
+  return `<div class="code-map-config"><label class="code-map-field"><span>Fuente</span><select class="select code-map-select code-map-source-select" data-code-map-source${disabled} aria-label="Fuente del mapa">${sourceMarkup}</select></label><label class="code-map-field"><span>Alcance</span><select class="select code-map-select" data-code-map-scope${disabled} aria-label="Alcance del mapa">${optionMarkup('project', 'Proyecto completo', scope === 'project')}${optionMarkup('entry', 'Desde un fichero', scope === 'entry')}${optionMarkup('folder', 'Desde una carpeta', scope === 'folder')}</select></label>${scope !== 'project' ? `<label class="code-map-field"><span>${scope === 'entry' ? 'Fichero de entrada' : 'Carpeta de entrada'}</span><select class="select code-map-select code-map-target" data-code-map-target${disabled} aria-label="${scope === 'entry' ? 'Fichero de entrada' : 'Carpeta de entrada'}">${targetMarkup}</select></label>` : ''}</div>`;
 }
 
 function fileById(id) { return codeMapState().result?.files?.find((file) => file.id === id) || null; }
@@ -194,14 +252,16 @@ function selectedSymbol() {
 }
 
 function projectEmptyMarkup() {
-  return `<div class="code-map-empty panel"><div class="code-map-empty-icon">⌘</div><h1>Mapa de código</h1><p>Carga un proyecto global para descubrir sus ficheros, símbolos y dependencias locales.</p><button type="button" class="btn btn-primary" data-code-map-go-global>Ir a Buscar</button></div>`;
+  return `<div class="code-map-empty panel"><div class="code-map-empty-icon">⌘</div><h1>Mapa de código</h1><p>Carga una fuente local desde Buscar para descubrir sus ficheros, símbolos y dependencias locales.</p><button type="button" class="btn btn-primary" data-code-map-go-global>Ir a Buscar</button></div>`;
 }
 
 function noFilesMarkup() {
   const codeMap = codeMapState();
+  const source = currentCodeMapSource();
   const error = codeMap.error ? `<div class="code-map-error">${escapeHtml(codeMap.error)}</div>` : '';
   const warnings = codeMap.filesWarnings?.length ? `<div class="code-map-warning-list">${codeMap.filesWarnings.slice(0, 8).map((warning) => `<div><strong>${escapeHtml(warning.path || 'Proyecto')}</strong><span>${escapeHtml(warning.message)}</span></div>`).join('')}</div>` : '';
-  return `<div class="code-map-empty panel">${error}<div class="code-map-empty-icon">⌁</div><h2>No hay ficheros compatibles</h2><p>Se admiten JavaScript, TypeScript, JSX, TSX, MJS, CJS, HTML y CSS. Se excluyen automáticamente node_modules, .git, dist, build, coverage y cachés.</p>${warnings}<button type="button" class="btn btn-secondary" data-code-map-refresh-files>Volver a descubrir ficheros</button></div>`;
+  const sourceLabel = source ? ` en «${source.name}»` : '';
+  return `<div class="code-map-empty panel">${error}<div class="code-map-empty-icon">⌁</div><h2>No hay ficheros compatibles${sourceLabel}</h2><p>Se admiten JavaScript/TypeScript, Python, Java, C/C++, C#, Go, Rust, PHP, Ruby, Kotlin, Swift, Dart, Lua, R, Scala, Perl, Shell, PowerShell, SQL, HTML y CSS. Se excluyen automáticamente node_modules, .git, dist, build, coverage y cachés.</p>${warnings}<button type="button" class="btn btn-secondary" data-code-map-refresh-files>Volver a descubrir ficheros</button></div>`;
 }
 
 function toolbarMarkup() {
@@ -209,7 +269,7 @@ function toolbarMarkup() {
   const loading = codeMap.loading;
   const ready = scopeReady(codeMap);
   const disabled = loading || !ready ? 'disabled' : '';
-  return `<div class="code-map-toolbar"><div class="code-map-title-wrap"><h1>Mapa de código</h1><p>${escapeHtml(scopeDescription(codeMap))}</p></div>${scopeControlsMarkup()}<div class="code-map-actions"><button type="button" class="btn ${loading ? 'btn-secondary' : 'btn-primary'} code-map-generate" data-code-map-generate ${disabled}>${loading ? 'Analizando…' : codeMap.result ? '↻ Actualizar mapa' : 'Generar mapa'}</button>${loading ? '<button type="button" class="btn btn-danger" data-code-map-cancel>Cancelar</button>' : ''}</div></div>`;
+  return `<div class="code-map-toolbar"><div class="code-map-title-wrap">${sectionIconMarkup('code')}<div class="code-map-title-copy"><h1>Mapa de código</h1><p>${escapeHtml(scopeDescription(codeMap))}</p></div></div>${scopeControlsMarkup()}<div class="code-map-actions"><button type="button" class="btn ${loading ? 'btn-secondary' : 'btn-primary'} code-map-generate" data-code-map-generate ${disabled}>${loading ? 'Analizando…' : codeMap.result ? '↻ Actualizar mapa' : 'Generar mapa'}</button>${loading ? '<button type="button" class="btn btn-danger" data-code-map-cancel>Cancelar</button>' : ''}</div></div>`;
 }
 
 function beforeMapMarkup() {
@@ -218,7 +278,7 @@ function beforeMapMarkup() {
 }
 
 function staleMarkup() {
-  return codeMapState().stale ? '<div class="code-map-stale panel">La selección o los ficheros del proyecto han cambiado. Genera de nuevo el mapa para actualizar el diagrama.</div>' : '';
+  return codeMapState().stale ? '<div class="code-map-stale panel">La selección o los ficheros de la fuente han cambiado. Genera de nuevo el mapa para actualizar el diagrama.</div>' : '';
 }
 
 function folderMarkup() {
@@ -263,9 +323,9 @@ function detailMarkup() {
   if (symbol) {
     const startLine = symbol.range?.startLine || 1;
     const endLine = symbol.range?.endLine || startLine;
-    return `<aside class="code-map-detail panel"><div class="code-map-detail-head"><span class="code-map-detail-kicker">SÍMBOLO · ${escapeHtml(symbol.kind)}</span><h2>${escapeHtml(symbol.name)}</h2></div><dl class="code-map-detail-list"><div><dt>Fichero</dt><dd>${escapeHtml(file.path)}</dd></div><div><dt>Línea</dt><dd>${escapeHtml(`${startLine}${endLine !== startLine ? `–${endLine}` : ''}`)}</dd></div><div><dt>Exportado</dt><dd>${symbol.exported ? 'Sí' : 'No'}</dd></div>${symbol.imported ? `<div><dt>Importa</dt><dd><code>${escapeHtml(symbol.imported)}</code></dd></div>` : ''}</dl><div class="code-map-detail-actions"><button type="button" class="btn btn-primary btn-small" data-code-map-open="${escapeHtml(file.path)}" data-code-map-line="${escapeHtml(startLine)}" data-code-map-end-line="${escapeHtml(endLine)}" data-code-map-symbol-label="${escapeHtml(symbol.name)}">Abrir código</button></div></aside>`;
+    return `<aside class="code-map-detail panel"><div class="code-map-detail-head"><span class="code-map-detail-kicker">SÍMBOLO · ${escapeHtml(symbol.kind)}</span><h2>${escapeHtml(symbol.name)}</h2></div><dl class="code-map-detail-list"><div><dt>Fichero</dt><dd>${escapeHtml(file.path)}</dd></div><div><dt>Línea</dt><dd>${escapeHtml(`${startLine}${endLine !== startLine ? `–${endLine}` : ''}`)}</dd></div><div><dt>Exportado</dt><dd>${symbol.exported ? 'Sí' : 'No'}</dd></div>${symbol.imported ? `<div><dt>Importa</dt><dd><code>${escapeHtml(symbol.imported)}</code></dd></div>` : ''}</dl><div class="code-map-detail-actions">${copyPathButtonMarkup(file.path)}<button type="button" class="btn btn-primary btn-small" data-code-map-open="${escapeHtml(file.path)}" data-code-map-line="${escapeHtml(startLine)}" data-code-map-end-line="${escapeHtml(endLine)}" data-code-map-symbol-label="${escapeHtml(symbol.name)}">Abrir código</button></div></aside>`;
   }
-  return `<aside class="code-map-detail panel"><div class="code-map-detail-head"><span class="code-map-detail-kicker">FICHERO · ${escapeHtml(languageLabel(file.language))}</span><h2 title="${escapeHtml(file.path)}">${escapeHtml(file.path.split('/').pop())}</h2><p>${escapeHtml(file.path)}</p></div><dl class="code-map-detail-list"><div><dt>Tamaño</dt><dd>${escapeHtml(formatBytes(file.size))}</dd></div><div><dt>Símbolos</dt><dd>${escapeHtml(file.symbols.length)}</dd></div><div><dt>Conexiones</dt><dd>${escapeHtml(result.relations.filter((relation) => relation.from === file.id || relation.to === file.id).length)}</dd></div></dl>${file.warnings?.length ? `<div class="code-map-detail-warnings">${file.warnings.map((warning) => `<div><strong>Línea ${escapeHtml(warning.line || 1)}</strong><span>${escapeHtml(warning.message)}</span></div>`).join('')}</div>` : ''}<div class="code-map-detail-actions"><button type="button" class="btn btn-primary btn-small" data-code-map-open="${escapeHtml(file.path)}">Abrir código</button></div></aside>`;
+  return `<aside class="code-map-detail panel"><div class="code-map-detail-head"><span class="code-map-detail-kicker">FICHERO · ${escapeHtml(languageLabel(file.language))}</span><h2 title="${escapeHtml(file.path)}">${escapeHtml(file.path.split('/').pop())}</h2><p>${escapeHtml(file.path)}</p></div><dl class="code-map-detail-list"><div><dt>Tamaño</dt><dd>${escapeHtml(formatBytes(file.size))}</dd></div><div><dt>Símbolos</dt><dd>${escapeHtml(file.symbols.length)}</dd></div><div><dt>Conexiones</dt><dd>${escapeHtml(result.relations.filter((relation) => relation.from === file.id || relation.to === file.id).length)}</dd></div></dl>${file.warnings?.length ? `<div class="code-map-detail-warnings">${file.warnings.map((warning) => `<div><strong>Línea ${escapeHtml(warning.line || 1)}</strong><span>${escapeHtml(warning.message)}</span></div>`).join('')}</div>` : ''}<div class="code-map-detail-actions">${copyPathButtonMarkup(file.path)}<button type="button" class="btn btn-primary btn-small" data-code-map-open="${escapeHtml(file.path)}">Abrir código</button></div></aside>`;
 }
 
 function normaliseCodeRange(range, lineCount) {
@@ -287,7 +347,7 @@ function modalMarkup(file, line, range = null, symbolName = '') {
   const numberWidth = String(selectedRange?.endLine || lines.length).length;
   const heading = symbolName ? `${file.path} · ${symbolName}` : file.path;
   const scope = selectedRange ? ` · líneas ${selectedRange.startLine}–${selectedRange.endLine}` : '';
-  return `<div id="code-map-code-modal" class="modal-backdrop"><div class="modal code-map-code-modal" role="dialog" aria-modal="true" aria-labelledby="code-map-code-title"><div class="modal-head"><div><h2 id="code-map-code-title">${escapeHtml(heading)}</h2><p>${escapeHtml(languageLabel(file.language))} · ${escapeHtml(file.size)} bytes${scope}</p></div><button type="button" class="modal-close" data-code-map-close-modal aria-label="Cerrar">×</button></div><div class="code-map-code-body"><pre class="code-map-code-view">${visibleLines.map(({ content, lineNumber }) => `<span class="code-map-code-line${lineNumber === targetLine ? ' is-target' : ''}" data-line="${lineNumber}"><b>${String(lineNumber).padStart(numberWidth, ' ')}</b>${escapeHtml(content) || ' '}</span>`).join('')}</pre></div></div></div>`;
+  return `<div id="code-map-code-modal" class="modal-backdrop"><div class="modal code-map-code-modal" role="dialog" aria-modal="true" aria-labelledby="code-map-code-title"><div class="modal-head"><div><h2 id="code-map-code-title">${escapeHtml(heading)}</h2><p>${escapeHtml(languageLabel(file.language))} · ${escapeHtml(file.size)} bytes${scope}</p></div><button type="button" class="modal-close" data-code-map-close-modal aria-label="Cerrar">×</button></div><div class="code-map-code-body"><pre class="code-map-code-view">${visibleLines.map(({ content, lineNumber }) => `<span class="code-map-code-line${lineNumber === targetLine ? ' is-target' : ''}" data-line="${lineNumber}"><b>${String(lineNumber).padStart(numberWidth, ' ')}</b>${escapeHtml(content) || ' '}</span>`).join('')}</pre></div><div class="modal-actions"><button type="button" class="btn btn-secondary" data-copy-path="${escapeHtml(file.path)}" aria-label="Copiar ruta" title="Copiar ruta">Copiar ruta</button><button type="button" class="btn btn-secondary" data-code-map-close-modal>Cerrar</button></div></div></div>`;
 }
 
 function renderGraphAndDetails() {
@@ -304,13 +364,15 @@ function renderGraphAndDetails() {
     depth: codeMap.depth,
     zoom: codeMap.zoom
   });
+  if (graph && codeMap.result) bindCopyPathActions(graph);
   const minimap = $('#code-map-minimap-wrap');
   if (minimap && codeMap.result) minimap.innerHTML = minimapMarkup(codeMap.result, codeMap.filters, codeMap.expanded, codeMap.groupByFolder);
 }
 
 export function renderCodeMap() {
   const codeMap = codeMapState();
-  if (!state.globalProject) {
+  const source = syncCodeMapSource();
+  if (!source) {
     $('#view-code-map').innerHTML = projectEmptyMarkup();
     bindCodeMapEvents($('#view-code-map'));
     return;
@@ -339,15 +401,17 @@ export function renderCodeMap() {
 
 async function loadCodeMapFiles() {
   const codeMap = codeMapState();
-  if (codeMap.filesLoading || !state.globalProject) return;
+  const source = currentCodeMapSource();
+  if (codeMap.filesLoading || !source) return;
+  const sourceId = source.id;
   const requestId = ++filesRequestId;
   codeMap.filesLoading = true;
   codeMap.error = '';
   renderCodeMap();
   try {
-    const result = await api(`/code-map/files?maxFiles=${encodeURIComponent(codeMap.maxFiles)}&maxFileBytes=${encodeURIComponent(codeMap.maxFileBytes)}`);
-    if (requestId !== filesRequestId) return;
-    if (result.loaded === false) throw new Error('No hay un proyecto global cargado');
+    const result = await api(`/code-map/files?sourceId=${encodeURIComponent(sourceId)}&maxFiles=${encodeURIComponent(codeMap.maxFiles)}&maxFileBytes=${encodeURIComponent(codeMap.maxFileBytes)}`);
+    if (requestId !== filesRequestId || codeMap.sourceId !== sourceId) return;
+    if (result.loaded === false) throw new Error('La fuente seleccionada no está disponible');
     const previousFingerprint = codeMap.filesFingerprint;
     codeMap.files = result.files || [];
     codeMap.folders = result.folders || deriveFolders(codeMap.files);
@@ -369,6 +433,12 @@ async function loadCodeMapFiles() {
 async function generateCodeMap() {
   const codeMap = codeMapState();
   if (codeMap.loading) return;
+  const source = currentCodeMapSource();
+  if (!source) {
+    codeMap.error = 'Selecciona una fuente local antes de generar el mapa';
+    renderCodeMap();
+    return;
+  }
   const scope = ['project', 'entry', 'folder'].includes(codeMap.scope) ? codeMap.scope : 'project';
   if (scope === 'entry' && !codeMap.entryFile) {
     codeMap.error = 'Selecciona un fichero de código antes de generar el mapa';
@@ -393,6 +463,7 @@ async function generateCodeMap() {
       method: 'POST',
       signal: controller.signal,
       body: JSON.stringify({
+        sourceId: source.id,
         scope,
         entryFile: scope === 'entry' ? codeMap.entryFile : '',
         entryFolder: scope === 'folder' ? codeMap.entryFolder : '',
@@ -421,9 +492,11 @@ async function generateCodeMap() {
 async function openCode(path, line = null, range = null, symbolName = '') {
   try {
     const query = new URLSearchParams({ path });
+    if (codeMapState().sourceId) query.set('sourceId', codeMapState().sourceId);
     if (line) query.set('line', line);
     const file = await api(`/code-map/file?${query}`);
     $('#modal-root').innerHTML = modalMarkup(file, line, range, symbolName);
+    bindCopyPathActions($('#modal-root'));
     const modal = $('#code-map-code-modal');
     modal?.addEventListener('click', (event) => {
       if (event.target.closest?.('[data-code-map-close-modal]')) closeModal();
@@ -437,11 +510,6 @@ async function openCode(path, line = null, range = null, symbolName = '') {
     target?.scrollIntoView({ block: 'center' });
     $('#modal-root [data-code-map-close-modal]')?.focus();
   } catch (error) { showToast(error.message, true); }
-}
-
-async function openFileCode(fileId, line = null) {
-  const file = fileById(fileId);
-  if (file) await openCode(file.path, line);
 }
 
 async function openSymbolCode(symbolId) {
@@ -478,6 +546,15 @@ function updateAnalysisScope(value) {
   renderCodeMap();
 }
 
+function updateCodeMapSource(value) {
+  const codeMap = codeMapState();
+  if (codeMap.loading || codeMap.filesLoading) return;
+  const source = codeMapSources().find((item) => item.id === value);
+  if (!source || source.id === codeMap.sourceId) return;
+  resetCodeMapForSource(codeMap, source);
+  renderCodeMap();
+}
+
 function updateAnalysisTarget(value) {
   const codeMap = codeMapState();
   if (codeMap.loading) return;
@@ -502,8 +579,8 @@ function bindCodeMapEvents(container) {
     if (target.matches('[data-code-map-generate]')) { await generateCodeMap(); return; }
     if (target.matches('[data-code-map-cancel]')) { analysisController?.abort(); return; }
     if (target.matches('[data-code-map-toggle]')) { const id = target.dataset.codeMapToggle; codeMapState().expanded[id] = !codeMapState().expanded[id]; renderGraphAndDetails(); return; }
-    if (target.matches('[data-code-map-file]')) { selectFile(target.dataset.codeMapFile); await openFileCode(target.dataset.codeMapFile); return; }
-    if (target.matches('[data-code-map-file-select], [data-code-map-tree-file]')) { const fileId = target.dataset.codeMapFileSelect || target.dataset.codeMapTreeFile; selectFile(fileId); await openFileCode(fileId); return; }
+    if (target.matches('[data-code-map-file]')) { selectFile(target.dataset.codeMapFile); return; }
+    if (target.matches('[data-code-map-file-select], [data-code-map-tree-file]')) { const fileId = target.dataset.codeMapFileSelect || target.dataset.codeMapTreeFile; selectFile(fileId); return; }
     if (target.matches('[data-code-map-symbol]')) { codeMapState().selectedId = target.dataset.codeMapSymbol; codeMapState().selectedRelationId = null; renderGraphAndDetails(); await openSymbolCode(target.dataset.codeMapSymbol); return; }
     if (target.matches('[data-code-map-relation]')) { codeMapState().selectedRelationId = target.dataset.codeMapRelation; codeMapState().selectedId = null; renderGraphAndDetails(); return; }
     if (target.matches('[data-code-map-open]')) {
@@ -518,8 +595,9 @@ function bindCodeMapEvents(container) {
     if (target.matches('[data-code-map-fit]')) { codeMapState().zoom = 1; renderGraphAndDetails(); $('#code-map-graph')?.scrollTo({ left: 0, top: 0, behavior: 'smooth' }); }
     });
     container.addEventListener('change', (event) => {
-      const target = event.target.closest('[data-code-map-scope], [data-code-map-target]');
+      const target = event.target.closest('[data-code-map-source], [data-code-map-scope], [data-code-map-target]');
       if (!target) return;
+      if (target.matches('[data-code-map-source]')) updateCodeMapSource(target.value);
       if (target.matches('[data-code-map-scope]')) updateAnalysisScope(target.value);
       if (target.matches('[data-code-map-target]')) updateAnalysisTarget(target.value);
     });

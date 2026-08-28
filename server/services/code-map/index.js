@@ -38,6 +38,9 @@ function optionsFrom(input = {}) {
   const maxFiles = Math.min(Math.max(Number(input.maxFiles) || DEFAULT_MAX_FILES, 1), MAX_ANALYSIS_FILES);
   const maxFileBytes = Math.min(Math.max(Number(input.maxFileBytes) || DEFAULT_MAX_FILE_BYTES, 1024), 20 * 1024 * 1024);
   const maxRelations = Math.min(Math.max(Number(input.maxRelations) || 20000, 1), 100000);
+  const inputPaths = Array.isArray(input.inputPaths)
+    ? [...new Set(input.inputPaths.filter((value) => typeof value === 'string' && value.trim()).map((value) => path.resolve(value)))]
+    : [];
   return {
     scope,
     entryFile: normaliseRelative(input.entryFile),
@@ -47,7 +50,8 @@ function optionsFrom(input = {}) {
     maxFiles,
     maxFileBytes,
     maxRelations,
-    maxDepth: Math.min(Math.max(Number(input.maxDepth) || 80, 1), 200)
+    maxDepth: Math.min(Math.max(Number(input.maxDepth) || 80, 1), 200),
+    inputPaths
   };
 }
 
@@ -123,7 +127,7 @@ function analyzeCodeMap(projectRoot, input = {}) {
   return result;
 }
 
-function getCodeMapFile(projectRoot, requestedPath, requestedLine = null) {
+function getCodeMapFile(projectRoot, requestedPath, requestedLine = null, { inputPaths = [] } = {}) {
   const root = safeRoot(projectRoot);
   const relative = normaliseRelative(requestedPath);
   if (!relative || path.isAbsolute(requestedPath || '') || relative.split('/').includes('..')) throw new Error('La ruta del fichero no es válida');
@@ -132,6 +136,14 @@ function getCodeMapFile(projectRoot, requestedPath, requestedLine = null) {
   let realPath;
   try { realPath = fs.realpathSync(candidate); } catch { throw new Error('El fichero indicado no existe'); }
   if (!insideRoot(root, realPath)) throw new Error('La ruta queda fuera del proyecto global');
+  if (inputPaths.length && !inputPaths.some((inputPath) => {
+    try {
+      const selected = fs.realpathSync(path.resolve(inputPath));
+      return realPath === selected || insideRoot(selected, realPath);
+    } catch {
+      return false;
+    }
+  })) throw new Error('El fichero no pertenece a la fuente seleccionada');
   const stats = fs.statSync(realPath);
   if (!stats.isFile()) throw new Error('La ruta indicada no es un fichero');
   const language = supportedLanguage(realPath);

@@ -2,13 +2,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { now, parseJson, sourceForResponse, withDocumentShape, documentSelect } = require('../database/db');
-const { importLocalSource } = require('../importers/local');
+const { importLocalSource, readFileDocument } = require('../importers/local');
 const { syncRestSource, testRestSource } = require('../services/rest');
 const { inspectHtmlProject } = require('../services/html-viewer');
 const { createHtmlPreview, getHtmlPreview } = require('../services/html-viewer-preview');
 const { analyzeCodeMap, getCodeMapFile, listCodeMapFiles } = require('../services/code-map');
 const { commonPathsConfig, isCommonPathsConfig, listCommonDirectories, COMMON_PATHS_ROLE, COMMON_PATHS_SOURCE_NAME } = require('../services/common-paths');
-const { documentRows, searchDocuments } = require('../services/search');
+const { documentRows, favoriteDocuments, recentDocuments, searchDocuments } = require('../services/search');
+const { createWorkspaceSnapshot, importWorkspaceSnapshot } = require('../services/workspace');
 const { createSearchWorker } = require('../services/search/runner');
 const { Worker } = require('node:worker_threads');
 const { installAuthRoutes, requireAuth } = require('../auth');
@@ -96,11 +97,92 @@ function globalProjectResponse(db) {
   };
 }
 
-function globalProjectRoot(db) {
-  const row = globalProjectRow(db);
+function codeMapSourceRow(db, sourceId = '') {
+  const row = asText(sourceId)
+    ? sourceRow(db, sourceId, { localOnly: true })
+    : globalProjectRow(db);
   if (!row) return null;
   const config = parseJson(row.config_json);
-  return Array.isArray(config.paths) && typeof config.paths[0] === 'string' ? config.paths[0] : null;
+  return isCommonPathsConfig(config) ? null : row;
+}
+
+function codeMapSourcePaths(row) {
+  const config = parseJson(row?.config_json);
+  const candidates = Array.isArray(config.paths) ? config.paths : [];
+  return [...new Set(candidates.map((candidate) => {
+    try {
+      const resolved = fs.realpathSync(path.resolve(candidate));
+      const stats = fs.statSync(resolved);
+      return stats.isFile() || stats.isDirectory() ? resolved : null;
+    } catch {
+      return null;
+    }
+  }).filter(Boolean))];
+}
+
+function pathContains(parent, candidate) {
+  const relative = path.relative(parent, candidate);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+function documentPathBelongsToSource(row) {
+  const config = parseJson(row?.source_config_json);
+  const documentPath = path.resolve(row?.external_id || row?.path || '');
+  return Array.isArray(config.paths) && config.paths.some((sourcePath) => pathContains(path.resolve(sourcePath), documentPath));
+}
+
+function hydrateDeferredDocument(db, row) {
+  const metadata = parseJson(row?.metadata_json);
+  if (row?.source_type !== 'local' || metadata.contentDeferred !== true) return row;
+  if (!documentPathBelongsToSource(row)) throw new Error('La ruta del documento no pertenece a su fuente');
+  const loaded = readFileDocument(row.external_id, { allowLargeMetadata: true });
+  const loadedMetadata = { ...loaded.metadata, contentDeferred: false, contentLoaded: true };
+  db.run(
+    'UPDATE documents SET content = ?, type = ?, path = ?, metadata_json = ? WHERE id = ?',
+    loaded.content,
+    loaded.type,
+    loaded.path,
+    JSON.stringify(loadedMetadata),
+    row.id
+  );
+  return db.get(`${documentSelect()} WHERE d.id = ?`, row.id);
+}
+
+function commonPath(first, second) {
+  let candidate = first;
+  while (!pathContains(candidate, second)) {
+    const parent = path.dirname(candidate);
+    if (parent === candidate) return candidate;
+    candidate = parent;
+  }
+  return candidate;
+}
+
+function codeMapSourceRoot(inputPaths) {
+  if (!inputPaths.length) return null;
+  const directories = inputPaths.map((candidate) => {
+    try { return fs.statSync(candidate).isDirectory() ? candidate : path.dirname(candidate); } catch { return path.dirname(candidate); }
+  });
+  return directories.slice(1).reduce(commonPath, directories[0]);
+}
+
+function codeMapProject(db, sourceId = '') {
+  const row = codeMapSourceRow(db, sourceId);
+  const inputPaths = codeMapSourcePaths(row);
+  const root = codeMapSourceRoot(inputPaths);
+  if (!row || !root) return { row, root: null, inputPaths, project: null };
+  const source = sourceForResponse(row);
+  return {
+    row,
+    root,
+    inputPaths,
+    project: {
+      id: source.id,
+      name: source.name,
+      path: root,
+      source
+    }
+  };
 }
 
 function commonPathsSourceRow(db) {
@@ -298,6 +380,25 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
     res.json({ directories: listCommonDirectories() });
   });
 
+  app.get('/api/workspace/export', (_req, res) => {
+    try {
+      res.json(createWorkspaceSnapshot(db));
+    } catch (error) {
+      res.status(500).json({ error: error.message || 'No se pudo exportar el espacio de trabajo' });
+    }
+  });
+
+  app.post('/api/workspace/import', (req, res) => {
+    try {
+      const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const snapshot = body.snapshot && typeof body.snapshot === 'object' ? body.snapshot : body;
+      const result = importWorkspaceSnapshot(db, snapshot, { mode: body.mode || 'merge' });
+      res.json(result);
+    } catch (error) {
+      res.status(400).json({ error: error.message || 'No se pudo importar el espacio de trabajo' });
+    }
+  });
+
   app.post('/api/common-paths/sync', async (_req, res) => {
     try {
       const directories = listCommonDirectories();
@@ -345,29 +446,35 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
   });
 
   app.get('/api/code-map/files', (req, res) => {
-    const project = globalProjectResponse(db).project;
-    const root = globalProjectRoot(db);
+    const sourceId = asText(req.query.sourceId);
+    const selection = codeMapProject(db, sourceId);
+    if (sourceId && !selection.row) return res.status(404).json({ error: 'Fuente local no encontrada para el mapa de código' });
+    const { project, root, inputPaths } = selection;
     if (!project || !root) {
       return res.json({ loaded: false, project: null, files: [], folders: [], warnings: [], excludedDirectories: [], limits: {} });
     }
     try {
       const result = listCodeMapFiles(root, {
+        inputPaths,
         excludes: req.query.excludes ? String(req.query.excludes).split(',').slice(0, 100) : [],
         maxFiles: req.query.maxFiles,
         maxFileBytes: req.query.maxFileBytes
       });
-      return res.json({ loaded: true, project: { ...project, fingerprint: result.project.fingerprint }, ...result });
+      return res.json({ loaded: true, ...result, project: { ...project, fingerprint: result.project.fingerprint } });
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
   });
 
   app.post('/api/code-map/analyze', (req, res) => {
-    const project = globalProjectResponse(db).project;
-    const root = globalProjectRoot(db);
-    if (!project || !root) return res.status(409).json({ error: 'Carga un proyecto global antes de generar el mapa' });
     try {
       const body = req.body && typeof req.body === 'object' ? req.body : {};
+      const sourceId = asText(body.sourceId);
+      const selection = codeMapProject(db, sourceId);
+      if (sourceId && !selection.row) return res.status(404).json({ error: 'Fuente local no encontrada para el mapa de código' });
+      const { project, root, inputPaths } = selection;
+      if (!project || !root) return res.status(409).json({ error: 'Selecciona una fuente local antes de generar el mapa' });
+      const options = { ...body, inputPaths };
       if (body.async === true || body.mode === 'async') {
         const job = {
           id: ID('code-map-job'),
@@ -377,7 +484,7 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
           error: null
         };
         CODE_MAP_JOBS.set(job.id, job);
-        setImmediate(() => runCodeMapJob(root, body, job));
+        setImmediate(() => runCodeMapJob(root, options, job));
         setTimeout(() => {
           if (CODE_MAP_JOBS.get(job.id) === job) {
             job.worker?.terminate().catch(() => {});
@@ -386,7 +493,7 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
         }, 10 * 60 * 1000).unref?.();
         return res.status(202).json(publicCodeMapJob(job));
       }
-      const result = analyzeCodeMap(root, body);
+      const result = analyzeCodeMap(root, options);
       return res.json(result);
     } catch (error) {
       return res.status(400).json({ error: error.message });
@@ -394,10 +501,13 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
   });
 
   app.get('/api/code-map/file', (req, res) => {
-    const root = globalProjectRoot(db);
-    if (!root) return res.status(409).json({ error: 'Carga un proyecto global antes de abrir código' });
+    const sourceId = asText(req.query.sourceId);
+    const selection = codeMapProject(db, sourceId);
+    if (sourceId && !selection.row) return res.status(404).json({ error: 'Fuente local no encontrada para el mapa de código' });
+    const { root, inputPaths } = selection;
+    if (!root) return res.status(409).json({ error: 'Selecciona una fuente local antes de abrir código' });
     try {
-      return res.json(getCodeMapFile(root, req.query.path, req.query.line));
+      return res.json(getCodeMapFile(root, req.query.path, req.query.line, { inputPaths }));
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -507,22 +617,49 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
     res.json({ total: documentRows(db, { ...req.query, limit: 500 }, options).length, documents: documentRows(db, { ...req.query, limit: req.query.limit || 200 }, options) });
   });
 
+  app.get('/api/documents/recent', (req, res) => {
+    const options = { localOnly: isOffline(req) };
+    const documents = recentDocuments(db, { ...req.query, limit: req.query.limit || 100 }, options);
+    res.json({ total: documents.length, documents });
+  });
+
+  app.get('/api/documents/favorites', (req, res) => {
+    const options = { localOnly: isOffline(req) };
+    const documents = favoriteDocuments(db, { ...req.query, limit: req.query.limit || 100 }, options);
+    res.json({ total: documents.length, documents });
+  });
+
   app.get('/api/documents/:id', (req, res) => {
     const where = isOffline(req) ? " AND s.type = 'local'" : '';
     const row = db.get(`${documentSelect()} WHERE d.id = ?${where}`, req.params.id);
     if (!row) return res.status(404).json({ error: 'Documento no encontrado' });
-    res.json(withDocumentShape(db, row));
+    try {
+      res.json(withDocumentShape(db, hydrateDeferredDocument(db, row)));
+    } catch (error) {
+      res.status(400).json({ error: error.message });
+    }
   });
 
   app.put('/api/documents/:id', (req, res) => {
     const where = isOffline(req) ? " AND s.type = 'local'" : '';
-    const existing = db.get(`SELECT d.id, d.title FROM documents d JOIN sources s ON s.id = d.source_id WHERE d.id = ?${where}`, req.params.id);
+    const existing = db.get(`SELECT d.id, d.title, d.metadata_json FROM documents d JOIN sources s ON s.id = d.source_id WHERE d.id = ?${where}`, req.params.id);
     if (!existing) return res.status(404).json({ error: 'Documento no encontrado' });
     const title = asText(req.body?.title);
     const content = typeof req.body?.content === 'string' ? req.body.content : null;
     if (!title || title.length > 240) return res.status(400).json({ error: 'Indica un título de hasta 240 caracteres' });
     if (content === null || content.length > 1500000) return res.status(400).json({ error: 'El contenido debe ser texto y no superar 1,5 MB' });
-    db.run('UPDATE documents SET title = ?, content = ?, updated_at = ? WHERE id = ?', title, content, now(), existing.id);
+    const metadata = { ...parseJson(existing.metadata_json), contentDeferred: false, contentLoaded: true };
+    db.run('UPDATE documents SET title = ?, content = ?, metadata_json = ?, updated_at = ? WHERE id = ?', title, content, JSON.stringify(metadata), now(), existing.id);
+    const updated = db.get(`${documentSelect()} WHERE d.id = ?${where}`, existing.id);
+    res.json(withDocumentShape(db, updated));
+  });
+
+  app.patch('/api/documents/:id/favorite', (req, res) => {
+    const where = isOffline(req) ? " AND s.type = 'local'" : '';
+    const existing = db.get(`SELECT d.id FROM documents d JOIN sources s ON s.id = d.source_id WHERE d.id = ?${where}`, req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Documento no encontrado' });
+    if (typeof req.body?.favorite !== 'boolean') return res.status(400).json({ error: 'Indica si el documento es favorito' });
+    db.run('UPDATE documents SET is_favorite = ? WHERE id = ?', req.body.favorite ? 1 : 0, existing.id);
     const updated = db.get(`${documentSelect()} WHERE d.id = ?${where}`, existing.id);
     res.json(withDocumentShape(db, updated));
   });
@@ -629,4 +766,4 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
   });
 }
 
-module.exports = { installRoutes, documentRows, searchDocuments, validateSourceInput, syncSource };
+module.exports = { installRoutes, documentRows, favoriteDocuments, recentDocuments, searchDocuments, validateSourceInput, syncSource };

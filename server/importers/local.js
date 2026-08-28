@@ -80,11 +80,11 @@ function isProbablyBinary(buffer) {
   return controlBytes / sample.length > 0.1;
 }
 
-function readFileDocument(filePath, { allowLargeMetadata = false } = {}) {
+function readFileDocument(filePath, { allowLargeMetadata = false, deferContent = false } = {}) {
   const extension = path.extname(filePath).toLowerCase();
   const type = SUPPORTED.get(extension) || (extension ? extension.slice(1) : 'file');
   const stats = fs.statSync(filePath);
-  if (stats.size > MAX_FILE_BYTES && !allowLargeMetadata) {
+  if (stats.size > MAX_FILE_BYTES && !allowLargeMetadata && !deferContent) {
     throw new Error(`El archivo supera el límite de ${MAX_FILE_BYTES / 1024 / 1024} MB`);
   }
   const baseName = path.basename(filePath, extension);
@@ -94,7 +94,10 @@ function readFileDocument(filePath, { allowLargeMetadata = false } = {}) {
     modifiedAt: stats.mtime.toISOString()
   };
   let content = '';
-  if (stats.size > MAX_FILE_BYTES) {
+  if (deferContent) {
+    if (stats.size > MAX_FILE_BYTES) metadata = { ...metadata, contentSkipped: 'too-large' };
+    metadata = { ...metadata, contentDeferred: true };
+  } else if (stats.size > MAX_FILE_BYTES) {
     metadata = { ...metadata, contentSkipped: 'too-large', searchTitleOnly: true };
   } else {
     const buffer = fs.readFileSync(filePath);
@@ -104,7 +107,7 @@ function readFileDocument(filePath, { allowLargeMetadata = false } = {}) {
       content = buffer.toString('utf8');
     }
   }
-  if (type === 'json') {
+  if (!deferContent && type === 'json') {
     try {
       const parsed = JSON.parse(content);
       metadata = { ...metadata, jsonKind: Array.isArray(parsed) ? 'array' : 'object', keys: parsed && !Array.isArray(parsed) && typeof parsed === 'object' ? Object.keys(parsed).slice(0, 50) : [] };
@@ -112,7 +115,8 @@ function readFileDocument(filePath, { allowLargeMetadata = false } = {}) {
       metadata = { ...metadata, parseError: 'JSON no válido' };
     }
   }
-  if (type === 'csv') metadata = { ...metadata, ...parseCsvSummary(content) };
+  if (!deferContent && type === 'csv') metadata = { ...metadata, ...parseCsvSummary(content) };
+  if (!deferContent) metadata = { ...metadata, contentLoaded: true };
   return {
     externalId: filePath,
     title: baseName.replace(/[-_]+/g, ' '),
@@ -147,7 +151,18 @@ function importLocalSource(db, source, { prune = false, includeUnsupported = tru
   db.transaction(() => {
     for (const filePath of uniqueFiles) {
       try {
-        const result = upsertDocument(db, source.id, readFileDocument(filePath, { allowLargeMetadata: scanOptions.includeUnsupported }));
+        const indexed = readFileDocument(filePath, { allowLargeMetadata: scanOptions.includeUnsupported, deferContent: true });
+        const existing = db.get(
+          'SELECT content, metadata_json FROM documents WHERE source_id = ? AND external_id = ?',
+          source.id,
+          filePath
+        );
+        const previousMetadata = parseJson(existing?.metadata_json);
+        if (existing && previousMetadata.contentDeferred !== true && previousMetadata.modifiedAt === indexed.metadata.modifiedAt) {
+          indexed.content = existing.content;
+          indexed.metadata = { ...previousMetadata, ...indexed.metadata, contentDeferred: false, contentLoaded: true };
+        }
+        const result = upsertDocument(db, source.id, indexed);
         if (result.updated) updated += 1;
         else created += 1;
       } catch (error) {

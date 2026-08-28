@@ -4,6 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const { analyzeCodeMap, getCodeMapFile, listCodeMapFiles } = require('../server/services/code-map');
+const { supportedLanguage } = require('../server/services/code-map/file-discovery');
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nexusdata-code-map-'));
@@ -68,6 +69,65 @@ test('conserva advertencias parciales y no permite abrir rutas fuera de la raíz
     assert.equal(source.path, 'src/entry.ts');
     assert.equal(source.line, 2);
     assert.match(source.content, /helper/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('reconoce lenguajes habituales y extrae símbolos y dependencias locales', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nexusdata-code-map-languages-'));
+  const files = {
+    'python/main.py': 'from .helper import greet\nclass Runner:\n    def run(self):\n        return greet()\n',
+    'python/helper.py': 'def greet():\n    return "ok"\n',
+    'java/src/com/example/Main.java': 'package com.example;\nimport com.example.Helper;\npublic class Main {\n  public void run() {}\n}\n',
+    'java/src/com/example/Helper.java': 'package com.example;\npublic class Helper {}\n',
+    'cpp/main.cpp': '#include "helper.hpp"\nint main() { return helper(); }\n',
+    'cpp/helper.hpp': 'int helper();\n',
+    'go/main.go': 'package main\nfunc main() {}\n',
+    'rust/lib.rs': 'mod helper;\npub fn run() {}\n',
+    'rust/helper.rs': 'pub fn help() {}\n',
+    'php/index.php': '<?php\nfunction render() {}\n',
+    'ruby/app.rb': 'def run\nend\n',
+    'kotlin/App.kt': 'fun run() {}\n',
+    'swift/App.swift': 'func run() {}\n',
+    'dart/main.dart': 'void run() {}\n',
+    'lua/main.lua': 'function run() end\n',
+    'stats/report.r': 'run <- function() {}\n',
+    'scala/App.scala': 'object App { def run(): Unit = {} }\n',
+    'perl/app.pl': 'sub run {}\n',
+    'scripts/app.sh': 'run() { echo ok; }\n',
+    'scripts/app.ps1': 'function Run-App {}\n',
+    'db/schema.sql': 'CREATE TABLE users (id INT);\n'
+  };
+  try {
+    Object.entries(files).forEach(([relative, content]) => {
+      const target = path.join(root, relative);
+      fs.mkdirSync(path.dirname(target), { recursive: true });
+      fs.writeFileSync(target, content);
+    });
+    const expectedExtensions = [
+      ['py', 'python'], ['java', 'java'], ['cs', 'csharp'], ['c', 'c'], ['h', 'c'], ['cpp', 'cpp'],
+      ['go', 'go'], ['rs', 'rust'], ['php', 'php'], ['rb', 'ruby'], ['kt', 'kotlin'], ['swift', 'swift'],
+      ['dart', 'dart'], ['lua', 'lua'], ['r', 'r'], ['scala', 'scala'], ['pl', 'perl'], ['sh', 'shell'],
+      ['ps1', 'powershell'], ['sql', 'sql']
+    ];
+    expectedExtensions.forEach(([extension, language]) => assert.equal(supportedLanguage(`sample.${extension}`), language));
+
+    const discovered = listCodeMapFiles(root);
+    assert.equal(discovered.files.length, Object.keys(files).length);
+    assert.equal(discovered.files.find((file) => file.path === 'python/main.py').language, 'python');
+    assert.equal(discovered.files.find((file) => file.path === 'java/src/com/example/Main.java').language, 'java');
+
+    const result = analyzeCodeMap(root);
+    assert.ok(result.files.find((file) => file.path === 'python/main.py').symbols.some((symbol) => symbol.name === 'Runner' && symbol.kind === 'class'));
+    assert.ok(result.files.find((file) => file.path === 'python/main.py').symbols.some((symbol) => symbol.name === 'run' && symbol.kind === 'function'));
+    assert.ok(result.files.find((file) => file.path === 'java/src/com/example/Main.java').symbols.some((symbol) => symbol.name === 'run' && symbol.kind === 'function'));
+    assert.ok(result.files.find((file) => file.path === 'go/main.go').symbols.some((symbol) => symbol.name === 'main' && symbol.kind === 'function'));
+    assert.ok(result.files.find((file) => file.path === 'scala/App.scala').symbols.some((symbol) => symbol.name === 'run' && symbol.kind === 'function'));
+    assert.ok(result.relations.some((relation) => relation.kind === 'imports' && relation.request === './helper' && relation.resolved));
+    assert.ok(result.relations.some((relation) => relation.kind === 'imports' && relation.request === 'com.example.Helper' && relation.resolved));
+    assert.ok(result.relations.some((relation) => relation.kind === 'imports' && relation.request === 'helper.hpp' && relation.resolved));
+    assert.ok(result.relations.some((relation) => relation.kind === 'imports' && relation.request === './helper' && relation.to === 'file:rust/helper.rs' && relation.resolved));
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

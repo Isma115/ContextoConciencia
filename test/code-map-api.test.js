@@ -82,6 +82,49 @@ test('expone descubrimiento, análisis parcial y apertura segura de código', as
   assert.equal(traversal.response.status, 400);
 });
 
+test('permite seleccionar una fuente local distinta para el mapa', async () => {
+  const secondRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nexusdata-code-map-source-'));
+  fs.mkdirSync(path.join(secondRoot, 'client'));
+  fs.mkdirSync(path.join(secondRoot, 'shared'));
+  fs.writeFileSync(path.join(secondRoot, 'client', 'main.js'), 'export const selectedSource = true;');
+  fs.writeFileSync(path.join(secondRoot, 'shared', 'helper.js'), 'export const helper = true;');
+  fs.writeFileSync(path.join(secondRoot, 'ignored.js'), 'export const ignored = true;');
+  try {
+    const created = await request('/sources', {
+      method: 'POST',
+      body: JSON.stringify({ name: 'Otra fuente de código', type: 'local', config: { paths: [path.join(secondRoot, 'client'), path.join(secondRoot, 'shared', 'helper.js')] } })
+    });
+    assert.equal(created.response.status, 201);
+    const synced = await request(`/sources/${encodeURIComponent(created.body.id)}/sync`, { method: 'POST' });
+    assert.equal(synced.response.status, 200);
+
+    const files = await request(`/code-map/files?sourceId=${encodeURIComponent(created.body.id)}`);
+    assert.equal(files.response.status, 200);
+    assert.equal(files.body.loaded, true);
+    assert.equal(files.body.project.source.id, created.body.id);
+    assert.deepEqual(files.body.files.map((file) => file.path), ['client/main.js', 'shared/helper.js']);
+
+    const analysed = await request('/code-map/analyze', {
+      method: 'POST',
+      body: JSON.stringify({ sourceId: created.body.id })
+    });
+    assert.equal(analysed.response.status, 200);
+    assert.deepEqual(analysed.body.files.map((file) => file.path), ['client/main.js', 'shared/helper.js']);
+
+    const sourceFile = await request(`/code-map/file?sourceId=${encodeURIComponent(created.body.id)}&path=client%2Fmain.js`);
+    assert.equal(sourceFile.response.status, 200);
+    assert.match(sourceFile.body.content, /selectedSource/);
+
+    const excludedFile = await request(`/code-map/file?sourceId=${encodeURIComponent(created.body.id)}&path=ignored.js`);
+    assert.equal(excludedFile.response.status, 400);
+
+    const invalidSource = await request('/code-map/files?sourceId=missing-source');
+    assert.equal(invalidSource.response.status, 404);
+  } finally {
+    fs.rmSync(secondRoot, { recursive: true, force: true });
+  }
+});
+
 test('admite trabajos asíncronos y cancelación', async () => {
   const queued = await request('/code-map/analyze', { method: 'POST', body: JSON.stringify({ async: true }) });
   assert.equal(queued.response.status, 202);

@@ -2,12 +2,32 @@ const crypto = require('node:crypto');
 const { analyseJavaScript } = require('./analyzers/javascript');
 const { analyseHtml } = require('./analyzers/html');
 const { analyseCss } = require('./analyzers/css');
+const { analyseProgramming } = require('./analyzers/programming');
 const { createResolver } = require('./resolver');
 const { sharedCache } = require('./cache');
 
 const ANALYZERS = {
   javascript: analyseJavaScript,
   typescript: analyseJavaScript,
+  python: analyseProgramming,
+  java: analyseProgramming,
+  csharp: analyseProgramming,
+  c: analyseProgramming,
+  cpp: analyseProgramming,
+  go: analyseProgramming,
+  rust: analyseProgramming,
+  php: analyseProgramming,
+  ruby: analyseProgramming,
+  kotlin: analyseProgramming,
+  swift: analyseProgramming,
+  dart: analyseProgramming,
+  lua: analyseProgramming,
+  r: analyseProgramming,
+  scala: analyseProgramming,
+  perl: analyseProgramming,
+  shell: analyseProgramming,
+  powershell: analyseProgramming,
+  sql: analyseProgramming,
   html: analyseHtml,
   css: analyseCss
 };
@@ -161,7 +181,10 @@ function buildCodeMap({ root, discovery, scope = 'project', entryFile = '', entr
       addUnresolved(fileAnalysis, relationBase(kind, from, null, { line: reference.line, request: requested }), 'Referencia dinámica no literal');
       return { status: 'unresolved', request: requested, reason: 'Referencia dinámica no literal' };
     }
-    const result = resolver.resolve(fileAnalysis.file.path, requested, { relativePath: ['references-script', 'references-style', 'imports-style'].includes(kind) });
+    const result = resolver.resolve(fileAnalysis.file.path, requested, {
+      relativePath: reference.relativePath === true || ['references-script', 'references-style', 'imports-style'].includes(kind),
+      modulePath: reference.modulePath === true
+    });
     if (result.status === 'resolved') {
       const target = analyses.get(result.file.path);
       const relation = relationBase(kind, from, fileId(result.file.path), { line: reference.line, request: reference.source });

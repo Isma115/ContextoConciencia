@@ -75,8 +75,12 @@ function createResolver(root, fileRecords = []) {
 
   function candidatesFor(base) {
     const candidates = [base];
-    if (!path.extname(base)) RESOLUTION_EXTENSIONS.forEach((extension) => candidates.push(`${base}${extension}`));
-    for (const extension of RESOLUTION_EXTENSIONS) candidates.push(path.join(base, `index${extension}`));
+    if (!path.extname(base)) {
+      RESOLUTION_EXTENSIONS.forEach((extension) => candidates.push(`${base}${extension}`));
+      for (const entryName of ['index', '__init__', 'mod']) {
+        for (const extension of RESOLUTION_EXTENSIONS) candidates.push(path.join(base, `${entryName}${extension}`));
+      }
+    }
     return [...new Set(candidates)];
   }
 
@@ -89,7 +93,39 @@ function createResolver(root, fileRecords = []) {
     return null;
   }
 
-  function resolve(importerPath, request, { relativePath = false } = {}) {
+  function moduleVariants(request) {
+    const normalized = normaliseRelative(stripQuery(request)).replace(/^\/+/, '').replace(/\/$/, '');
+    if (!normalized) return [];
+    const variants = new Set([normalized, normalized.replaceAll('::', '/')]);
+    if (!normalized.includes('/')) variants.add(normalized.replaceAll('.', '/'));
+    return [...variants].filter(Boolean);
+  }
+
+  function tryResolveModule(request) {
+    const candidateNames = new Set();
+    for (const variant of moduleVariants(request)) {
+      const base = variant.replace(/\/$/, '');
+      candidateNames.add(base);
+      if (!path.extname(base)) {
+        for (const extension of RESOLUTION_EXTENSIONS) {
+          candidateNames.add(`${base}${extension}`);
+          candidateNames.add(`${base}/index${extension}`);
+          candidateNames.add(`${base}/__init__${extension}`);
+          candidateNames.add(`${base}/mod${extension}`);
+        }
+      }
+    }
+    for (const candidateName of candidateNames) {
+      const direct = tryResolve(path.resolve(root, candidateName));
+      if (direct && !direct.outsideRoot) return direct;
+      for (const [relative, file] of fileByRelative.entries()) {
+        if (relative === candidateName || relative.endsWith(`/${candidateName}`)) return file;
+      }
+    }
+    return null;
+  }
+
+  function resolve(importerPath, request, { relativePath = false, modulePath = false } = {}) {
     const rawRequest = stripQuery(request);
     if (!rawRequest) return { status: 'unresolved', request: rawRequest, reason: 'Ruta vacía' };
     const aliases = aliasesFor(rawRequest, { paths: [...compiler.paths, ...(compiler.imports || [])] });
@@ -104,6 +140,10 @@ function createResolver(root, fileRecords = []) {
       if (result?.outsideRoot) return { status: 'unresolved', request: rawRequest, reason: 'La ruta queda fuera de la raíz del proyecto' };
       if (result) return { status: 'resolved', file: result, request: rawRequest };
       return { status: 'unresolved', request: rawRequest, reason: 'No existe un fichero compatible en la ruta indicada' };
+    }
+    if (modulePath) {
+      const result = tryResolveModule(rawRequest);
+      if (result) return { status: 'resolved', file: result, request: rawRequest, via: 'module' };
     }
     return { status: 'external', request: rawRequest, packageName: packageName(rawRequest) };
   }

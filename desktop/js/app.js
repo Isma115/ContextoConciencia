@@ -10,8 +10,10 @@ import { configureSourceModal } from './views/source-modal.js';
 import { bindHtmlViewerMenu, configureHtmlViewer, openPersistedHtmlSource, renderHtmlViewer } from './views/html-viewer.js';
 import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/diagrams.js';
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
+import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
+import { bindWorkspaceControls, configureWorkspace } from './core/workspace.js';
 
 let nativeMenuView = null;
 let offlineSessionRecovery = null;
@@ -44,7 +46,7 @@ async function refreshData() {
       state.codeMap.selectedRelationId = null;
       state.codeMap.stale = false;
     }
-    setConnection('offline', 'Modo offline · Solo archivos locales');
+    setConnection('offline', '');
     renderView();
     if (state.view === 'search') await performSearch();
     if (state.view === 'global-search') await performGlobalSearch();
@@ -63,6 +65,8 @@ function renderView() {
   document.querySelectorAll('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view));
   if (state.view === 'search') renderSearch();
   if (state.view === 'global-search') renderGlobalSearch();
+  if (state.view === 'recent-documents') renderRecentDocuments();
+  if (state.view === 'favorites') renderFavorites();
   if (state.view === 'html-viewer') renderHtmlViewer();
   if (state.view === 'diagrams') renderDiagrams();
   if (state.view === 'code-map') renderCodeMap();
@@ -156,9 +160,11 @@ configureSearch({ onRefresh: refreshData, onNavigate: (view) => { state.view = v
 configureSources({ onRefresh: refreshData });
 configureSourceModal({ onRefresh: refreshData, onSync: syncSource });
 configureCodeMap({ onNavigate: (view) => { state.view = view; renderView(); } });
+configureWorkspace({ onRefresh: refreshData });
 bindHtmlViewerMenu();
 bindDiagramMenu();
 bindPreferencesMenu();
+bindWorkspaceControls();
 bindNavigation();
 bindSidebarSearchToggle();
 bindSidebarSearch();

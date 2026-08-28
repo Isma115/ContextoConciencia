@@ -29,6 +29,8 @@ export const state = {
     error: ''
   },
   codeMap: {
+    sourceId: null,
+    sourceSignature: '',
     files: [],
     folders: [],
     filesLoading: false,
@@ -110,6 +112,17 @@ function normaliseSearchPreferences(preferences) {
   };
 }
 
+export function restoreSearchPreferences(preferences) {
+  if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) return false;
+  const restored = normaliseSearchPreferences(preferences);
+  const unifiedQuery = restored.globalSearchQuery || restored.searchQuery;
+  const unifiedFilters = hasActiveFilters(restored.globalFilters) ? restored.globalFilters : restored.filters;
+  state.searchQuery = unifiedQuery;
+  state.filters = { ...unifiedFilters };
+  state.includeCommonPaths = restored.includeCommonPaths;
+  return true;
+}
+
 function browserSearchPreferences() {
   if (typeof window === 'undefined' || !window.localStorage) return null;
   try {
@@ -143,15 +156,7 @@ export async function loadSearchPreferences() {
     preferences = null;
   }
 
-  if (!preferences || typeof preferences !== 'object' || Array.isArray(preferences)) return false;
-
-  const restored = normaliseSearchPreferences(preferences);
-  const unifiedQuery = restored.globalSearchQuery || restored.searchQuery;
-  const unifiedFilters = hasActiveFilters(restored.globalFilters) ? restored.globalFilters : restored.filters;
-  state.searchQuery = unifiedQuery;
-  state.filters = { ...unifiedFilters };
-  state.includeCommonPaths = restored.includeCommonPaths;
-  return true;
+  return restoreSearchPreferences(preferences);
 }
 
 export function persistSearchPreferences() {

@@ -1,4 +1,5 @@
 import { $, escapeHtml } from '../core/dom.js';
+import { sectionIconMarkup } from '../core/section-icons.js';
 import { showToast } from '../ui/notifications.js';
 import { bindModalClose, closeModal } from '../ui/modals.js';
 import { parseDiagramText, serializeDiagram } from './diagram-language.mjs';
@@ -18,6 +19,7 @@ const DIAGRAM_ZOOM_MAX = 3;
 const DIAGRAM_ZOOM_SENSITIVITY = 0.0015;
 const DIAGRAM_ZOOM_STEP = 1.15;
 const DIAGRAM_GRID_SIZE = 24;
+const DIAGRAM_IMAGE_SCALE = 2;
 const HISTORY_LIMIT = 100;
 const NODE_TYPES = Object.freeze({
   start: 'Inicio',
@@ -30,6 +32,7 @@ const EDGE_DIRECTIONS = Object.freeze({
   forward: 'Hacia el destino',
   backward: 'Hacia el origen'
 });
+const EDGE_COLOR_KEYS = Object.freeze(['blue', 'amber', 'purple', 'cyan', 'green', 'red']);
 const PORTS = Object.freeze({
   top: { label: 'arriba', x: 0.5, y: 0, dx: 0, dy: -1 },
   right: { label: 'derecha', x: 1, y: 0.5, dx: 1, dy: 0 },
@@ -42,6 +45,7 @@ let activeDiagramId = diagrams[0]?.id || null;
 let selection = { type: '', id: '' };
 let connectMode = false;
 let connectionStart = null;
+let connectionAnchorNodeId = '';
 let connectionDrag = null;
 let suppressedPortKeys = new Set();
 let dragState = null;
@@ -49,6 +53,7 @@ let lastDraggedNode = { id: '', timestamp: 0 };
 let focusNodeId = null;
 let contextMenuEdgeId = '';
 let contextMenuNodeId = '';
+let contextMenuCanvasPoint = null;
 let undoStack = [];
 let redoStack = [];
 let diagramResizeObserver = null;
@@ -78,8 +83,33 @@ function validEdgeDirection(direction) {
   return Object.prototype.hasOwnProperty.call(EDGE_DIRECTIONS, direction) ? direction : 'forward';
 }
 
+function validEdgeColor(color) {
+  return typeof color === 'string' && EDGE_COLOR_KEYS.includes(color) ? color : '';
+}
+
+function edgeColorForIndex(index) {
+  const safeIndex = Number.isFinite(Number(index)) ? Math.max(0, Number(index)) : 0;
+  return EDGE_COLOR_KEYS[safeIndex % EDGE_COLOR_KEYS.length];
+}
+
+function nextEdgeColor(diagram) {
+  const usedColors = new Set(diagram.edges.map((edge) => validEdgeColor(edge.color)).filter(Boolean));
+  return EDGE_COLOR_KEYS.find((color) => !usedColors.has(color)) || edgeColorForIndex(diagram.edges.length);
+}
+
 function createDiagram(title = 'Nuevo diagrama') {
   return { id: makeId('diagram'), title, nodes: [], edges: [] };
+}
+
+function duplicateDiagramTitle(title) {
+  const base = String(title || 'Diagrama').trim() || 'Diagrama';
+  let copyNumber = 1;
+  while (true) {
+    const suffix = copyNumber === 1 ? ' (copia)' : ` (copia ${copyNumber})`;
+    const candidate = `${base.slice(0, Math.max(1, 120 - suffix.length))}${suffix}`;
+    if (!diagrams.some((diagram) => diagram.title === candidate)) return candidate;
+    copyNumber += 1;
+  }
 }
 
 function defaultNodePosition(index) {
@@ -115,7 +145,8 @@ function normaliseEdge(raw, index, nodeIds, usedIds) {
     source: { nodeId: source.nodeId, port: PORTS[source.port] ? source.port : 'right' },
     target: { nodeId: target.nodeId, port: PORTS[target.port] ? target.port : 'left' },
     label: typeof raw?.label === 'string' ? raw.label.slice(0, 120) : '',
-    direction: validEdgeDirection(raw?.direction)
+    direction: validEdgeDirection(raw?.direction),
+    color: validEdgeColor(raw?.color) || edgeColorForIndex(index)
   };
 }
 
@@ -152,6 +183,30 @@ function persistDiagrams() {
   } catch {
     // La edición continúa disponible aunque el almacenamiento local no esté disponible.
   }
+}
+
+export function getDiagramWorkspaceState() {
+  return {
+    diagrams: cloneValue(diagrams),
+    activeDiagramId
+  };
+}
+
+export function restoreDiagramWorkspaceState(workspaceState) {
+  const rawDiagrams = Array.isArray(workspaceState) ? workspaceState : workspaceState?.diagrams;
+  if (!Array.isArray(rawDiagrams)) return false;
+  const restored = rawDiagrams.map(normaliseDiagram).filter(Boolean);
+  diagrams = restored.length ? restored : [createDiagram('Flujo principal')];
+  const requestedActiveId = workspaceState?.activeDiagramId;
+  activeDiagramId = diagrams.some((diagram) => diagram.id === requestedActiveId)
+    ? requestedActiveId
+    : diagrams[0].id;
+  undoStack = [];
+  redoStack = [];
+  resetDiagramInteraction();
+  persistDiagrams();
+  if (typeof document !== 'undefined' && document.querySelector('#view-diagrams')?.classList.contains('active')) renderDiagrams();
+  return true;
 }
 
 async function copyTextToClipboard(text) {
@@ -291,6 +346,7 @@ export function bindDiagramMenu() {
     if (!$('#view-diagrams')?.classList.contains('active')) return;
     if (action === 'import') importDiagramFile();
     if (action === 'export') exportDiagramText(serializeDiagram(activeDiagram()));
+    if (action === 'export-image') exportDiagramImage();
     if (action === 'undo') undoDiagramChange();
     if (action === 'redo') redoDiagramChange();
   });
@@ -328,6 +384,7 @@ function resetDiagramInteraction() {
   selection = { type: '', id: '' };
   connectMode = false;
   connectionStart = null;
+  connectionAnchorNodeId = '';
   connectionDrag = null;
   dragState = null;
   contextMenuEdgeId = '';
@@ -402,6 +459,15 @@ function hideNodeContextMenu() {
   contextMenuNodeId = '';
 }
 
+function hideCanvasContextMenu() {
+  const menu = $('#diagram-canvas-context-menu');
+  if (menu) {
+    menu.hidden = true;
+    menu.setAttribute('aria-hidden', 'true');
+  }
+  contextMenuCanvasPoint = null;
+}
+
 function hideEdgeContextMenu() {
   const menu = $('#diagram-context-menu');
   if (menu) {
@@ -410,6 +476,7 @@ function hideEdgeContextMenu() {
   }
   contextMenuEdgeId = '';
   hideNodeContextMenu();
+  hideCanvasContextMenu();
 }
 
 function syncEdgeContextMenu() {
@@ -434,6 +501,7 @@ function showEdgeContextMenu(event, edgeId) {
   if (!edge || !menu) return;
 
   hideNodeContextMenu();
+  hideCanvasContextMenu();
   setSelection('edge', edge.id);
   contextMenuEdgeId = edge.id;
   menu.hidden = false;
@@ -580,6 +648,42 @@ function handleNodeContextMenuAction(event) {
   }
 }
 
+function showCanvasContextMenu(event) {
+  const menu = $('#diagram-canvas-context-menu');
+  if (!menu) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  hideEdgeContextMenu();
+  setSelection();
+  contextMenuCanvasPoint = boardPoint(event);
+  menu.hidden = false;
+  menu.setAttribute('aria-hidden', 'false');
+
+  const positionMenu = () => {
+    if (menu.hidden) return;
+    const margin = 8;
+    const rect = menu.getBoundingClientRect();
+    const maxLeft = Math.max(margin, window.innerWidth - rect.width - margin);
+    const maxTop = Math.max(margin, window.innerHeight - rect.height - margin);
+    menu.style.left = `${clamp(event.clientX, margin, maxLeft)}px`;
+    menu.style.top = `${clamp(event.clientY, margin, maxTop)}px`;
+  };
+  positionMenu();
+  requestAnimationFrame(positionMenu);
+  menu.querySelector('[data-canvas-action]')?.focus({ preventScroll: true });
+}
+
+function handleCanvasContextMenuAction(event) {
+  const option = event.target.closest?.('[data-canvas-action]');
+  if (!option) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const point = contextMenuCanvasPoint;
+  hideCanvasContextMenu();
+  if (option.dataset.canvasAction === 'add-node' && point) addNodeAt(point);
+}
+
 function findPortElement(nodeId, portName) {
   return [...document.querySelectorAll('[data-diagram-port]')]
     .find((port) => port.dataset.nodeId === nodeId && port.dataset.port === portName) || null;
@@ -689,6 +793,11 @@ function nodePoint(node, portName) {
       };
     }
   }
+  return nodePointFromModel(node, portName);
+}
+
+function nodePointFromModel(node, portName) {
+  const port = PORTS[portName] || PORTS.right;
   return {
     x: node.x + NODE_WIDTH * port.x,
     y: node.y + NODE_HEIGHT * port.y
@@ -755,13 +864,14 @@ function freePreviewGeometry(start, end, sourcePortName) {
   return { path, midpoint };
 }
 
-function edgeGeometry(edge, diagram) {
+function edgeGeometry(edge, diagram, useDom = true) {
   const sourceNode = nodeById(diagram, edge.source.nodeId);
   const targetNode = nodeById(diagram, edge.target.nodeId);
   if (!sourceNode || !targetNode) return null;
+  const point = useDom ? nodePoint : nodePointFromModel;
   return directionalGeometry(
-    nodePoint(sourceNode, edge.source.port),
-    nodePoint(targetNode, edge.target.port),
+    point(sourceNode, edge.source.port),
+    point(targetNode, edge.target.port),
     edge.source.port,
     edge.target.port,
     validEdgeDirection(edge.direction)
@@ -771,7 +881,9 @@ function edgeGeometry(edge, diagram) {
 function nodeMarkup(node) {
   const typeLabel = NODE_TYPES[node.type] || NODE_TYPES.step;
   const ports = Object.entries(PORTS).map(([port, value]) => `<button class="diagram-port diagram-port-${port}" type="button" data-diagram-port data-node-id="${escapeHtml(node.id)}" data-port="${port}" aria-label="Conectar por el punto de ${value.label}"></button>`).join('');
-  return `<article class="diagram-node diagram-node-${node.type}${selection.type === 'node' && selection.id === node.id ? ' is-selected' : ''}" data-node-id="${escapeHtml(node.id)}" style="transform: translate(${node.x}px, ${node.y}px);"><div class="diagram-node-surface"><div class="diagram-node-topline"><span class="diagram-node-type">${escapeHtml(typeLabel)}</span><button class="diagram-node-delete" type="button" data-delete-node="${escapeHtml(node.id)}" aria-label="Eliminar nodo">×</button></div><input class="diagram-node-label" data-node-label="${escapeHtml(node.id)}" value="${escapeHtml(node.label)}" aria-label="Etiqueta del nodo" maxlength="160" /></div>${ports}</article>`;
+  const selectedClass = selection.type === 'node' && selection.id === node.id ? ' is-selected' : '';
+  const connectionSourceClass = connectionAnchorNodeId === node.id ? ' is-connection-source' : '';
+  return `<article class="diagram-node diagram-node-${node.type}${selectedClass}${connectionSourceClass}" data-node-id="${escapeHtml(node.id)}" style="transform: translate(${node.x}px, ${node.y}px);"><div class="diagram-node-surface"><div class="diagram-node-topline"><span class="diagram-node-type">${escapeHtml(typeLabel)}</span><button class="diagram-node-delete" type="button" data-delete-node="${escapeHtml(node.id)}" aria-label="Eliminar nodo">×</button></div><input class="diagram-node-label" data-node-label="${escapeHtml(node.id)}" value="${escapeHtml(node.label)}" aria-label="Etiqueta del nodo" maxlength="160" /></div>${ports}</article>`;
 }
 
 function renderNodes(diagram) {
@@ -782,11 +894,12 @@ function renderNodes(diagram) {
 function renderEdges(diagram) {
   const layer = $('#diagram-edge-paths');
   if (!layer) return;
-  const edgesMarkup = diagram.edges.map((edge) => {
+  const edgesMarkup = diagram.edges.map((edge, index) => {
     const geometry = edgeGeometry(edge, diagram);
     if (!geometry) return '';
     const selected = selection.type === 'edge' && selection.id === edge.id ? ' is-selected' : '';
     const direction = validEdgeDirection(edge.direction);
+    const color = validEdgeColor(edge.color) || edgeColorForIndex(index);
     const marker = direction === 'forward'
       ? ' marker-end="url(#diagram-arrow)"'
       : direction === 'backward'
@@ -798,7 +911,7 @@ function renderEdges(diagram) {
         ? `<circle class="diagram-edge-endpoint diagram-edge-target" data-edge-role="target" cx="${geometry.end.x}" cy="${geometry.end.y}" r="5"></circle>`
         : `<circle class="diagram-edge-endpoint diagram-edge-source" data-edge-role="source" cx="${geometry.start.x}" cy="${geometry.start.y}" r="5"></circle><circle class="diagram-edge-endpoint diagram-edge-target" data-edge-role="target" cx="${geometry.end.x}" cy="${geometry.end.y}" r="5"></circle>`;
     const label = edge.label ? `<text class="diagram-edge-label" x="${geometry.midpoint.x}" y="${geometry.midpoint.y}" text-anchor="middle">${escapeHtml(edge.label)}</text>` : '';
-    return `<g class="diagram-edge-group${selected}" data-edge-direction="${direction}"><path class="diagram-edge-backplate" d="${geometry.path}"></path><path class="diagram-edge${selected}" d="${geometry.path}" data-edge-direction="${direction}"${marker}></path>${endpointMarkup}<path class="diagram-edge-hit" d="${geometry.path}" data-edge-id="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-label="Seleccionar conexión"></path>${label}</g>`;
+    return `<g class="diagram-edge-group${selected}" data-edge-direction="${direction}" data-edge-color="${color}"><path class="diagram-edge-backplate" d="${geometry.path}"></path><path class="diagram-edge${selected}" d="${geometry.path}" data-edge-direction="${direction}"${marker}></path>${endpointMarkup}<path class="diagram-edge-hit" d="${geometry.path}" data-edge-id="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-label="Seleccionar conexión"></path>${label}</g>`;
   }).join('');
   const previewMarkup = connectionDrag?.moved && connectionDrag.current
     ? (() => {
@@ -823,7 +936,7 @@ function renderInspector() {
   if (selection.type === 'node') {
     const node = nodeById(diagram, selection.id);
     if (node) {
-      container.innerHTML = `<div class="diagram-inspector-card"><span class="diagram-inspector-kicker">NODO SELECCIONADO</span><label class="form-label">Etiqueta<input id="diagram-inspector-label" class="field" value="${escapeHtml(node.label)}" maxlength="160" /></label><label class="form-label">Tipo<select id="diagram-inspector-type" class="select"><option value="start"${node.type === 'start' ? ' selected' : ''}>Inicio</option><option value="step"${node.type === 'step' ? ' selected' : ''}>Paso</option><option value="decision"${node.type === 'decision' ? ' selected' : ''}>Decisión</option><option value="end"${node.type === 'end' ? ' selected' : ''}>Fin</option></select></label><p class="form-note">Arrastra la tarjeta para moverla. Usa cualquiera de sus cuatro puntos para conectarla.</p></div>`;
+      container.innerHTML = `<div class="diagram-inspector-card"><span class="diagram-inspector-kicker">NODO SELECCIONADO</span><label class="form-label">Etiqueta<input id="diagram-inspector-label" class="field" value="${escapeHtml(node.label)}" maxlength="160" /></label><label class="form-label">Tipo<select id="diagram-inspector-type" class="select"><option value="start"${node.type === 'start' ? ' selected' : ''}>Inicio</option><option value="step"${node.type === 'step' ? ' selected' : ''}>Paso</option><option value="decision"${node.type === 'decision' ? ' selected' : ''}>Decisión</option><option value="end"${node.type === 'end' ? ' selected' : ''}>Fin</option></select></label><p class="form-note">Arrastra la tarjeta para moverla. Haz doble clic en otra para conectarlas o usa sus puntos.</p></div>`;
       $('#diagram-inspector-label').addEventListener('input', (event) => {
         beginTextHistory(event.target);
         node.label = event.target.value.slice(0, 160);
@@ -861,7 +974,9 @@ function updateStatus() {
   const diagram = activeDiagram();
   const status = $('#diagram-status');
   if (!status) return;
-  if (connectMode && connectionStart) {
+  if (connectionAnchorNodeId) {
+    status.textContent = 'Tarjeta de origen seleccionada. Haz doble clic en otra tarjeta para conectarla.';
+  } else if (connectMode && connectionStart) {
     const node = nodeById(diagram, connectionStart.nodeId);
     status.textContent = `Conectando desde “${node?.label || 'nodo'}”. Selecciona el punto de destino.`;
   } else if (connectMode) {
@@ -880,7 +995,10 @@ function updateStatus() {
 function updateSelectionUI() {
   const root = $('#view-diagrams');
   if (!root) return;
-  root.querySelectorAll('.diagram-node').forEach((node) => node.classList.toggle('is-selected', selection.type === 'node' && selection.id === node.dataset.nodeId));
+  root.querySelectorAll('.diagram-node').forEach((node) => {
+    node.classList.toggle('is-selected', selection.type === 'node' && selection.id === node.dataset.nodeId);
+    node.classList.toggle('is-connection-source', connectionAnchorNodeId === node.dataset.nodeId);
+  });
   root.querySelectorAll('.diagram-edge').forEach((edge) => {
     const group = edge.closest('.diagram-edge-group');
     const edgeHit = group?.querySelector('[data-edge-id]');
@@ -912,8 +1030,9 @@ export function renderDiagrams() {
   if (!root) return;
   hideEdgeContextMenu();
   const diagram = activeDiagram();
-  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><button id="diagram-code" class="btn btn-secondary" type="button">⌘ Código</button><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
+  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap">${sectionIconMarkup('diagrams')}<div class="diagram-title-copy"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><button id="diagram-code" class="btn btn-secondary" type="button">⌘ Código</button><button id="diagram-export-image" class="btn btn-secondary" type="button">Exportar imagen</button><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
   ensureDiagramViewport();
+  root.querySelector('#diagram-new')?.insertAdjacentHTML('afterend', '<button id="diagram-duplicate" class="btn btn-secondary" type="button">Duplicar</button>');
   observeDiagramCanvas();
   const arrowMarker = root.querySelector('#diagram-arrow');
   if (arrowMarker) {
@@ -934,6 +1053,7 @@ export function renderDiagrams() {
     previewArrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 12 7 L 0 14 z');
   }
   root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Dirección de la conexión" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div><div id="diagram-node-context-menu" class="diagram-context-menu" role="menu" aria-label="Modificar tarjeta" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Tarjeta</div><button type="button" role="menuitem" data-node-action="focus-label">Editar etiqueta</button><div class="diagram-context-menu-heading">Tipo</div><button type="button" role="menuitemradio" data-node-type="start" aria-checked="false">Inicio</button><button type="button" role="menuitemradio" data-node-type="step" aria-checked="false">Paso</button><button type="button" role="menuitemradio" data-node-type="decision" aria-checked="false">Decisión</button><button type="button" role="menuitemradio" data-node-type="end" aria-checked="false">Fin</button><button type="button" role="menuitem" data-node-action="delete">Eliminar tarjeta</button></div>');
+  root.insertAdjacentHTML('beforeend', '<div id="diagram-canvas-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones del canvas" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Canvas</div><button type="button" role="menuitem" data-canvas-action="add-node">＋ Agregar nodo</button></div>');
   bindDiagramEvents(root);
   renderDiagramCanvas();
   updateSelectionUI();
@@ -1017,6 +1137,22 @@ function addNodeAt(point, label = 'Nuevo paso') {
   renderDiagrams();
 }
 
+function duplicateActiveDiagram() {
+  const current = activeDiagram();
+  const before = historySnapshot();
+  const copy = normaliseDiagram({
+    ...cloneValue(current),
+    id: makeId('diagram'),
+    title: duplicateDiagramTitle(current.title)
+  }, diagrams.length);
+  diagrams = [...diagrams, copy];
+  activeDiagramId = copy.id;
+  resetDiagramInteraction();
+  recordHistory(before);
+  persistDiagrams();
+  renderDiagrams();
+}
+
 function removeNode(nodeId) {
   const diagram = activeDiagram();
   const before = historySnapshot();
@@ -1024,6 +1160,7 @@ function removeNode(nodeId) {
   diagram.edges = diagram.edges.filter((edge) => edge.source.nodeId !== nodeId && edge.target.nodeId !== nodeId);
   if (selection.id === nodeId) selection = { type: '', id: '' };
   if (connectionStart?.nodeId === nodeId) connectionStart = null;
+  if (connectionAnchorNodeId === nodeId) connectionAnchorNodeId = '';
   recordHistory(before);
   persistDiagrams();
   renderDiagrams();
@@ -1087,15 +1224,64 @@ function commitConnection(source, target) {
   }
   const diagram = activeDiagram();
   const before = historySnapshot();
-  const edge = { id: makeId('edge'), source, target, label: '', direction: 'forward' };
+  const edge = { id: makeId('edge'), source, target, label: '', direction: 'forward', color: nextEdgeColor(diagram) };
   diagram.edges.push(edge);
   connectionStart = null;
+  connectionAnchorNodeId = '';
   selection = { type: 'edge', id: edge.id };
   recordHistory(before);
   persistDiagrams();
   renderDiagrams();
   showToast('Conexión creada');
   return true;
+}
+
+function connectionPortsBetween(sourceNode, targetNode) {
+  const deltaX = (targetNode.x + NODE_WIDTH / 2) - (sourceNode.x + NODE_WIDTH / 2);
+  const deltaY = (targetNode.y + NODE_HEIGHT / 2) - (sourceNode.y + NODE_HEIGHT / 2);
+  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+    return deltaX >= 0
+      ? { sourcePort: 'right', targetPort: 'left' }
+      : { sourcePort: 'left', targetPort: 'right' };
+  }
+  return deltaY >= 0
+    ? { sourcePort: 'bottom', targetPort: 'top' }
+    : { sourcePort: 'top', targetPort: 'bottom' };
+}
+
+function handleNodeDoubleClick(event) {
+  const element = event.target.closest?.('.diagram-node');
+  if (!element || event.target.closest('button')) return;
+  const node = nodeById(activeDiagram(), element.dataset.nodeId);
+  if (!node) return;
+
+  event.preventDefault();
+  event.stopPropagation();
+  if (!connectionAnchorNodeId) {
+    connectionAnchorNodeId = node.id;
+    connectionStart = null;
+    connectMode = false;
+    setSelection('node', node.id);
+    return;
+  }
+  if (connectionAnchorNodeId === node.id) {
+    connectionAnchorNodeId = '';
+    updateSelectionUI();
+    return;
+  }
+
+  const sourceNode = nodeById(activeDiagram(), connectionAnchorNodeId);
+  if (!sourceNode) {
+    connectionAnchorNodeId = node.id;
+    setSelection('node', node.id);
+    return;
+  }
+  const { sourcePort, targetPort } = connectionPortsBetween(sourceNode, node);
+  connectionAnchorNodeId = '';
+  commitConnection(
+    { nodeId: sourceNode.id, port: sourcePort },
+    { nodeId: node.id, port: targetPort }
+  );
 }
 
 function handlePortSelection(port) {
@@ -1110,6 +1296,9 @@ function handlePortSelection(port) {
 }
 
 function beginConnectionDrag(event, port) {
+  const hadConnectionAnchor = Boolean(connectionAnchorNodeId);
+  connectionAnchorNodeId = '';
+  if (hadConnectionAnchor) updateSelectionUI();
   connectionDrag = {
     source: { nodeId: port.dataset.nodeId, port: port.dataset.port },
     pointerId: event.pointerId,
@@ -1266,7 +1455,244 @@ function handleEdgeContextMenu(event) {
 }
 
 function handleBoardPointerDown(event) {
-  if (event.target === event.currentTarget || event.target.id === 'diagram-edge-layer') setSelection();
+  if (event.target === event.currentTarget || event.target.id === 'diagram-edge-layer') {
+    connectionAnchorNodeId = '';
+    setSelection();
+  }
+}
+
+function escapeSvg(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&apos;',
+    '"': '&quot;'
+  }[character]));
+}
+
+function diagramCssColor(name, fallback) {
+  if (typeof window === 'undefined' || typeof document === 'undefined' || typeof window.getComputedStyle !== 'function') {
+    return fallback;
+  }
+  return window.getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+}
+
+function diagramImageColors() {
+  return {
+    canvas: diagramCssColor('--canvas', '#171717'),
+    gridLine: diagramCssColor('--grid-line', 'rgba(255, 255, 255, .045)'),
+    surface: diagramCssColor('--surface', '#252526'),
+    surfaceDeep: diagramCssColor('--surface-deep', '#171717'),
+    strong: diagramCssColor('--strong', '#f2f2f2'),
+    muted: diagramCssColor('--muted', '#858585'),
+    blue: diagramCssColor('--blue', '#3794ff'),
+    green: diagramCssColor('--green', '#89d185'),
+    amber: diagramCssColor('--amber', '#dcdcaa'),
+    red: diagramCssColor('--red', '#f48771'),
+    purple: diagramCssColor('--purple', '#c586c0'),
+    cyan: diagramCssColor('--cyan', '#4ec9b0'),
+    accentBorder: diagramCssColor('--accent-border-strong', '#405b75'),
+    accentText: diagramCssColor('--accent-text', '#9bceff'),
+    accentTextSoft: diagramCssColor('--accent-text-soft', '#a8bbce'),
+    successSurface: diagramCssColor('--success-surface', '#263526'),
+    successBorder: diagramCssColor('--success-border', 'rgba(137, 209, 133, .4)'),
+    warningSurface: diagramCssColor('--warning-surface', 'rgba(220, 220, 170, .08)'),
+    warningBorder: diagramCssColor('--warning-border', 'rgba(220, 220, 170, .35)'),
+    errorSurface: diagramCssColor('--error-surface', '#3a2926'),
+    dangerBorder: diagramCssColor('--danger-border', '#5b3630')
+  };
+}
+
+function wrapSvgText(value, maxCharacters = 24, maxLines = 3) {
+  const words = String(value ?? '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return [''];
+  const lines = [];
+  let current = '';
+  words.forEach((word) => {
+    const chunks = word.length > maxCharacters
+      ? word.match(new RegExp(`.{1,${maxCharacters}}`, 'g')) || [word]
+      : [word];
+    chunks.forEach((chunk) => {
+      const candidate = current ? `${current} ${chunk}` : chunk;
+      if (candidate.length <= maxCharacters) {
+        current = candidate;
+      } else {
+        if (current) lines.push(current);
+        current = chunk;
+      }
+    });
+  });
+  if (current) lines.push(current);
+  if (lines.length <= maxLines) return lines;
+  const visibleLines = lines.slice(0, maxLines);
+  const lastLine = visibleLines[maxLines - 1].slice(0, Math.max(1, maxCharacters - 1)).replace(/\s+$/, '');
+  visibleLines[maxLines - 1] = `${lastLine}…`;
+  return visibleLines;
+}
+
+function svgTextLines(lines, { x, y, anchor = 'start', fill, fontSize = 13, weight = 400, lineHeight = 16 } = {}) {
+  const xValue = Number(x);
+  const yValue = Number(y);
+  return `<text x="${xValue}" y="${Number(yValue)}" text-anchor="${anchor}" fill="${escapeSvg(fill)}" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="${fontSize}" font-weight="${weight}">${lines.map((line, index) => `<tspan x="${xValue}" dy="${index ? lineHeight : 0}">${escapeSvg(line)}</tspan>`).join('')}</text>`;
+}
+
+function diagramNodeSvg(node, colors) {
+  const type = validNodeType(node.type);
+  const x = Number(node.x) || 0;
+  const y = Number(node.y) || 0;
+  const centerX = x + NODE_WIDTH / 2;
+  const centerY = y + NODE_HEIGHT / 2;
+  const rounded = type === 'start' || type === 'end';
+  const shape = type === 'decision'
+    ? `<polygon points="${centerX},${y} ${x + NODE_WIDTH},${centerY} ${centerX},${y + NODE_HEIGHT} ${x},${centerY}" fill="${escapeSvg(colors.warningSurface)}" stroke="${escapeSvg(colors.warningBorder)}" stroke-width="1.5" filter="url(#diagram-image-shadow)"></polygon>`
+    : `<rect x="${x}" y="${y}" width="${NODE_WIDTH}" height="${NODE_HEIGHT}" rx="${rounded ? 44 : 6}" fill="${escapeSvg(type === 'start' ? colors.successSurface : type === 'end' ? colors.errorSurface : colors.surface)}" stroke="${escapeSvg(type === 'start' ? colors.successBorder : type === 'end' ? colors.dangerBorder : colors.accentBorder)}" stroke-width="${type === 'end' ? 3 : 1.5}" filter="url(#diagram-image-shadow)"></rect>`;
+  const accent = type === 'step'
+    ? `<line x1="${x + 1}" y1="${y + 7}" x2="${x + 1}" y2="${y + NODE_HEIGHT - 7}" stroke="${escapeSvg(colors.accentTextSoft)}" stroke-width="3" stroke-linecap="round"></line>`
+    : '';
+  const innerEnd = type === 'end'
+    ? `<rect x="${x + 5}" y="${y + 5}" width="${NODE_WIDTH - 10}" height="${NODE_HEIGHT - 10}" rx="39" fill="none" stroke="${escapeSvg(colors.dangerBorder)}" stroke-width="1"></rect>`
+    : '';
+  const centered = type === 'decision';
+  const textX = centered ? centerX : x + (rounded ? 20 : 14);
+  const textAnchor = centered ? 'middle' : 'start';
+  const typeColor = type === 'start' ? colors.green : type === 'decision' ? colors.amber : type === 'end' ? colors.red : colors.accentText;
+  const labelLines = wrapSvgText(node.label, centered ? 15 : rounded ? 21 : 24, 3);
+  const typeMarkup = svgTextLines([NODE_TYPES[type] || NODE_TYPES.step], {
+    x: textX,
+    y: y + (centered ? 27 : 22),
+    anchor: textAnchor,
+    fill: typeColor,
+    fontSize: 10,
+    weight: 700,
+    lineHeight: 12
+  });
+  const labelMarkup = svgTextLines(labelLines, {
+    x: textX,
+    y: y + (centered ? 48 : 46),
+    anchor: textAnchor,
+    fill: colors.strong,
+    fontSize: 13,
+    weight: 650,
+    lineHeight: 16
+  });
+  return `<g aria-label="${escapeSvg(node.label)}">${shape}${innerEnd}${accent}${typeMarkup}${labelMarkup}</g>`;
+}
+
+function diagramEdgeSvg(edge, diagram, colors, index = 0) {
+  const geometry = edgeGeometry(edge, diagram, false);
+  if (!geometry) return '';
+  const direction = validEdgeDirection(edge.direction);
+  const edgeColorKey = validEdgeColor(edge.color) || edgeColorForIndex(index);
+  const edgeColor = colors[edgeColorKey] || colors.accentTextSoft;
+  const markerId = direction === 'forward'
+    ? `diagram-image-arrow-forward-${index}`
+    : direction === 'backward'
+      ? `diagram-image-arrow-backward-${index}`
+      : '';
+  const marker = markerId
+    ? direction === 'forward'
+      ? ` marker-end="url(#${markerId})"`
+      : ` marker-start="url(#${markerId})"`
+    : '';
+  const markerDefinition = markerId
+    ? `<defs><marker id="${markerId}" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(edgeColor)}"></path></marker></defs>`
+    : '';
+  const dash = direction === 'none' ? ' stroke-dasharray="7 5"' : '';
+  const endpointMarkup = direction === 'forward'
+    ? `<circle cx="${geometry.start.x}" cy="${geometry.start.y}" r="5" fill="${escapeSvg(colors.cyan)}" stroke="${escapeSvg(colors.canvas)}" stroke-width="2.5"></circle>`
+    : direction === 'backward'
+      ? `<circle cx="${geometry.end.x}" cy="${geometry.end.y}" r="5" fill="${escapeSvg(colors.amber)}" stroke="${escapeSvg(colors.canvas)}" stroke-width="2.5"></circle>`
+      : `<circle cx="${geometry.start.x}" cy="${geometry.start.y}" r="5" fill="${escapeSvg(colors.canvas)}" stroke="${escapeSvg(colors.accentTextSoft)}" stroke-width="2.5"></circle><circle cx="${geometry.end.x}" cy="${geometry.end.y}" r="5" fill="${escapeSvg(colors.canvas)}" stroke="${escapeSvg(colors.accentTextSoft)}" stroke-width="2.5"></circle>`;
+  const label = edge.label
+    ? `<text x="${geometry.midpoint.x}" y="${geometry.midpoint.y}" text-anchor="middle" dominant-baseline="middle" fill="${escapeSvg(colors.accentTextSoft)}" paint-order="stroke" stroke="${escapeSvg(colors.surfaceDeep)}" stroke-width="5" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10">${escapeSvg(edge.label)}</text>`
+    : '';
+  return `<g><path d="${geometry.path}" fill="none" stroke="${escapeSvg(colors.canvas)}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path><path d="${geometry.path}" fill="none" stroke="${escapeSvg(edgeColor)}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"${dash}${marker}></path>${endpointMarkup}${label}</g>`;
+}
+
+function createDiagramImageSvg(diagram) {
+  const colors = diagramImageColors();
+  const safeDiagram = diagram || { title: 'Diagrama', nodes: [], edges: [] };
+  const edges = Array.isArray(safeDiagram.edges) ? safeDiagram.edges.map((edge) => diagramEdgeSvg(edge, safeDiagram, colors)).join('') : '';
+  const nodes = Array.isArray(safeDiagram.nodes) ? safeDiagram.nodes.map((node) => diagramNodeSvg(node, colors)).join('') : '';
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" role="img" aria-labelledby="diagram-image-title"><title id="diagram-image-title">${escapeSvg(safeDiagram.title || 'Diagrama')}</title><defs><pattern id="diagram-image-grid" width="${DIAGRAM_GRID_SIZE}" height="${DIAGRAM_GRID_SIZE}" patternUnits="userSpaceOnUse"><path d="M ${DIAGRAM_GRID_SIZE} 0 L 0 0 0 ${DIAGRAM_GRID_SIZE}" fill="none" stroke="${escapeSvg(colors.gridLine)}" stroke-width="1"></path></pattern><filter id="diagram-image-shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity=".3"></feDropShadow></filter><marker id="diagram-image-arrow-forward" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(colors.blue)}"></path></marker><marker id="diagram-image-arrow-backward" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(colors.purple)}"></path></marker></defs><rect width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" fill="${escapeSvg(colors.canvas)}"></rect><rect width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" fill="url(#diagram-image-grid)"></rect><g aria-label="Conexiones">${edges}</g><g aria-label="Nodos">${nodes}</g></svg>`;
+}
+
+function canvasToPngDataUrl(canvas) {
+  return new Promise((resolve, reject) => {
+    if (typeof canvas.toBlob !== 'function') {
+      try {
+        resolve(canvas.toDataURL('image/png'));
+      } catch (error) {
+        reject(new Error(error.message || 'No se pudo crear la imagen del diagrama'));
+      }
+      return;
+    }
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error('No se pudo crear la imagen del diagrama'));
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error('No se pudo preparar la imagen del diagrama'));
+      reader.readAsDataURL(blob);
+    }, 'image/png');
+  });
+}
+
+function svgToPngDataUrl(svg) {
+  return new Promise((resolve, reject) => {
+    if (typeof window === 'undefined' || typeof document === 'undefined' || typeof window.Blob !== 'function' || typeof window.URL?.createObjectURL !== 'function' || typeof window.Image !== 'function') {
+      reject(new Error('La exportación de imágenes no está disponible'));
+      return;
+    }
+    const objectUrl = window.URL.createObjectURL(new window.Blob([svg], { type: 'image/svg+xml;charset=utf-8' }));
+    const image = new window.Image();
+    const cleanup = () => window.URL.revokeObjectURL(objectUrl);
+    image.onload = async () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = BOARD_WIDTH * DIAGRAM_IMAGE_SCALE;
+        canvas.height = BOARD_HEIGHT * DIAGRAM_IMAGE_SCALE;
+        const context = canvas.getContext('2d');
+        if (!context) throw new Error('El navegador no permite crear un lienzo de imagen');
+        context.imageSmoothingEnabled = true;
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(await canvasToPngDataUrl(canvas));
+      } catch (error) {
+        reject(new Error(error.message || 'No se pudo crear la imagen del diagrama'));
+      } finally {
+        cleanup();
+      }
+    };
+    image.onerror = () => {
+      cleanup();
+      reject(new Error('No se pudo dibujar el diagrama como imagen'));
+    };
+    image.src = objectUrl;
+  });
+}
+
+async function exportDiagramImage(button = null) {
+  const originalText = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = 'Exportando…';
+  }
+  try {
+    if (typeof window.nexusData?.saveDiagramFile !== 'function') throw new Error('La exportación de diagramas no está disponible');
+    const dataUrl = await svgToPngDataUrl(createDiagramImageSvg(activeDiagram()));
+    const savedPath = await window.nexusData.saveDiagramFile({ content: dataUrl, format: 'png' });
+    if (savedPath) showToast(`Diagrama exportado: ${fileNameFromPath(savedPath)}`);
+  } catch (error) {
+    showToast(error.message || 'No se pudo exportar la imagen del diagrama', true);
+  } finally {
+    if (button) {
+      button.disabled = false;
+      button.textContent = originalText;
+    }
+  }
 }
 
 function handleBoardDoubleClick(event) {
@@ -1359,14 +1785,15 @@ function handleKeydown(event) {
     redoDiagramChange();
     return;
   }
-  if (event.key === 'Escape' && (contextMenuEdgeId || contextMenuNodeId)) {
+  if (event.key === 'Escape' && (contextMenuEdgeId || contextMenuNodeId || contextMenuCanvasPoint)) {
     event.preventDefault();
     hideEdgeContextMenu();
     return;
   }
-  if (event.key === 'Escape' && connectMode) {
+  if (event.key === 'Escape' && (connectMode || connectionAnchorNodeId)) {
     connectionStart = null;
     connectMode = false;
+    connectionAnchorNodeId = '';
     updateSelectionUI();
     return;
   }
@@ -1387,6 +1814,7 @@ function bindDiagramEvents(root) {
     activeDiagramId = event.target.value;
     selection = { type: '', id: '' };
     connectionStart = null;
+    connectionAnchorNodeId = '';
     connectMode = false;
     renderDiagrams();
   });
@@ -1397,12 +1825,14 @@ function bindDiagramEvents(root) {
     activeDiagramId = next.id;
     selection = { type: '', id: '' };
     connectionStart = null;
+    connectionAnchorNodeId = '';
     connectMode = false;
     recordHistory(before);
     persistDiagrams();
     renderDiagrams();
     showToast('Nuevo diagrama creado');
   });
+  $('#diagram-duplicate').addEventListener('click', duplicateActiveDiagram);
   $('#diagram-add-node').addEventListener('click', () => {
     const canvas = $('#diagram-canvas');
     const point = canvas
@@ -1411,15 +1841,18 @@ function bindDiagramEvents(root) {
     addNodeAt(point);
   });
   $('#diagram-code').addEventListener('click', () => openDiagramCodeModal());
+  $('#diagram-export-image').addEventListener('click', (event) => exportDiagramImage(event.currentTarget));
   $('#diagram-connect').addEventListener('click', () => {
     connectMode = !connectMode;
     connectionStart = null;
+    connectionAnchorNodeId = '';
     updateSelectionUI();
   });
   $('#diagram-delete-selection').addEventListener('click', openDeleteDiagramConfirmation);
   const nodeLayer = $('#diagram-node-layer');
   nodeLayer.addEventListener('pointerdown', handleNodePointerDown);
   nodeLayer.addEventListener('click', handleNodeClick);
+  nodeLayer.addEventListener('dblclick', handleNodeDoubleClick);
   nodeLayer.addEventListener('contextmenu', handleNodeContextMenu);
   nodeLayer.addEventListener('input', handleNodeInput);
   const edgeLayer = $('#diagram-edge-layer');
@@ -1427,8 +1860,10 @@ function bindDiagramEvents(root) {
   edgeLayer.addEventListener('contextmenu', handleEdgeContextMenu);
   $('#diagram-context-menu').addEventListener('click', handleEdgeContextMenuAction);
   $('#diagram-node-context-menu').addEventListener('click', handleNodeContextMenuAction);
+  $('#diagram-canvas-context-menu').addEventListener('click', handleCanvasContextMenuAction);
   const canvas = $('#diagram-canvas');
   canvas.addEventListener('wheel', handleDiagramWheel, { passive: false });
+  canvas.addEventListener('contextmenu', showCanvasContextMenu);
   const board = $('#diagram-board');
   board.addEventListener('pointerdown', handleBoardPointerDown);
   board.addEventListener('dblclick', handleBoardDoubleClick);

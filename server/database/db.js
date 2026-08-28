@@ -25,6 +25,7 @@ CREATE TABLE IF NOT EXISTS documents (
   type TEXT NOT NULL,
   path TEXT,
   metadata_json TEXT NOT NULL DEFAULT '{}',
+  is_favorite INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
   UNIQUE(source_id, external_id)
@@ -65,11 +66,20 @@ function now() {
   return new Date().toISOString();
 }
 
+function ensureSchemaCompatibility(database) {
+  const columns = database.prepare('PRAGMA table_info(documents)').all();
+  if (!columns.some((column) => column.name === 'is_favorite')) {
+    database.exec('ALTER TABLE documents ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0');
+  }
+}
+
 function openDatabase(dbPath) {
   const resolvedPath = dbPath || path.join(process.cwd(), 'data', 'nexusdata.db');
   fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
   const database = new DatabaseSync(resolvedPath);
   database.exec(SCHEMA);
+  ensureSchemaCompatibility(database);
+  database.exec('CREATE INDEX IF NOT EXISTS idx_documents_favorite ON documents(is_favorite)');
 
   const api = {
     raw: database,
@@ -153,6 +163,7 @@ function withDocumentShape(db, row) {
     content: row.content,
     type: row.type,
     path: row.path,
+    favorite: Number(row.is_favorite) === 1,
     metadata: parseJson(row.metadata_json),
     tags: documentTags(db, row.id).map((tag) => tag.name),
     createdAt: row.created_at,
@@ -161,7 +172,7 @@ function withDocumentShape(db, row) {
 }
 
 function documentSelect() {
-  return `SELECT d.*, s.name AS source_name
+  return `SELECT d.*, s.name AS source_name, s.type AS source_type, s.config_json AS source_config_json
           FROM documents d JOIN sources s ON s.id = d.source_id`;
 }
 

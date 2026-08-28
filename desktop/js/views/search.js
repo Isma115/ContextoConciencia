@@ -2,8 +2,10 @@ import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { persistSearchPreferences, state, resetFilters } from '../core/state.js';
 import { shortDate, sourceIcon, statusLabel, typeLabel } from '../core/format.js';
+import { sectionIconMarkup } from '../core/section-icons.js';
+import { bindModalClose, closeModal } from '../ui/modals.js';
 import { showToast } from '../ui/notifications.js';
-import { bindDocumentOpeners } from './documents.js';
+import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, copyPathButtonMarkup, favoriteButtonMarkup } from './documents.js';
 import { openSourceModal } from './source-modal.js';
 import { deleteSource, syncSource } from './sources.js';
 
@@ -55,10 +57,6 @@ function sourceOptions(selected = '') {
 
 function collectionOptions(selected = '') {
   return `<option value="">Todas las colecciones</option>${state.collections.map((item) => `<option value="${escapeHtml(item.id)}" ${item.id === selected ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}`;
-}
-
-function tagOptions(selected = '') {
-  return `<option value="">Todas las etiquetas</option>${state.tags.map((item) => `<option value="${escapeHtml(item.name)}" ${item.name === selected ? 'selected' : ''}>${escapeHtml(item.name)}</option>`).join('')}`;
 }
 
 function typeOptions(selected = '') {
@@ -118,7 +116,8 @@ function bindCollectionAndTagActions(container, prefix = '') {
 
 function filterMarkup(prefix = '', filters = state.filters) {
   const id = (name) => prefix ? `global-filter-${name}` : `filter-${name}`;
-  return `<div class="filter-row"><select id="${id('source')}" class="select">${sourceOptions(filters.source)}</select><select id="${id('type')}" class="select">${typeOptions(filters.type)}</select><select id="${id('tag')}" class="select">${tagOptions(filters.tag).replace('Todas las etiquetas', 'Etiqueta')}</select><select id="${id('collection')}" class="select">${collectionOptions(filters.collection).replace('Todas las colecciones', 'Colección')}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div>`;
+  const viewSourcesButton = prefix === 'global' ? '<button id="global-view-sources" class="btn btn-secondary btn-small source-filter-button" type="button">Ver Fuentes</button>' : '';
+  return `<div class="filter-row"><select id="${id('source')}" class="select source-filter-select">${sourceOptions(filters.source)}</select>${viewSourcesButton}<select id="${id('type')}" class="select type-filter-select">${typeOptions(filters.type)}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div>`;
 }
 
 function resultMarkup(results, prefix = '') {
@@ -127,8 +126,8 @@ function resultMarkup(results, prefix = '') {
   return resultItems.map((doc) => `
     <article class="result-card document-hit" data-view-document="${escapeHtml(doc.id)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(doc.title)}">
       <div class="result-head"><div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div><div class="result-title-wrap"><h3 class="result-title">${escapeHtml(doc.title)}</h3><div class="result-source">${escapeHtml(doc.source)}</div></div><span class="score">${Math.round((doc.score || 0) * 100)}%</span></div>
-      <div class="snippet">${escapeHtml(doc.snippet || doc.content?.slice(0, 220))}</div>
-      <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions"><button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
+      <div class="snippet">${escapeHtml(doc.metadata?.contentDeferred ? 'Contenido disponible al abrir' : doc.snippet || doc.content?.slice(0, 220))}</div>
+      <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}<button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
     </article>`).join('');
 }
 
@@ -145,7 +144,8 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
     schedule(prefix);
   });
   input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { cancel(); perform(); } });
-  ['source', 'type', 'tag', 'collection', 'date'].forEach((name) => $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`).addEventListener('change', () => { cancel(); perform(); }));
+  ['source', 'type', 'date'].forEach((name) => $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`).addEventListener('change', () => { cancel(); perform(); }));
+  $(`#${prefix ? 'global-view-sources' : 'view-sources'}`)?.addEventListener('click', openSourcesModal);
   commonPaths?.addEventListener('change', async () => {
     state.includeCommonPaths = commonPaths.checked;
     persistSearchPreferences();
@@ -173,10 +173,12 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
 }
 
 export function renderSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
-  $('#view-search').innerHTML = `<div class="search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div></div><div class="panel search-results-panel"><div class="panel-header"><h2>Documentos</h2></div><div class="result-list">${resultMarkup(results)}</div></div>`;
+  $('#view-search').innerHTML = `<div class="search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div></div><div class="panel search-results-panel"><div class="panel-header"><div class="section-panel-heading">${sectionIconMarkup('search')}<h2>Documentos</h2></div></div><div class="result-list">${resultMarkup(results)}</div></div>`;
   bindSearchControls({ perform: performSearch, cancel: cancelSearchDebounce, clear: () => { resetUnifiedSearch(); renderSearch([]); } });
   const surface = $('#view-search');
   bindCollectionAndTagActions(surface);
+  bindCopyPathActions(surface);
+  bindDocumentFavoriteActions(surface);
   bindDocumentOpeners(surface);
   if (restoreFocus) restoreSearchFocus($('#search-input'), selectionStart, selectionEnd);
 }
@@ -235,9 +237,9 @@ async function performSearchRequest({ prefix = '', view, renderResults }) {
   const selectionEnd = input.selectionEnd;
   const query = input.value.trim();
   const requestId = prefix ? ++globalSearchRequestId : ++searchRequestId;
-  const filters = { ...state.filters };
+  const filters = { ...state.filters, tag: '', collection: '' };
   const params = new URLSearchParams({ q: query });
-  [['source', 'source'], ['type', 'type'], ['tag', 'tag'], ['collection', 'collection'], ['date', 'updatedFrom']].forEach(([name, key]) => {
+  [['source', 'source'], ['type', 'type'], ['date', 'updatedFrom']].forEach(([name, key]) => {
     const value = $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`)?.value || '';
     const stateKey = key === 'updatedFrom' ? 'date' : key;
     filters[stateKey] = value;
@@ -273,12 +275,20 @@ function globalSourceMarkup(sources) {
   }).join('');
 }
 
-export function renderGlobalSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
-  const sources = state.sources.filter((source) => source.config?.role !== 'common-paths');
+function availableSearchSources() {
+  return state.sources.filter((source) => source.config?.role !== 'common-paths');
+}
+
+function openSourcesModal() {
+  const sources = availableSearchSources();
   const sourceCount = `${sources.length} fuente${sources.length === 1 ? '' : 's'} cargada${sources.length === 1 ? '' : 's'}`;
-  const sourcePanel = `<div class="panel global-sources-panel"><div class="panel-header"><div><h2>Fuentes</h2><p>${sourceCount}. Se pueden consultar juntas desde Buscar.</p></div><button class="btn btn-primary btn-small" data-global-source-action="load">＋ Cargar Fuente</button></div><div class="global-source-list">${globalSourceMarkup(sources)}</div></div>`;
-  $('#view-global-search').innerHTML = '<div id="global-search-controls"></div>' + sourcePanel + '<div id="global-search-surface"></div>';
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal sources-modal" role="dialog" aria-modal="true" aria-labelledby="sources-modal-title"><div class="modal-head"><div><h2 id="sources-modal-title">Fuentes</h2><p>${sourceCount}.</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body sources-modal-body"><div class="global-source-list sources-modal-list">${globalSourceMarkup(sources)}</div></div><div class="modal-actions"><button class="btn btn-primary btn-small" data-global-source-action="load" type="button">＋ Cargar Fuente</button><button class="btn btn-secondary" data-close-modal type="button">Cerrar</button></div></div></div>`;
+  bindModalClose();
   bindGlobalSourceActions();
+}
+
+export function renderGlobalSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
+  $('#view-global-search').innerHTML = '<div id="global-search-controls"></div><div id="global-search-surface"></div>';
   bindDocumentOpeners($('#view-global-search'));
   renderGlobalSearchControls({ restoreFocus, selectionStart, selectionEnd });
   renderGlobalSearchSurface(results);
@@ -299,8 +309,10 @@ function renderGlobalSearchControls({ restoreFocus = false, selectionStart = nul
 function renderGlobalSearchSurface(results = null) {
   const surface = $('#global-search-surface');
   if (!surface) return;
-  surface.innerHTML = `<div class="panel search-results-panel global-documents-panel"><div class="panel-header"><h2>Documentos</h2></div><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
+  surface.innerHTML = `<div class="panel search-results-panel global-documents-panel"><div class="panel-header"><div class="section-panel-heading">${sectionIconMarkup('search')}<h2>Documentos</h2></div></div><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
   bindCollectionAndTagActions(surface, 'global');
+  bindCopyPathActions(surface);
+  bindDocumentFavoriteActions(surface);
   bindDocumentOpeners(surface);
 }
 
@@ -310,7 +322,7 @@ export function performGlobalSearch() {
 
 function bindGlobalSourceActions() {
   document.querySelectorAll('[data-global-source-action="load"]').forEach((button) => button.addEventListener('click', () => openSourceModal(null, 'local', [], '', 'global-search')));
-  document.querySelectorAll('[data-global-source-action="sync"]').forEach((button) => button.addEventListener('click', () => syncSource(button.dataset.globalSourceId)));
-  document.querySelectorAll('[data-global-source-action="edit"]').forEach((button) => button.addEventListener('click', () => openSourceModal(state.sources.find((source) => source.id === button.dataset.globalSourceId), null, [], '', 'global-search')));
-  document.querySelectorAll('[data-global-source-action="delete"]').forEach((button) => button.addEventListener('click', () => deleteSource(button.dataset.globalSourceId)));
+  document.querySelectorAll('[data-global-source-action="sync"]').forEach((button) => button.addEventListener('click', () => { closeModal(); void syncSource(button.dataset.globalSourceId); }));
+  document.querySelectorAll('[data-global-source-action="edit"]').forEach((button) => button.addEventListener('click', () => { closeModal(); openSourceModal(state.sources.find((source) => source.id === button.dataset.globalSourceId), null, [], '', 'global-search'); }));
+  document.querySelectorAll('[data-global-source-action="delete"]').forEach((button) => button.addEventListener('click', () => { closeModal(); void deleteSource(button.dataset.globalSourceId); }));
 }

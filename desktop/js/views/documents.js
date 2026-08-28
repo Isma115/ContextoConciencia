@@ -3,7 +3,6 @@ import { api } from '../core/api.js';
 import { showToast } from '../ui/notifications.js';
 import { closeModal, bindModalClose } from '../ui/modals.js';
 import { state } from '../core/state.js';
-import { typeLabel, shortDate } from '../core/format.js';
 
 let refreshData = async () => {};
 let openHtmlViewer = null;
@@ -49,6 +48,70 @@ export function bindDocumentOpeners(container) {
   bindHtmlSourceOpeners(container);
 }
 
+export function favoriteButtonMarkup(doc) {
+  const favorite = doc?.favorite === true;
+  const label = favorite ? 'Quitar de favoritos' : 'Añadir a favoritos';
+  return `<button type="button" class="btn btn-secondary btn-small favorite-toggle${favorite ? ' is-favorite' : ''}" data-document-favorite="${escapeHtml(doc.id)}" aria-label="${label}" aria-pressed="${favorite}" title="${label}">${favorite ? '★' : '☆'}</button>`;
+}
+
+export function copyPathButtonMarkup(path, { small = true, className = '' } = {}) {
+  if (path === null || path === undefined || String(path).trim() === '') return '';
+  const sizeClass = small ? ' btn-small' : '';
+  const extraClass = className ? ` ${className}` : '';
+  return `<button type="button" class="btn btn-secondary${sizeClass} copy-path-button${extraClass}" data-copy-path="${escapeHtml(path)}" aria-label="Copiar ruta" title="Copiar ruta">Copiar ruta</button>`;
+}
+
+export async function copyPathToClipboard(path) {
+  const value = String(path || '').trim();
+  if (!value) throw new Error('La ruta no está disponible');
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.writeText) throw new Error('El portapapeles no está disponible');
+  await navigator.clipboard.writeText(value);
+}
+
+export function bindCopyPathActions(container) {
+  container?.querySelectorAll('[data-copy-path]').forEach((button) => {
+    if (button.dataset.copyPathBound === 'true') return;
+    button.dataset.copyPathBound = 'true';
+    button.addEventListener('click', async (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (button.disabled) return;
+      button.disabled = true;
+      try {
+        await copyPathToClipboard(button.dataset.copyPath);
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+    button.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
+    });
+  });
+}
+
+export function bindDocumentFavoriteActions(container, { onRefresh = refreshData } = {}) {
+  container.querySelectorAll('[data-document-favorite]').forEach((button) => {
+    button.addEventListener('click', async () => {
+      if (button.disabled) return;
+      const favorite = button.getAttribute('aria-pressed') !== 'true';
+      button.disabled = true;
+      try {
+        await api(`/documents/${encodeURIComponent(button.dataset.documentFavorite)}/favorite`, {
+          method: 'PATCH',
+          body: JSON.stringify({ favorite })
+        });
+        await onRefresh?.();
+      } catch (error) {
+        showToast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+}
+
 function documentContent(doc) {
   if (doc.type === 'json') {
     try { return JSON.stringify(JSON.parse(doc.content), null, 2); } catch { return doc.content; }
@@ -71,17 +134,18 @@ export async function openDocument(id) {
     }
     const isMarkdown = doc.type === 'markdown';
     const content = documentContent(doc);
-    const canRevealPath = Boolean(doc.path) && doc.type !== 'rest';
-    const tags = doc.tags?.length ? doc.tags.map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('') : '<span class="viewer-muted">Sin etiquetas</span>';
+    const hasPath = Boolean(doc.path);
+    const canRevealPath = hasPath && doc.type !== 'rest';
     const modeButton = isMarkdown ? '<button class="btn btn-secondary markdown-mode-button" id="toggle-markdown-mode" type="button" aria-label="Cambiar al modo de edición">✎ Editar</button>' : '';
     const viewer = isMarkdown
       ? `<div id="markdown-preview" class="markdown-preview" aria-label="Vista del documento Markdown">${window.NexusMarkdown.render(content)}</div><textarea id="document-content" class="document-content markdown-editor" aria-label="Editar contenido Markdown" spellcheck="false" hidden>${escapeHtml(content)}</textarea>`
       : `<textarea id="document-content" class="document-content" aria-label="Contenido del documento" spellcheck="false">${escapeHtml(content)}</textarea>`;
     const pathLabel = canRevealPath
-      ? `<button id="reveal-document-path" class="viewer-path" type="button" title="Mostrar el archivo en el explorador">↳ ${escapeHtml(doc.path)}</button>`
-      : `<span title="${escapeHtml(doc.path || '')}">↳ ${escapeHtml(doc.path || 'Sin ruta')}</span>`;
-    $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal viewer-modal" role="dialog" aria-modal="true"><div class="modal-head"><div class="viewer-title-wrap"><input id="document-title" class="viewer-title" value="${escapeHtml(doc.title)}" aria-label="Título del documento" /><div class="viewer-subtitle">${escapeHtml(typeLabel(doc.type))} · ${escapeHtml(doc.source)}</div></div><div class="viewer-head-actions">${modeButton}<button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div></div><div class="viewer-body"><div class="viewer-meta">${pathLabel}<span>${escapeHtml(shortDate(doc.updatedAt))}</span><div class="viewer-tags">${tags}</div></div>${viewer}</div><div class="modal-actions"><button class="btn btn-secondary" id="copy-document">Copiar</button><button class="btn btn-primary" id="save-document">Guardar cambios</button><button class="btn btn-secondary" data-close-modal>Cerrar</button></div></div></div>`;
+      ? `<button id="reveal-document-path" class="viewer-path viewer-title-path" type="button" title="Mostrar el archivo en el explorador">↳ ${escapeHtml(doc.path)}</button>`
+      : hasPath ? `<span class="viewer-title-path" title="${escapeHtml(doc.path)}">↳ ${escapeHtml(doc.path)}</span>` : '';
+    $('#modal-root').innerHTML = `<div class="modal-backdrop viewer-modal-backdrop"><div class="modal viewer-modal" role="dialog" aria-modal="true"><div class="modal-head"><div class="viewer-title-wrap"><div class="viewer-title-line"><input id="document-title" class="viewer-title" value="${escapeHtml(doc.title)}" aria-label="Título del documento" />${pathLabel}</div></div><div class="viewer-head-actions">${modeButton}<button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div></div><div class="viewer-body">${viewer}</div><div class="modal-actions"><button class="btn btn-secondary" id="copy-document">Copiar</button>${copyPathButtonMarkup(doc.path, { small: false })}<button class="btn btn-primary" id="save-document">Guardar cambios</button><button class="btn btn-secondary" data-close-modal>Cerrar</button></div></div></div>`;
     bindModalClose();
+    bindCopyPathActions($('#modal-root'));
     if (canRevealPath) {
       $('#reveal-document-path').addEventListener('click', async (event) => {
         const button = event.currentTarget;

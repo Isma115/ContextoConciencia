@@ -16,7 +16,7 @@ Cada fichero se mostrará como un nodo que pueda desplegar sus símbolos: variab
 
 ### Primera versión
 
-- Analizar JavaScript, TypeScript, JSX, TSX, MJS y CJS.
+- Analizar JavaScript, TypeScript, JSX, TSX, MJS, CJS y ofrecer un analizador estático ligero para Python, Java, C/C++, C#, Go, Rust, PHP, Ruby, Kotlin, Swift, Dart, Lua, R, Scala, Perl, Shell, PowerShell y SQL.
 - Reconocer referencias estáticas básicas desde HTML y CSS para enlazar entradas, scripts, hojas de estilo e importaciones CSS.
 - Trabajar únicamente con rutas contenidas en el proyecto global cargado en NexusData.
 - Excluir automáticamente dependencias, artefactos generados y carpetas técnicas: `node_modules`, `.git`, `dist`, `build`, `coverage`, cachés y binarios.
@@ -32,7 +32,7 @@ Cada fichero se mostrará como un nodo que pueda desplegar sus símbolos: variab
 
 ### Ampliaciones posteriores
 
-- Analizadores para Python, Java, C#, PHP u otros lenguajes mediante adaptadores independientes.
+- Analizadores semánticos especializados por lenguaje para mejorar la resolución de tipos, namespaces, traits, macros y módulos.
 - Seguimiento semántico más profundo de llamadas indirectas, inyección de dependencias y alias complejos.
 - Vista inversa de impacto: qué ficheros y símbolos dependen de un fichero seleccionado.
 - Comparación entre dos versiones del mapa.
@@ -111,6 +111,7 @@ Crear `server/services/code-map/` con responsabilidades separadas:
 
 - `file-discovery.js`: recorrido del proyecto, exclusiones, límites, detección de lenguaje y metadatos.
 - `analyzers/javascript.js`: extracción AST de módulos, símbolos, rangos y referencias.
+- `analyzers/programming.js`: extracción estática común de símbolos e imports para los lenguajes adicionales.
 - `analyzers/html.js` y `analyzers/css.js`: relaciones básicas con recursos locales.
 - `resolver.js`: resolución de extensiones, ficheros índice, rutas relativas y alias de `package.json`, `jsconfig.json` o `tsconfig.json`.
 - `graph-builder.js`: unión de resultados, deduplicación, ciclos, cálculo de alcanzabilidad y advertencias.

@@ -103,15 +103,44 @@ export async function copyGitDiffPrompt() {
 }
 
 export function openNewDiagramPromptModal() {
-  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="new-diagram-prompt-title"><div class="modal-head"><div><h2 id="new-diagram-prompt-title">Nuevo diagrama prompt</h2><p>Describe la funcionalidad y copia un prompt que genere y guarde código de diagrama NexusData.</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><form id="new-diagram-prompt-form"><div class="modal-body"><label class="form-label">Funcionalidad a representar<textarea id="diagram-prompt-part" class="textarea" rows="5" placeholder="Ej. registro de usuarios: completar formulario, validar datos, guardar la cuenta y mostrar errores" required></textarea></label><p class="diagram-code-hint">El prompt incluirá la sintaxis <code>diagram</code>, <code>node</code> y <code>edge</code>, y pedirá guardar el archivo en <code>docs</code>.</p></div><div class="modal-actions"><button class="btn btn-secondary" type="button" data-close-modal>Cancelar</button><button id="copy-diagram-prompt" class="btn btn-primary" type="submit">Copiar prompt</button></div></form></div></div>`;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div id="new-diagram-prompt-modal" class="modal diagram-prompt-modal" role="dialog" aria-modal="true" aria-labelledby="new-diagram-prompt-title"><div class="modal-head"><div><h2 id="new-diagram-prompt-title">Nuevo diagrama</h2><p>Describe la funcionalidad que quieres representar.</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><form id="new-diagram-prompt-form"><div class="modal-body"><label class="form-label">Funcionalidad<textarea id="diagram-prompt-part" class="textarea" rows="5" placeholder="Ej. Registro de usuarios: validar datos y guardar la cuenta." required></textarea></label><p class="diagram-code-hint">Incluye la sintaxis del diagrama y guarda el archivo en <code>docs</code>.</p><div id="diagram-prompt-preview" class="diagram-prompt-preview" hidden><strong class="diagram-prompt-preview-title">Prompt completo</strong><pre id="diagram-prompt-preview-text" class="diagram-prompt-preview-text" tabindex="0"></pre></div></div><div class="modal-actions"><button id="toggle-diagram-prompt-preview" class="btn btn-secondary" type="button" aria-controls="diagram-prompt-preview" aria-expanded="false">Ver Prompt completo</button><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="copy-diagram-prompt" class="btn btn-primary" type="submit">Copiar</button></div></form></div></div>`;
   bindModalClose();
+  const modal = $('#new-diagram-prompt-modal');
   const input = $('#diagram-prompt-part');
+  const previewToggle = $('#toggle-diagram-prompt-preview');
+  const preview = $('#diagram-prompt-preview');
+  const previewText = $('#diagram-prompt-preview-text');
+
+  const updatePreview = () => {
+    const part = input.value.trim();
+    previewText.textContent = part ? buildDiagramPrompt(part) : 'Escribe una funcionalidad para ver el prompt completo.';
+  };
+
+  previewToggle.addEventListener('click', () => {
+    const part = input.value.trim();
+    if (!part) {
+      showToast('Describe una funcionalidad', true);
+      input.focus();
+      return;
+    }
+    const expanded = !modal.classList.contains('is-expanded');
+    modal.classList.toggle('is-expanded', expanded);
+    preview.hidden = !expanded;
+    previewToggle.setAttribute('aria-expanded', String(expanded));
+    previewToggle.textContent = expanded ? 'Ocultar prompt' : 'Ver Prompt completo';
+    if (expanded) updatePreview();
+  });
+
+  input.addEventListener('input', () => {
+    if (!preview.hidden) updatePreview();
+  });
+
   input.focus();
   $('#new-diagram-prompt-form').addEventListener('submit', async (event) => {
     event.preventDefault();
     const part = input.value.trim();
     if (!part) {
-      showToast('Describe la funcionalidad que quieres representar', true);
+      showToast('Describe una funcionalidad', true);
       input.focus();
       return;
     }
@@ -121,12 +150,12 @@ export function openNewDiagramPromptModal() {
     try {
       await copyTextToClipboard(buildDiagramPrompt(part));
       closeModal();
-      showToast('Prompt copiado al portapapeles');
+      showToast('Prompt copiado');
     } catch (error) {
-      showToast(error.message || 'No se pudo copiar el prompt', true);
+      showToast(error.message || 'No se pudo copiar', true);
     } finally {
       button.disabled = false;
-      button.textContent = 'Copiar prompt';
+      button.textContent = 'Copiar';
     }
   });
 }

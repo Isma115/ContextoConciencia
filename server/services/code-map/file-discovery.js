@@ -8,6 +8,42 @@ const SUPPORTED_EXTENSIONS = new Map([
   ['.tsx', 'typescript'],
   ['.mjs', 'javascript'],
   ['.cjs', 'javascript'],
+  ['.py', 'python'],
+  ['.pyw', 'python'],
+  ['.java', 'java'],
+  ['.cs', 'csharp'],
+  ['.c', 'c'],
+  ['.h', 'c'],
+  ['.cc', 'cpp'],
+  ['.cpp', 'cpp'],
+  ['.cxx', 'cpp'],
+  ['.hh', 'cpp'],
+  ['.hpp', 'cpp'],
+  ['.hxx', 'cpp'],
+  ['.go', 'go'],
+  ['.rs', 'rust'],
+  ['.php', 'php'],
+  ['.phtml', 'php'],
+  ['.rb', 'ruby'],
+  ['.rake', 'ruby'],
+  ['.gemspec', 'ruby'],
+  ['.kt', 'kotlin'],
+  ['.kts', 'kotlin'],
+  ['.swift', 'swift'],
+  ['.dart', 'dart'],
+  ['.lua', 'lua'],
+  ['.r', 'r'],
+  ['.scala', 'scala'],
+  ['.sc', 'scala'],
+  ['.pl', 'perl'],
+  ['.pm', 'perl'],
+  ['.sh', 'shell'],
+  ['.bash', 'shell'],
+  ['.zsh', 'shell'],
+  ['.fish', 'shell'],
+  ['.ps1', 'powershell'],
+  ['.psm1', 'powershell'],
+  ['.sql', 'sql'],
   ['.html', 'html'],
   ['.htm', 'html'],
   ['.css', 'css']
@@ -111,10 +147,30 @@ function discoverFiles(projectRoot, options = {}) {
   const maxFileBytes = Math.min(Math.max(Number(options.maxFileBytes) || DEFAULT_MAX_FILE_BYTES, 1024), 20 * 1024 * 1024);
   const maxDepth = Math.min(Math.max(Number(options.maxDepth) || DEFAULT_MAX_DEPTH, 1), 200);
   const shouldExclude = createExclusionMatcher(options.excludes);
+  const requestedInputPaths = Array.isArray(options.inputPaths) && options.inputPaths.length
+    ? [...new Set(options.inputPaths.filter((value) => typeof value === 'string' && value.trim()).map((value) => path.resolve(value)))]
+    : null;
+  const inputPaths = requestedInputPaths
+    ? requestedInputPaths.map((inputPath) => {
+      let realPath;
+      try { realPath = fs.realpathSync(inputPath); } catch { throw new Error('Una de las rutas de la fuente seleccionada ya no existe'); }
+      if (!insideRoot(root, realPath)) throw new Error('Una de las rutas de la fuente queda fuera de la raíz seleccionada');
+      return realPath;
+    })
+    : null;
   const files = [];
   const warnings = [];
   const visitedDirectories = new Set([root]);
   let truncated = false;
+
+  function isRelevantPath(candidate) {
+    if (!inputPaths) return true;
+    return inputPaths.some((inputPath) => candidate === inputPath || insideRoot(inputPath, candidate) || insideRoot(candidate, inputPath));
+  }
+
+  function isSelectedFile(candidate) {
+    return !inputPaths || inputPaths.some((inputPath) => candidate === inputPath || insideRoot(inputPath, candidate));
+  }
 
   function visit(directory, depth) {
     if (truncated || depth > maxDepth) {
@@ -145,6 +201,8 @@ function discoverFiles(projectRoot, options = {}) {
         warnings.push({ path: relative, message: 'Se omitió una ruta que queda fuera de la raíz del proyecto' });
         continue;
       }
+      if (!isRelevantPath(realCandidate)) continue;
+      if (!entry.isDirectory() && !isSelectedFile(realCandidate)) continue;
 
       let stats;
       try { stats = fs.statSync(realCandidate); } catch (error) {

@@ -27,14 +27,28 @@ function documentRows(db, query = {}, { localOnly = false, includeCommonPaths = 
     clauses.push('EXISTS (SELECT 1 FROM collection_items ci WHERE ci.document_id = d.id AND ci.collection_id = ?)');
     params.push(query.collection);
   }
+  if (query.favorite === true || ['1', 'true', 'yes'].includes(String(query.favorite || '').toLowerCase())) {
+    clauses.push('d.is_favorite = 1');
+  }
   if (query.updatedFrom) {
     clauses.push('d.updated_at >= ?');
     params.push(query.updatedFrom);
   }
   const where = clauses.length ? ` WHERE ${clauses.join(' AND ')}` : '';
   const limit = Math.min(Math.max(Number(query.limit) || 200, 1), 500);
-  const rows = db.all(`${documentSelect()}${where} ORDER BY LOWER(COALESCE(d.path, d.title)) ASC, LOWER(d.title) ASC, d.id ASC LIMIT ${limit}`, ...params);
+  const order = query.sort === 'recent'
+    ? 'd.updated_at DESC, d.created_at DESC, d.id ASC'
+    : 'LOWER(COALESCE(d.path, d.title)) ASC, LOWER(d.title) ASC, d.id ASC';
+  const rows = db.all(`${documentSelect()}${where} ORDER BY ${order} LIMIT ${limit}`, ...params);
   return rows.map((row) => withDocumentShape(db, row));
+}
+
+function recentDocuments(db, query = {}, options = {}) {
+  return documentRows(db, { ...query, sort: 'recent' }, options);
+}
+
+function favoriteDocuments(db, query = {}, options = {}) {
+  return documentRows(db, { ...query, favorite: true, sort: 'recent' }, options);
 }
 
 function snippet(content, query) {
@@ -99,4 +113,4 @@ function searchDocuments(db, query = '', filters = {}, options = {}) {
   return results.map(({ _rank, tagsText, metadataText, searchableContent, searchablePath, searchableType, ...result }) => result).slice(0, 100);
 }
 
-module.exports = { documentRows, searchDocuments };
+module.exports = { documentRows, favoriteDocuments, recentDocuments, searchDocuments };

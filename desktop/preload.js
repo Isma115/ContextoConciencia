@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('nexusData', {
   resolveCloseConfirmation: (confirmed) => ipcRenderer.send('close-confirmation-result', confirmed === true),
   loadSearchPreferences: () => ipcRenderer.invoke('load-search-preferences'),
   saveSearchPreferences: (preferences) => ipcRenderer.invoke('save-search-preferences', preferences),
+  selectWorkspaceFile: () => ipcRenderer.invoke('select-workspace-file'),
+  saveWorkspaceFile: (payload) => ipcRenderer.invoke('save-workspace-file', payload),
   selectLocalPaths: (options) => ipcRenderer.invoke('select-local-paths', options),
   selectDiagramFile: () => ipcRenderer.invoke('select-diagram-file'),
   saveDiagramFile: (payload) => ipcRenderer.invoke('save-diagram-file', payload),

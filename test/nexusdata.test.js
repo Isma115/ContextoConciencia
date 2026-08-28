@@ -108,15 +108,21 @@ test('importa fuentes locales y conserva el origen', async () => {
   assert.ok(docs.documents.some((doc) => doc.path.endsWith('README.md')));
   const media = docs.documents.find((doc) => doc.path.endsWith('foto.png'));
   assert.equal(media.content, '');
-  assert.equal(media.metadata.binary, true);
-  assert.equal(media.metadata.searchTitleOnly, true);
+  assert.equal(media.metadata.contentDeferred, true);
+  const mediaDetail = await request(`/documents/${media.id}`);
+  assert.equal(mediaDetail.content, '');
+  assert.equal(mediaDetail.metadata.binary, true);
+  assert.equal(mediaDetail.metadata.contentDeferred, false);
   const diagram = docs.documents.find((doc) => doc.path.endsWith('registro-de-usuario.nxd'));
   assert.equal(diagram.type, 'diagram');
-  assert.match(diagram.content, /diagram "Registro de usuario"/);
+  assert.equal(diagram.metadata.contentDeferred, true);
   const readme = docs.documents.find((doc) => doc.path.endsWith('README.md'));
+  assert.equal(readme.content, '');
+  assert.equal(readme.metadata.contentDeferred, true);
   const detail = await request(`/documents/${readme.id}`);
   assert.equal(detail.id, readme.id);
   assert.match(detail.content, /Authentication service/);
+  assert.equal(detail.metadata.contentDeferred, false);
 
   const orderBeforeSync = (await request('/search?q=')).results
     .filter((document) => document.sourceId === source.id)
@@ -189,6 +195,29 @@ test('edita y persiste documentos', async () => {
   assert.equal(reloaded.content, '# Authentication service\nConfiguration actualizada.');
 });
 
+test('lista documentos recientes y permite gestionar favoritos', async () => {
+  const docs = await request('/documents');
+  const readme = docs.documents.find((doc) => doc.path.endsWith('README.md'));
+  const invalid = await request(`/documents/${readme.id}/favorite`, { method: 'PATCH', body: JSON.stringify({ favorite: 'true' }) }, { expectedStatus: 400 });
+  assert.match(invalid.error, /favorito/);
+
+  const marked = await request(`/documents/${readme.id}/favorite`, { method: 'PATCH', body: JSON.stringify({ favorite: true }) });
+  assert.equal(marked.favorite, true);
+  const favorites = await request('/documents/favorites');
+  assert.ok(favorites.documents.some((doc) => doc.id === readme.id && doc.favorite));
+
+  const recent = await request('/documents/recent');
+  assert.ok(recent.documents.length > 0);
+  assert.deepEqual(
+    recent.documents.map((doc) => doc.updatedAt),
+    [...recent.documents].map((doc) => doc.updatedAt).sort((first, second) => second.localeCompare(first))
+  );
+
+  const unmarked = await request(`/documents/${readme.id}/favorite`, { method: 'PATCH', body: JSON.stringify({ favorite: false }) });
+  assert.equal(unmarked.favorite, false);
+  assert.ok(!(await request('/documents/favorites')).documents.some((doc) => doc.id === readme.id));
+});
+
 test('busca coincidencias aproximadas y filtra por tipo', async () => {
   const result = await request('/search?q=configruation&type=markdown');
   assert.ok(result.total >= 1);
@@ -209,6 +238,40 @@ test('etiqueta documentos y los organiza en colecciones', async () => {
   const detail = await request(`/collections/${collection.id}`);
   assert.equal(detail.itemCount, 1);
   assert.ok(detail.items[0].tags.includes('backend'));
+});
+
+test('exporta e importa el espacio de trabajo con sus relaciones', async () => {
+  const snapshot = await request('/workspace/export');
+  assert.equal(snapshot.format, 'nexusdata-workspace');
+  assert.equal(snapshot.version, 1);
+  assert.ok(snapshot.data.sources.length >= 2);
+  assert.ok(snapshot.data.documents.length >= 6);
+  assert.ok(snapshot.data.tags.some((tag) => tag.name === 'backend'));
+  assert.ok(snapshot.data.collections.some((collection) => collection.name === 'Proyecto Alpha'));
+
+  const imported = await request('/workspace/import', {
+    method: 'POST',
+    body: JSON.stringify({ snapshot, mode: 'merge' })
+  });
+  assert.equal(imported.mode, 'merge');
+  assert.ok(imported.documents.updated >= snapshot.data.documents.length);
+  assert.equal(imported.tags.created, 0);
+  assert.equal(imported.collections.created, 0);
+
+  const restored = await request('/workspace/export');
+  assert.deepEqual(restored.data, snapshot.data);
+  await request('/workspace/import', {
+    method: 'POST',
+    body: JSON.stringify({ format: 'otro-formato', version: 1, data: {} })
+  }, { expectedStatus: 400 });
+
+  const replaced = await request('/workspace/import', {
+    method: 'POST',
+    body: JSON.stringify({ snapshot, mode: 'replace' })
+  });
+  assert.equal(replaced.mode, 'replace');
+  assert.equal(replaced.sources.created, snapshot.data.sources.length);
+  assert.deepEqual((await request('/workspace/export')).data, snapshot.data);
 });
 
 test('conecta y sincroniza una API REST con mapeo', async () => {

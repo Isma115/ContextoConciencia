@@ -1,4 +1,5 @@
 import { escapeHtml } from '../core/dom.js';
+import { copyPathButtonMarkup } from './documents.js';
 
 const RELATION_LABELS = {
   imports: 'importa',
@@ -11,7 +12,11 @@ const RELATION_LABELS = {
   'imports-style': 'css import'
 };
 
-const LANGUAGE_LABELS = { javascript: 'JS', typescript: 'TS', html: 'HTML', css: 'CSS' };
+const LANGUAGE_LABELS = {
+  javascript: 'JS', typescript: 'TS', html: 'HTML', css: 'CSS', python: 'PY', java: 'JAVA', csharp: 'C#',
+  c: 'C', cpp: 'C++', go: 'GO', rust: 'RS', php: 'PHP', ruby: 'RB', kotlin: 'KT', swift: 'SWIFT',
+  dart: 'DART', lua: 'LUA', r: 'R', scala: 'SCALA', perl: 'PL', shell: 'SH', powershell: 'PS', sql: 'SQL'
+};
 
 export function relationLabel(kind) { return RELATION_LABELS[kind] || kind; }
 export function languageLabel(language) { return LANGUAGE_LABELS[language] || language; }
@@ -120,7 +125,7 @@ function nodeMarkup(file, position, expanded, selectedId, selectedSymbolId, dept
     : '';
   const warning = file.warnings?.length ? `<span class="code-map-node-warning" title="${escapeHtml(file.warnings[0].message)}">!</span>` : '';
   const toggleLabel = expanded ? 'Replegar símbolos' : 'Desplegar símbolos';
-  return `<article class="code-map-node${selected}" data-code-map-file="${escapeHtml(file.id)}" style="left:${position.x}px;top:${position.y}px;width:${position.width}px;min-height:${position.height}px" tabindex="0" role="button" aria-label="${escapeHtml(file.path)}"><div class="code-map-node-head"><button type="button" class="code-map-node-toggle" data-code-map-toggle="${escapeHtml(file.id)}" aria-label="${escapeHtml(toggleLabel)}">${expanded ? '⌄' : '›'}</button><button type="button" class="code-map-node-title" data-code-map-file-select="${escapeHtml(file.id)}"><span class="code-map-file-icon">${escapeHtml(languageLabel(file.language))}</span><span class="code-map-file-path" title="${escapeHtml(file.path)}">${escapeHtml(file.path)}</span></button>${warning}</div><div class="code-map-node-meta"><span>${file.symbols.length} símbolo${file.symbols.length === 1 ? '' : 's'}</span><span>${file.warnings?.length || 0} aviso${file.warnings?.length === 1 ? '' : 's'}</span><span>${escapeHtml(file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`)}</span></div>${depth === 'symbols' && !expanded ? `<div class="code-map-node-hint">Despliega para ver símbolos</div>` : ''}${symbols}</article>`;
+  return `<article class="code-map-node${selected}" data-code-map-file="${escapeHtml(file.id)}" style="left:${position.x}px;top:${position.y}px;width:${position.width}px;min-height:${position.height}px" tabindex="0" role="button" aria-label="${escapeHtml(file.path)}"><div class="code-map-node-head"><button type="button" class="code-map-node-toggle" data-code-map-toggle="${escapeHtml(file.id)}" aria-label="${escapeHtml(toggleLabel)}">${expanded ? '⌄' : '›'}</button><button type="button" class="code-map-node-title" data-code-map-file-select="${escapeHtml(file.id)}"><span class="code-map-file-icon">${escapeHtml(languageLabel(file.language))}</span><span class="code-map-file-path" title="${escapeHtml(file.path)}">${escapeHtml(file.path)}</span></button>${copyPathButtonMarkup(file.path, { className: 'code-map-node-copy-path' })}${warning}</div><div class="code-map-node-meta"><span>${file.symbols.length} símbolo${file.symbols.length === 1 ? '' : 's'}</span><span>${file.warnings?.length || 0} aviso${file.warnings?.length === 1 ? '' : 's'}</span><span>${escapeHtml(file.size > 1024 ? `${Math.round(file.size / 1024)} KB` : `${file.size} B`)}</span></div>${depth === 'symbols' && !expanded ? `<div class="code-map-node-hint">Despliega para ver símbolos</div>` : ''}${symbols}</article>`;
 }
 
 function packageMarkup(packageEntry, position, selectedRelationId) {
@@ -155,4 +160,4 @@ export function minimapMarkup(result, filters = {}, expanded = {}, groupByFolder
 }
 
 export const CODE_MAP_RELATION_KINDS = Object.keys(RELATION_LABELS);
-export const CODE_MAP_SYMBOL_KINDS = ['variable', 'function', 'class', 'constructor', 'method', 'property', 'import', 'export', 'interface', 'type', 'enum', 'namespace', 'element'];
+export const CODE_MAP_SYMBOL_KINDS = ['variable', 'function', 'class', 'constructor', 'method', 'property', 'import', 'export', 'interface', 'type', 'enum', 'struct', 'trait', 'protocol', 'record', 'object', 'namespace', 'module', 'extension', 'element'];

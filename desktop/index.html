@@ -29,13 +29,22 @@
                 </div>
               </div>
             </div>
+            <button class="nav-item" data-view="recent-documents"><span class="nav-icon">◷</span>Documentos recientes</button>
+            <button class="nav-item" data-view="favorites"><span class="nav-icon">★</span>Favoritos</button>
             <button class="nav-item" data-view="html-viewer"><span class="nav-icon">▣</span>Visor HTML</button>
             <button class="nav-item nav-item-sub" data-view="diagrams"><span class="nav-icon">◇</span>Diagramas</button>
             <button class="nav-item" data-view="code-map"><span class="nav-icon">⌘</span>Mapa de código</button>
             <button class="nav-item" data-view="sources"><span class="nav-icon">◈</span>Fuentes</button>
           </nav>
+          <div class="sidebar-workspace-tools" aria-label="Espacio de trabajo">
+            <div class="sidebar-label">ESPACIO</div>
+            <div class="sidebar-workspace-actions">
+              <button id="workspace-export" class="sidebar-workspace-button" type="button">Exportar</button>
+              <button id="workspace-import" class="sidebar-workspace-button" type="button">Importar</button>
+            </div>
+          </div>
           <div class="sidebar-session">
-            <div class="sidebar-session-status"><span id="api-status" class="connection-status offline"><i></i>Modo offline</span><span id="active-user" class="active-user"></span></div>
+            <div class="sidebar-session-status"><span id="api-status" class="connection-status offline"><i></i></span><span id="active-user" class="active-user"></span></div>
           </div>
         </div>
       </aside>
@@ -44,6 +53,8 @@
         <div id="toast-region" class="toast-region" aria-live="polite"></div>
         <section id="view-global-search" class="view active"></section>
         <section id="view-search" class="view"></section>
+        <section id="view-recent-documents" class="view"></section>
+        <section id="view-favorites" class="view"></section>
         <section id="view-html-viewer" class="view"></section>
         <section id="view-diagrams" class="view"></section>
         <section id="view-code-map" class="view"></section>
