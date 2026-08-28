@@ -1,6 +1,6 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
-import { shortDate, typeLabel } from '../core/format.js';
+import { documentTypeClass, shortDate, typeLabel } from '../core/format.js';
 import { sectionIconMarkup } from '../core/section-icons.js';
 import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, copyPathButtonMarkup, favoriteButtonMarkup } from './documents.js';
 
@@ -12,6 +12,7 @@ const COLLECTIONS = Object.freeze({
     viewId: 'view-recent-documents',
     endpoint: '/documents/recent',
     title: 'Documentos recientes',
+    showHeading: false,
     panelTitle: 'Últimos documentos',
     emptyTitle: 'Aún no hay documentos recientes',
     emptyDescription: 'Los documentos sincronizados o editados aparecerán aquí.'
@@ -42,7 +43,7 @@ function documentCard(doc) {
   const content = doc.metadata?.contentDeferred ? 'Contenido disponible al abrir' : compactContent(doc.content);
   const tags = (doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('');
   const searchText = [title, source, path, content, typeLabel(doc.type), ...(doc.tags || [])].join(' ');
-  return `<article class="result-card document-hit document-collection-card" data-view-document="${escapeHtml(doc.id)}" data-document-search="${escapeHtml(searchText)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(title)}">
+  return `<article class="result-card document-hit document-collection-card document-type-${documentTypeClass(doc.type)}" data-view-document="${escapeHtml(doc.id)}" data-document-search="${escapeHtml(searchText)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(title)}">
     <div class="result-head">
       <div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div>
       <div class="result-title-wrap"><h3 class="result-title">${escapeHtml(title)}</h3><div class="result-source" title="${escapeHtml(path)}">${escapeHtml(source)} · ${escapeHtml(path)}</div></div>
@@ -80,7 +81,8 @@ function viewMarkup(config, documents = null, error = null) {
   const compactClass = ['view-recent-documents', 'view-favorites'].includes(config.viewId) ? ' document-collection-compact' : '';
   const searchEmpty = Array.isArray(documents) ? favoriteSearchEmptyMarkup(config, documents) : '';
   const sectionIcon = config.viewId === 'view-favorites' ? 'favorite' : 'recent';
-  return `<div class="document-collection-shell${compactClass}"><div class="section-top"><div class="section-heading-with-icon">${sectionIconMarkup(sectionIcon)}<div class="section-heading-copy"><h1>${escapeHtml(config.title)}</h1>${description}</div></div></div><div class="panel search-results-panel document-collection-panel"><div class="panel-header"><h2>${escapeHtml(config.panelTitle)}</h2>${collectionSearchMarkup(config, documents)}</div><div class="result-list">${body}${searchEmpty}</div></div></div>`;
+  const sectionHeading = config.showHeading === false ? '' : `<div class="section-top"><div class="section-heading-with-icon">${sectionIconMarkup(sectionIcon)}<div class="section-heading-copy"><h1>${escapeHtml(config.title)}</h1>${description}</div></div></div>`;
+  return `<div class="document-collection-shell${compactClass}">${sectionHeading}<div class="panel search-results-panel document-collection-panel"><div class="panel-header"><h2>${escapeHtml(config.panelTitle)}</h2>${collectionSearchMarkup(config, documents)}</div><div class="result-list">${body}${searchEmpty}</div></div></div>`;
 }
 
 function applyFavoriteSearch(container) {

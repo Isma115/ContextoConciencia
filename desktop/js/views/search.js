@@ -1,8 +1,7 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { persistSearchPreferences, state, resetFilters } from '../core/state.js';
-import { shortDate, sourceIcon, statusLabel, typeLabel } from '../core/format.js';
-import { sectionIconMarkup } from '../core/section-icons.js';
+import { documentTypeClass, shortDate, sourceIcon, statusLabel, typeLabel } from '../core/format.js';
 import { bindModalClose, closeModal } from '../ui/modals.js';
 import { showToast } from '../ui/notifications.js';
 import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, copyPathButtonMarkup, favoriteButtonMarkup } from './documents.js';
@@ -117,14 +116,18 @@ function bindCollectionAndTagActions(container, prefix = '') {
 function filterMarkup(prefix = '', filters = state.filters) {
   const id = (name) => prefix ? `global-filter-${name}` : `filter-${name}`;
   const viewSourcesButton = prefix === 'global' ? '<button id="global-view-sources" class="btn btn-secondary btn-small source-filter-button" type="button">Ver Fuentes</button>' : '';
-  return `<div class="filter-row"><select id="${id('source')}" class="select source-filter-select">${sourceOptions(filters.source)}</select>${viewSourcesButton}<select id="${id('type')}" class="select type-filter-select">${typeOptions(filters.type)}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div>`;
+  const panelId = prefix ? 'global-filter-panel' : 'filter-panel';
+  const toggleId = prefix ? 'global-filter-toggle' : 'filter-toggle';
+  const expanded = state.searchFiltersExpanded !== false;
+  const toggleLabel = expanded ? 'Ocultar filtros' : 'Mostrar filtros';
+  return `<div class="filter-controls"><button id="${toggleId}" class="filter-toggle btn btn-secondary btn-small" type="button" data-filter-toggle aria-controls="${panelId}" aria-expanded="${expanded}" aria-label="${toggleLabel}" title="${toggleLabel}"><span class="filter-toggle-arrow" aria-hidden="true">${expanded ? '⌄' : '›'}</span><span>Filtros</span></button><div id="${panelId}" class="filter-panel" data-filter-panel${expanded ? '' : ' hidden'}><div class="filter-row"><select id="${id('source')}" class="select source-filter-select">${sourceOptions(filters.source)}</select>${viewSourcesButton}<select id="${id('type')}" class="select type-filter-select">${typeOptions(filters.type)}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div></div></div>`;
 }
 
 function resultMarkup(results, prefix = '') {
   const resultItems = results || [];
   if (!resultItems.length) return '<div class="empty">Sin resultados</div>';
   return resultItems.map((doc) => `
-    <article class="result-card document-hit" data-view-document="${escapeHtml(doc.id)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(doc.title)}">
+    <article class="result-card document-hit document-type-${documentTypeClass(doc.type)}" data-view-document="${escapeHtml(doc.id)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(doc.title)}">
       <div class="result-head"><div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div><div class="result-title-wrap"><h3 class="result-title">${escapeHtml(doc.title)}</h3><div class="result-source">${escapeHtml(doc.source)}</div></div><span class="score">${Math.round((doc.score || 0) * 100)}%</span></div>
       <div class="snippet">${escapeHtml(doc.metadata?.contentDeferred ? 'Contenido disponible al abrir' : doc.snippet || doc.content?.slice(0, 220))}</div>
       <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}<button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
@@ -134,6 +137,7 @@ function resultMarkup(results, prefix = '') {
 function bindSearchControls({ prefix = '', perform, cancel, clear }) {
   const input = $(`#${prefix ? 'global-search-input' : 'search-input'}`);
   const submit = $(`#${prefix ? 'global-search-submit' : 'search-submit'}`);
+  const filterToggle = $(`#${prefix ? 'global-filter-toggle' : 'filter-toggle'}`);
   const commonPaths = $(`#${prefix ? 'global-common-paths' : 'common-paths'}`);
   submit.addEventListener('click', () => { cancel(); perform(); });
   input.addEventListener('input', () => {
@@ -145,6 +149,7 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
   });
   input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { cancel(); perform(); } });
   ['source', 'type', 'date'].forEach((name) => $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`).addEventListener('change', () => { cancel(); perform(); }));
+  filterToggle?.addEventListener('click', () => setSearchFiltersExpanded(state.searchFiltersExpanded === false));
   $(`#${prefix ? 'global-view-sources' : 'view-sources'}`)?.addEventListener('click', openSourcesModal);
   commonPaths?.addEventListener('change', async () => {
     state.includeCommonPaths = commonPaths.checked;
@@ -172,8 +177,27 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
   $(`#${prefix ? 'global-clear-filters' : 'clear-filters'}`).addEventListener('click', () => { cancel(); clear(); });
 }
 
+function updateSearchFilterPanels() {
+  const expanded = state.searchFiltersExpanded !== false;
+  const toggleLabel = expanded ? 'Ocultar filtros' : 'Mostrar filtros';
+  document.querySelectorAll('[data-filter-panel]').forEach((panel) => { panel.hidden = !expanded; });
+  document.querySelectorAll('[data-filter-toggle]').forEach((toggle) => {
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.setAttribute('aria-label', toggleLabel);
+    toggle.title = toggleLabel;
+    const arrow = toggle.querySelector('.filter-toggle-arrow');
+    if (arrow) arrow.textContent = expanded ? '⌄' : '›';
+  });
+}
+
+function setSearchFiltersExpanded(expanded) {
+  state.searchFiltersExpanded = Boolean(expanded);
+  updateSearchFilterPanels();
+  persistSearchPreferences();
+}
+
 export function renderSearch(results = null, { restoreFocus = false, selectionStart = null, selectionEnd = null } = {}) {
-  $('#view-search').innerHTML = `<div class="search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div></div><div class="panel search-results-panel"><div class="panel-header"><div class="section-panel-heading">${sectionIconMarkup('search')}<h2>Documentos</h2></div></div><div class="result-list">${resultMarkup(results)}</div></div>`;
+  $('#view-search').innerHTML = `<div class="search-sticky"><div class="panel search-controls"><div class="search-toolbar"><div class="search-bar"><div class="search-input-wrap"><span>⌕</span><input id="search-input" class="search-input" value="${escapeHtml(state.searchQuery)}" placeholder="Buscar documentos…" autocomplete="off" /></div><button id="search-submit" class="btn btn-primary search-submit">Buscar</button></div>${filterMarkup()}</div></div></div><div class="panel search-results-panel"><div class="result-list">${resultMarkup(results)}</div></div>`;
   bindSearchControls({ perform: performSearch, cancel: cancelSearchDebounce, clear: () => { resetUnifiedSearch(); renderSearch([]); } });
   const surface = $('#view-search');
   bindCollectionAndTagActions(surface);
@@ -309,7 +333,7 @@ function renderGlobalSearchControls({ restoreFocus = false, selectionStart = nul
 function renderGlobalSearchSurface(results = null) {
   const surface = $('#global-search-surface');
   if (!surface) return;
-  surface.innerHTML = `<div class="panel search-results-panel global-documents-panel"><div class="panel-header"><div class="section-panel-heading">${sectionIconMarkup('search')}<h2>Documentos</h2></div></div><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
+  surface.innerHTML = `<div class="panel search-results-panel global-documents-panel"><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
   bindCollectionAndTagActions(surface, 'global');
   bindCopyPathActions(surface);
   bindDocumentFavoriteActions(surface);

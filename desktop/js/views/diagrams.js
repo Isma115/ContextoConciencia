@@ -9,6 +9,10 @@ const BOARD_WIDTH = 1400;
 const BOARD_HEIGHT = 900;
 const NODE_WIDTH = 190;
 const NODE_HEIGHT = 88;
+const NODE_MIN_WIDTH = 120;
+const NODE_MIN_HEIGHT = 64;
+const NODE_MAX_WIDTH = 420;
+const NODE_MAX_HEIGHT = 280;
 const NODE_MARGIN = 20;
 const AUTO_LAYOUT_COLUMNS = 4;
 const AUTO_LAYOUT_COLUMN_GAP = 140;
@@ -49,6 +53,8 @@ let connectionAnchorNodeId = '';
 let connectionDrag = null;
 let suppressedPortKeys = new Set();
 let dragState = null;
+let resizeState = null;
+let panState = null;
 let lastDraggedNode = { id: '', timestamp: 0 };
 let focusNodeId = null;
 let contextMenuEdgeId = '';
@@ -73,6 +79,16 @@ function makeId(prefix) {
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+function nodeWidth(node) {
+  const value = Number(node?.width);
+  return clamp(Number.isFinite(value) ? value : NODE_WIDTH, NODE_MIN_WIDTH, NODE_MAX_WIDTH);
+}
+
+function nodeHeight(node) {
+  const value = Number(node?.height);
+  return clamp(Number.isFinite(value) ? value : NODE_HEIGHT, NODE_MIN_HEIGHT, NODE_MAX_HEIGHT);
 }
 
 function validNodeType(type) {
@@ -123,13 +139,17 @@ function normaliseNode(raw, index, usedIds) {
   const requestedId = typeof raw?.id === 'string' && raw.id ? raw.id : makeId('node');
   const id = usedIds.has(requestedId) ? makeId('node') : requestedId;
   const fallbackPosition = defaultNodePosition(index);
+  const width = nodeWidth(raw);
+  const height = nodeHeight(raw);
   usedIds.add(id);
   return {
     id,
     label: typeof raw?.label === 'string' && raw.label.trim() ? raw.label.slice(0, 160) : `Paso ${index + 1}`,
     type: validNodeType(raw?.type),
-    x: clamp(Number.isFinite(Number(raw?.x)) ? Number(raw.x) : fallbackPosition.x, NODE_MARGIN, BOARD_WIDTH - NODE_WIDTH - NODE_MARGIN),
-    y: clamp(Number.isFinite(Number(raw?.y)) ? Number(raw.y) : fallbackPosition.y, NODE_MARGIN, BOARD_HEIGHT - NODE_HEIGHT - NODE_MARGIN)
+    x: clamp(Number.isFinite(Number(raw?.x)) ? Number(raw.x) : fallbackPosition.x, NODE_MARGIN, BOARD_WIDTH - width - NODE_MARGIN),
+    y: clamp(Number.isFinite(Number(raw?.y)) ? Number(raw.y) : fallbackPosition.y, NODE_MARGIN, BOARD_HEIGHT - height - NODE_MARGIN),
+    width,
+    height
   };
 }
 
@@ -387,6 +407,9 @@ function resetDiagramInteraction() {
   connectionAnchorNodeId = '';
   connectionDrag = null;
   dragState = null;
+  resizeState = null;
+  $('#diagram-canvas')?.classList.remove('is-panning');
+  panState = null;
   contextMenuEdgeId = '';
   contextMenuNodeId = '';
   suppressedPortKeys.clear();
@@ -545,11 +568,35 @@ function changeEdgeDirection(direction) {
 }
 
 function handleEdgeContextMenuAction(event) {
-  const option = event.target.closest?.('[data-edge-direction]');
+  const option = event.target.closest?.('[data-edge-direction], [data-edge-action]');
   if (!option) return;
   event.preventDefault();
   event.stopPropagation();
+  if (option.dataset.edgeAction === 'edit-label') {
+    editEdgeLabel();
+    return;
+  }
   changeEdgeDirection(option.dataset.edgeDirection);
+}
+
+function editEdgeLabel() {
+  const edgeId = contextMenuEdgeId || (selection.type === 'edge' ? selection.id : '');
+  const edge = edgeById(activeDiagram(), edgeId);
+  if (!edge) {
+    hideEdgeContextMenu();
+    return;
+  }
+  const nextLabel = window.prompt('Texto de la línea', edge.label || '');
+  hideEdgeContextMenu();
+  if (nextLabel === null) return;
+  const label = nextLabel.slice(0, 120);
+  if (label === edge.label) return;
+  const before = historySnapshot();
+  edge.label = label;
+  recordHistory(before);
+  persistDiagrams();
+  renderEdges(activeDiagram());
+  updateSelectionUI();
 }
 
 function syncNodeContextMenu() {
@@ -798,9 +845,11 @@ function nodePoint(node, portName) {
 
 function nodePointFromModel(node, portName) {
   const port = PORTS[portName] || PORTS.right;
+  const width = nodeWidth(node);
+  const height = nodeHeight(node);
   return {
-    x: node.x + NODE_WIDTH * port.x,
-    y: node.y + NODE_HEIGHT * port.y
+    x: node.x + width * port.x,
+    y: node.y + height * port.y
   };
 }
 
@@ -883,7 +932,7 @@ function nodeMarkup(node) {
   const ports = Object.entries(PORTS).map(([port, value]) => `<button class="diagram-port diagram-port-${port}" type="button" data-diagram-port data-node-id="${escapeHtml(node.id)}" data-port="${port}" aria-label="Conectar por el punto de ${value.label}"></button>`).join('');
   const selectedClass = selection.type === 'node' && selection.id === node.id ? ' is-selected' : '';
   const connectionSourceClass = connectionAnchorNodeId === node.id ? ' is-connection-source' : '';
-  return `<article class="diagram-node diagram-node-${node.type}${selectedClass}${connectionSourceClass}" data-node-id="${escapeHtml(node.id)}" style="transform: translate(${node.x}px, ${node.y}px);"><div class="diagram-node-surface"><div class="diagram-node-topline"><span class="diagram-node-type">${escapeHtml(typeLabel)}</span><button class="diagram-node-delete" type="button" data-delete-node="${escapeHtml(node.id)}" aria-label="Eliminar nodo">×</button></div><input class="diagram-node-label" data-node-label="${escapeHtml(node.id)}" value="${escapeHtml(node.label)}" aria-label="Etiqueta del nodo" maxlength="160" /></div>${ports}</article>`;
+  return `<article class="diagram-node diagram-node-${node.type}${selectedClass}${connectionSourceClass}" data-node-id="${escapeHtml(node.id)}" style="width: ${nodeWidth(node)}px; height: ${nodeHeight(node)}px; transform: translate(${node.x}px, ${node.y}px);"><div class="diagram-node-surface"><div class="diagram-node-topline"><span class="diagram-node-type">${escapeHtml(typeLabel)}</span><button class="diagram-node-delete" type="button" data-delete-node="${escapeHtml(node.id)}" aria-label="Eliminar nodo">×</button></div><input class="diagram-node-label" data-node-label="${escapeHtml(node.id)}" value="${escapeHtml(node.label)}" aria-label="Etiqueta del nodo" maxlength="160" /></div><button class="diagram-node-resize" type="button" data-resize-node="${escapeHtml(node.id)}" aria-label="Redimensionar tarjeta" title="Redimensionar tarjeta"></button>${ports}</article>`;
 }
 
 function renderNodes(diagram) {
@@ -929,47 +978,6 @@ function renderEdges(diagram) {
   layer.innerHTML = `${edgesMarkup}${previewMarkup}`;
 }
 
-function renderInspector() {
-  const container = $('#diagram-inspector');
-  if (!container) return;
-  const diagram = activeDiagram();
-  if (selection.type === 'node') {
-    const node = nodeById(diagram, selection.id);
-    if (node) {
-      container.innerHTML = `<div class="diagram-inspector-card"><span class="diagram-inspector-kicker">NODO SELECCIONADO</span><label class="form-label">Etiqueta<input id="diagram-inspector-label" class="field" value="${escapeHtml(node.label)}" maxlength="160" /></label><label class="form-label">Tipo<select id="diagram-inspector-type" class="select"><option value="start"${node.type === 'start' ? ' selected' : ''}>Inicio</option><option value="step"${node.type === 'step' ? ' selected' : ''}>Paso</option><option value="decision"${node.type === 'decision' ? ' selected' : ''}>Decisión</option><option value="end"${node.type === 'end' ? ' selected' : ''}>Fin</option></select></label><p class="form-note">Arrastra la tarjeta para moverla. Haz doble clic en otra para conectarlas o usa sus puntos.</p></div>`;
-      $('#diagram-inspector-label').addEventListener('input', (event) => {
-        beginTextHistory(event.target);
-        node.label = event.target.value.slice(0, 160);
-        const nodeInput = document.querySelector(`[data-node-label="${node.id}"]`);
-        if (nodeInput && nodeInput !== event.target) nodeInput.value = node.label;
-        persistDiagrams();
-      });
-      $('#diagram-inspector-type').addEventListener('change', (event) => {
-        const before = historySnapshot();
-        node.type = validNodeType(event.target.value);
-        recordHistory(before);
-        persistDiagrams();
-        renderDiagrams();
-      });
-      return;
-    }
-  }
-  if (selection.type === 'edge') {
-    const edge = edgeById(diagram, selection.id);
-    if (edge) {
-      container.innerHTML = `<div class="diagram-inspector-card"><span class="diagram-inspector-kicker">CONEXIÓN SELECCIONADA</span><label class="form-label">Texto de la línea<input id="diagram-inspector-edge-label" class="field" value="${escapeHtml(edge.label)}" maxlength="120" placeholder="Opcional" /></label><div class="diagram-edge-direction"><span>Dirección</span><strong>${escapeHtml(EDGE_DIRECTIONS[validEdgeDirection(edge.direction)])}</strong></div><p class="form-note">Haz clic derecho sobre la línea para cambiar entre línea simple o flecha hacia cualquiera de los dos sentidos.</p></div>`;
-      $('#diagram-inspector-edge-label').addEventListener('input', (event) => {
-        beginTextHistory(event.target);
-        edge.label = event.target.value.slice(0, 120);
-        persistDiagrams();
-        renderEdges(diagram);
-      });
-      return;
-    }
-  }
-  container.innerHTML = '<div class="diagram-inspector-empty"><strong>Sin selección</strong><p>Crea un nodo con el botón “＋ Nodo” o haciendo doble clic en el lienzo.</p></div>';
-}
-
 function updateStatus() {
   const diagram = activeDiagram();
   const status = $('#diagram-status');
@@ -1012,7 +1020,6 @@ function updateSelectionUI() {
     connectButton.classList.toggle('is-active', connectMode);
     connectButton.textContent = connectMode ? '✓ Conectar' : '↗ Conectar';
   }
-  renderInspector();
   updateStatus();
   updateHistoryControls();
 }
@@ -1052,7 +1059,7 @@ export function renderDiagrams() {
     previewArrowMarker.setAttribute('refY', '7');
     previewArrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 12 7 L 0 14 z');
   }
-  root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Dirección de la conexión" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div><div id="diagram-node-context-menu" class="diagram-context-menu" role="menu" aria-label="Modificar tarjeta" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Tarjeta</div><button type="button" role="menuitem" data-node-action="focus-label">Editar etiqueta</button><div class="diagram-context-menu-heading">Tipo</div><button type="button" role="menuitemradio" data-node-type="start" aria-checked="false">Inicio</button><button type="button" role="menuitemradio" data-node-type="step" aria-checked="false">Paso</button><button type="button" role="menuitemradio" data-node-type="decision" aria-checked="false">Decisión</button><button type="button" role="menuitemradio" data-node-type="end" aria-checked="false">Fin</button><button type="button" role="menuitem" data-node-action="delete">Eliminar tarjeta</button></div>');
+  root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones de la conexión" aria-hidden="true" hidden><button type="button" role="menuitem" data-edge-action="edit-label">Editar texto</button><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div><div id="diagram-node-context-menu" class="diagram-context-menu" role="menu" aria-label="Modificar tarjeta" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Tarjeta</div><button type="button" role="menuitem" data-node-action="focus-label">Editar etiqueta</button><div class="diagram-context-menu-heading">Tipo</div><button type="button" role="menuitemradio" data-node-type="start" aria-checked="false">Inicio</button><button type="button" role="menuitemradio" data-node-type="step" aria-checked="false">Paso</button><button type="button" role="menuitemradio" data-node-type="decision" aria-checked="false">Decisión</button><button type="button" role="menuitemradio" data-node-type="end" aria-checked="false">Fin</button><button type="button" role="menuitem" data-node-action="delete">Eliminar tarjeta</button></div>');
   root.insertAdjacentHTML('beforeend', '<div id="diagram-canvas-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones del canvas" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Canvas</div><button type="button" role="menuitem" data-canvas-action="add-node">＋ Agregar nodo</button></div>');
   bindDiagramEvents(root);
   renderDiagramCanvas();
@@ -1079,11 +1086,13 @@ function boardPoint(event) {
 }
 
 function nodePositionIsFree(diagram, x, y) {
+  const width = NODE_WIDTH;
+  const height = NODE_HEIGHT;
   return diagram.nodes.every((node) => (
-    x + NODE_WIDTH + NODE_MARGIN <= node.x
-    || node.x + NODE_WIDTH + NODE_MARGIN <= x
-    || y + NODE_HEIGHT + NODE_MARGIN <= node.y
-    || node.y + NODE_HEIGHT + NODE_MARGIN <= y
+    x + width + NODE_MARGIN <= node.x
+    || node.x + nodeWidth(node) + NODE_MARGIN <= x
+    || y + height + NODE_MARGIN <= node.y
+    || node.y + nodeHeight(node) + NODE_MARGIN <= y
   ));
 }
 
@@ -1127,7 +1136,9 @@ function addNodeAt(point, label = 'Nuevo paso') {
     label,
     type: 'step',
     x: position.x,
-    y: position.y
+    y: position.y,
+    width: NODE_WIDTH,
+    height: NODE_HEIGHT
   };
   diagram.nodes.push(node);
   selection = { type: 'node', id: node.id };
@@ -1135,6 +1146,25 @@ function addNodeAt(point, label = 'Nuevo paso') {
   recordHistory(before);
   persistDiagrams();
   renderDiagrams();
+}
+
+function beginNodeResize(event, handle) {
+  const node = nodeById(activeDiagram(), handle.dataset.resizeNode);
+  if (!node) return;
+  event.preventDefault();
+  event.stopPropagation();
+  setSelection('node', node.id);
+  resizeState = {
+    id: node.id,
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startWidth: nodeWidth(node),
+    startHeight: nodeHeight(node),
+    moved: false,
+    historyBefore: historySnapshot()
+  };
+  handle.setPointerCapture?.(event.pointerId);
 }
 
 function duplicateActiveDiagram() {
@@ -1237,8 +1267,8 @@ function commitConnection(source, target) {
 }
 
 function connectionPortsBetween(sourceNode, targetNode) {
-  const deltaX = (targetNode.x + NODE_WIDTH / 2) - (sourceNode.x + NODE_WIDTH / 2);
-  const deltaY = (targetNode.y + NODE_HEIGHT / 2) - (sourceNode.y + NODE_HEIGHT / 2);
+  const deltaX = (targetNode.x + nodeWidth(targetNode) / 2) - (sourceNode.x + nodeWidth(sourceNode) / 2);
+  const deltaY = (targetNode.y + nodeHeight(targetNode) / 2) - (sourceNode.y + nodeHeight(sourceNode) / 2);
   if (Math.abs(deltaX) >= Math.abs(deltaY)) {
     return deltaX >= 0
       ? { sourcePort: 'right', targetPort: 'left' }
@@ -1362,6 +1392,11 @@ function finishConnectionDrag(event) {
 
 function handleNodePointerDown(event) {
   if (event.target.closest('[data-delete-node]')) return;
+  const resizeHandle = event.target.closest('[data-resize-node]');
+  if (resizeHandle && event.button === 0) {
+    beginNodeResize(event, resizeHandle);
+    return;
+  }
   const port = event.target.closest('[data-diagram-port]');
   if (port && event.button === 0) {
     beginConnectionDrag(event, port);
@@ -1433,8 +1468,6 @@ function handleNodeInput(event) {
   node.label = input.value.slice(0, 160);
   persistDiagrams();
   if (selection.type === 'node' && selection.id === node.id) {
-    const inspectorInput = $('#diagram-inspector-label');
-    if (inspectorInput && inspectorInput !== input) inspectorInput.value = node.label;
     updateStatus();
   }
 }
@@ -1459,6 +1492,26 @@ function handleBoardPointerDown(event) {
     connectionAnchorNodeId = '';
     setSelection();
   }
+}
+
+function beginDiagramPan(event) {
+  const canvas = event.currentTarget;
+  if (event.button !== 0 || !canvas || event.target.closest?.('.diagram-node, .diagram-edge-group, [data-edge-id], [data-diagram-port]')) return;
+  event.preventDefault();
+  hideEdgeContextMenu();
+  connectionAnchorNodeId = '';
+  setSelection();
+  ensureDiagramViewport();
+  panState = {
+    pointerId: event.pointerId,
+    startX: event.clientX,
+    startY: event.clientY,
+    startOffsetX: diagramViewport.offsetX,
+    startOffsetY: diagramViewport.offsetY,
+    moved: false
+  };
+  canvas.classList.add('is-panning');
+  canvas.setPointerCapture?.(event.pointerId);
 }
 
 function escapeSvg(value) {
@@ -1500,7 +1553,15 @@ function diagramImageColors() {
     warningSurface: diagramCssColor('--warning-surface', 'rgba(220, 220, 170, .08)'),
     warningBorder: diagramCssColor('--warning-border', 'rgba(220, 220, 170, .35)'),
     errorSurface: diagramCssColor('--error-surface', '#3a2926'),
-    dangerBorder: diagramCssColor('--danger-border', '#5b3630')
+    dangerBorder: diagramCssColor('--danger-border', '#5b3630'),
+    edgeColors: {
+      blue: diagramCssColor('--diagram-edge-blue', '#3794ff'),
+      amber: diagramCssColor('--diagram-edge-amber', '#dcdcaa'),
+      purple: diagramCssColor('--diagram-edge-purple', '#c586c0'),
+      cyan: diagramCssColor('--diagram-edge-cyan', '#4ec9b0'),
+      green: diagramCssColor('--diagram-edge-green', '#89d185'),
+      red: diagramCssColor('--diagram-edge-red', '#f48771')
+    }
   };
 }
 
@@ -1541,23 +1602,30 @@ function diagramNodeSvg(node, colors) {
   const type = validNodeType(node.type);
   const x = Number(node.x) || 0;
   const y = Number(node.y) || 0;
-  const centerX = x + NODE_WIDTH / 2;
-  const centerY = y + NODE_HEIGHT / 2;
+  const width = nodeWidth(node);
+  const height = nodeHeight(node);
+  const centerX = x + width / 2;
+  const centerY = y + height / 2;
   const rounded = type === 'start' || type === 'end';
   const shape = type === 'decision'
-    ? `<polygon points="${centerX},${y} ${x + NODE_WIDTH},${centerY} ${centerX},${y + NODE_HEIGHT} ${x},${centerY}" fill="${escapeSvg(colors.warningSurface)}" stroke="${escapeSvg(colors.warningBorder)}" stroke-width="1.5" filter="url(#diagram-image-shadow)"></polygon>`
-    : `<rect x="${x}" y="${y}" width="${NODE_WIDTH}" height="${NODE_HEIGHT}" rx="${rounded ? 44 : 6}" fill="${escapeSvg(type === 'start' ? colors.successSurface : type === 'end' ? colors.errorSurface : colors.surface)}" stroke="${escapeSvg(type === 'start' ? colors.successBorder : type === 'end' ? colors.dangerBorder : colors.accentBorder)}" stroke-width="${type === 'end' ? 3 : 1.5}" filter="url(#diagram-image-shadow)"></rect>`;
+    ? `<polygon points="${centerX},${y} ${x + width},${centerY} ${centerX},${y + height} ${x},${centerY}" fill="${escapeSvg(colors.warningSurface)}" stroke="${escapeSvg(colors.warningBorder)}" stroke-width="1.5" filter="url(#diagram-image-shadow)"></polygon>`
+    : `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${rounded ? Math.min(width, height) / 2 : 6}" fill="${escapeSvg(type === 'start' ? colors.successSurface : type === 'end' ? colors.errorSurface : colors.surface)}" stroke="${escapeSvg(type === 'start' ? colors.successBorder : type === 'end' ? colors.dangerBorder : colors.accentBorder)}" stroke-width="${type === 'end' ? 3 : 1.5}" filter="url(#diagram-image-shadow)"></rect>`;
   const accent = type === 'step'
-    ? `<line x1="${x + 1}" y1="${y + 7}" x2="${x + 1}" y2="${y + NODE_HEIGHT - 7}" stroke="${escapeSvg(colors.accentTextSoft)}" stroke-width="3" stroke-linecap="round"></line>`
+    ? `<line x1="${x + 1}" y1="${y + 7}" x2="${x + 1}" y2="${y + height - 7}" stroke="${escapeSvg(colors.accentTextSoft)}" stroke-width="3" stroke-linecap="round"></line>`
     : '';
   const innerEnd = type === 'end'
-    ? `<rect x="${x + 5}" y="${y + 5}" width="${NODE_WIDTH - 10}" height="${NODE_HEIGHT - 10}" rx="39" fill="none" stroke="${escapeSvg(colors.dangerBorder)}" stroke-width="1"></rect>`
+    ? `<rect x="${x + 5}" y="${y + 5}" width="${width - 10}" height="${height - 10}" rx="${Math.max(0, Math.min(width, height) / 2 - 5)}" fill="none" stroke="${escapeSvg(colors.dangerBorder)}" stroke-width="1"></rect>`
     : '';
   const centered = type === 'decision';
   const textX = centered ? centerX : x + (rounded ? 20 : 14);
   const textAnchor = centered ? 'middle' : 'start';
   const typeColor = type === 'start' ? colors.green : type === 'decision' ? colors.amber : type === 'end' ? colors.red : colors.accentText;
-  const labelLines = wrapSvgText(node.label, centered ? 15 : rounded ? 21 : 24, 3);
+  const labelMaxCharacters = centered
+    ? Math.max(12, Math.floor(width / 10))
+    : rounded
+      ? Math.max(15, Math.floor((width - 40) / 7.3))
+      : Math.max(18, Math.floor((width - 14) / 7.3));
+  const labelLines = wrapSvgText(node.label, labelMaxCharacters, 3);
   const typeMarkup = svgTextLines([NODE_TYPES[type] || NODE_TYPES.step], {
     x: textX,
     y: y + (centered ? 27 : 22),
@@ -1584,7 +1652,7 @@ function diagramEdgeSvg(edge, diagram, colors, index = 0) {
   if (!geometry) return '';
   const direction = validEdgeDirection(edge.direction);
   const edgeColorKey = validEdgeColor(edge.color) || edgeColorForIndex(index);
-  const edgeColor = colors[edgeColorKey] || colors.accentTextSoft;
+  const edgeColor = colors.edgeColors?.[edgeColorKey] || colors.accentTextSoft;
   const markerId = direction === 'forward'
     ? `diagram-image-arrow-forward-${index}`
     : direction === 'backward'
@@ -1607,13 +1675,13 @@ function diagramEdgeSvg(edge, diagram, colors, index = 0) {
   const label = edge.label
     ? `<text x="${geometry.midpoint.x}" y="${geometry.midpoint.y}" text-anchor="middle" dominant-baseline="middle" fill="${escapeSvg(colors.accentTextSoft)}" paint-order="stroke" stroke="${escapeSvg(colors.surfaceDeep)}" stroke-width="5" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10">${escapeSvg(edge.label)}</text>`
     : '';
-  return `<g><path d="${geometry.path}" fill="none" stroke="${escapeSvg(colors.canvas)}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path><path d="${geometry.path}" fill="none" stroke="${escapeSvg(edgeColor)}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"${dash}${marker}></path>${endpointMarkup}${label}</g>`;
+  return `<g>${markerDefinition}<path d="${geometry.path}" fill="none" stroke="${escapeSvg(colors.canvas)}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path><path d="${geometry.path}" fill="none" stroke="${escapeSvg(edgeColor)}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"${dash}${marker}></path>${endpointMarkup}${label}</g>`;
 }
 
 function createDiagramImageSvg(diagram) {
   const colors = diagramImageColors();
   const safeDiagram = diagram || { title: 'Diagrama', nodes: [], edges: [] };
-  const edges = Array.isArray(safeDiagram.edges) ? safeDiagram.edges.map((edge) => diagramEdgeSvg(edge, safeDiagram, colors)).join('') : '';
+  const edges = Array.isArray(safeDiagram.edges) ? safeDiagram.edges.map((edge, index) => diagramEdgeSvg(edge, safeDiagram, colors, index)).join('') : '';
   const nodes = Array.isArray(safeDiagram.nodes) ? safeDiagram.nodes.map((node) => diagramNodeSvg(node, colors)).join('') : '';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" role="img" aria-labelledby="diagram-image-title"><title id="diagram-image-title">${escapeSvg(safeDiagram.title || 'Diagrama')}</title><defs><pattern id="diagram-image-grid" width="${DIAGRAM_GRID_SIZE}" height="${DIAGRAM_GRID_SIZE}" patternUnits="userSpaceOnUse"><path d="M ${DIAGRAM_GRID_SIZE} 0 L 0 0 0 ${DIAGRAM_GRID_SIZE}" fill="none" stroke="${escapeSvg(colors.gridLine)}" stroke-width="1"></path></pattern><filter id="diagram-image-shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity=".3"></feDropShadow></filter><marker id="diagram-image-arrow-forward" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(colors.blue)}"></path></marker><marker id="diagram-image-arrow-backward" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(colors.purple)}"></path></marker></defs><rect width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" fill="${escapeSvg(colors.canvas)}"></rect><rect width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" fill="url(#diagram-image-grid)"></rect><g aria-label="Conexiones">${edges}</g><g aria-label="Nodos">${nodes}</g></svg>`;
 }
@@ -1718,6 +1786,41 @@ function handlePointerMove(event) {
     }
     return;
   }
+  if (resizeState && resizeState.pointerId === event.pointerId) {
+    const diagram = activeDiagram();
+    const node = nodeById(diagram, resizeState.id);
+    const board = $('#diagram-board');
+    if (!node || !board) return;
+    const boardRect = board.getBoundingClientRect();
+    const scaleX = boardRect.width ? boardRect.width / BOARD_WIDTH : 1;
+    const scaleY = boardRect.height ? boardRect.height / BOARD_HEIGHT : 1;
+    const distance = Math.hypot(event.clientX - resizeState.startX, event.clientY - resizeState.startY);
+    if (!resizeState.moved && distance < 5) return;
+    resizeState.moved = true;
+    event.preventDefault();
+    const maxWidth = Math.min(NODE_MAX_WIDTH, BOARD_WIDTH - node.x - NODE_MARGIN);
+    const maxHeight = Math.min(NODE_MAX_HEIGHT, BOARD_HEIGHT - node.y - NODE_MARGIN);
+    node.width = Math.round(clamp(resizeState.startWidth + (event.clientX - resizeState.startX) / scaleX, NODE_MIN_WIDTH, maxWidth));
+    node.height = Math.round(clamp(resizeState.startHeight + (event.clientY - resizeState.startY) / scaleY, NODE_MIN_HEIGHT, maxHeight));
+    const element = document.querySelector(`[data-node-id="${node.id}"]`);
+    if (element) {
+      element.style.width = `${node.width}px`;
+      element.style.height = `${node.height}px`;
+    }
+    renderEdges(diagram);
+    return;
+  }
+  if (panState && panState.pointerId === event.pointerId) {
+    const distance = Math.hypot(event.clientX - panState.startX, event.clientY - panState.startY);
+    if (!panState.moved && distance < 5) return;
+    panState.moved = true;
+    event.preventDefault();
+    diagramViewport.offsetX = panState.startOffsetX + event.clientX - panState.startX;
+    diagramViewport.offsetY = panState.startOffsetY + event.clientY - panState.startY;
+    diagramViewport.userZoomed = true;
+    applyDiagramViewport();
+    return;
+  }
   if (!dragState || dragState.pointerId !== event.pointerId) return;
   const diagram = activeDiagram();
   const node = nodeById(diagram, dragState.id);
@@ -1728,8 +1831,8 @@ function handlePointerMove(event) {
   dragState.moved = true;
   event.preventDefault();
   const point = boardPoint(event);
-  node.x = clamp(point.x - dragState.offsetX, NODE_MARGIN, BOARD_WIDTH - NODE_WIDTH - NODE_MARGIN);
-  node.y = clamp(point.y - dragState.offsetY, NODE_MARGIN, BOARD_HEIGHT - NODE_HEIGHT - NODE_MARGIN);
+  node.x = clamp(point.x - dragState.offsetX, NODE_MARGIN, BOARD_WIDTH - nodeWidth(node) - NODE_MARGIN);
+  node.y = clamp(point.y - dragState.offsetY, NODE_MARGIN, BOARD_HEIGHT - nodeHeight(node) - NODE_MARGIN);
   const element = document.querySelector(`[data-node-id="${node.id}"]`);
   if (element) element.style.transform = `translate(${node.x}px, ${node.y}px)`;
   renderEdges(diagram);
@@ -1738,6 +1841,18 @@ function handlePointerMove(event) {
 function handlePointerUp(event) {
   if (connectionDrag && connectionDrag.pointerId === event.pointerId) {
     finishConnectionDrag(event);
+    return;
+  }
+  if (resizeState && resizeState.pointerId === event.pointerId) {
+    if (resizeState.moved) recordHistory(resizeState.historyBefore);
+    resizeState = null;
+    persistDiagrams();
+    return;
+  }
+  if (panState && panState.pointerId === event.pointerId) {
+    if (panState.moved) event.preventDefault();
+    $('#diagram-canvas')?.classList.remove('is-panning');
+    panState = null;
     return;
   }
   if (!dragState || dragState.pointerId !== event.pointerId) return;
@@ -1863,6 +1978,7 @@ function bindDiagramEvents(root) {
   $('#diagram-canvas-context-menu').addEventListener('click', handleCanvasContextMenuAction);
   const canvas = $('#diagram-canvas');
   canvas.addEventListener('wheel', handleDiagramWheel, { passive: false });
+  canvas.addEventListener('pointerdown', beginDiagramPan);
   canvas.addEventListener('contextmenu', showCanvasContextMenu);
   const board = $('#diagram-board');
   board.addEventListener('pointerdown', handleBoardPointerDown);

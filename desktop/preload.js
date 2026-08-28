@@ -26,6 +26,15 @@ contextBridge.exposeInMainWorld('nexusData', {
   selectWorkspaceFile: () => ipcRenderer.invoke('select-workspace-file'),
   saveWorkspaceFile: (payload) => ipcRenderer.invoke('save-workspace-file', payload),
   selectLocalPaths: (options) => ipcRenderer.invoke('select-local-paths', options),
+  getFileSystemRoots: () => ipcRenderer.invoke('get-file-system-roots'),
+  listFileSystemDirectory: (directoryPath) => ipcRenderer.invoke('list-file-system-directory', directoryPath),
+  searchFileSystem: (payload) => ipcRenderer.invoke('search-file-system', payload),
+  openFileSystemEntry: (filePath) => ipcRenderer.invoke('open-file-system-entry', filePath),
+  createFileSystemDirectory: (payload) => ipcRenderer.invoke('create-file-system-directory', payload),
+  createFileSystemFile: (payload) => ipcRenderer.invoke('create-file-system-file', payload),
+  renameFileSystemEntry: (payload) => ipcRenderer.invoke('rename-file-system-entry', payload),
+  deleteFileSystemEntries: (paths) => ipcRenderer.invoke('delete-file-system-entries', paths),
+  transferFileSystemEntries: (payload) => ipcRenderer.invoke('transfer-file-system-entries', payload),
   selectDiagramFile: () => ipcRenderer.invoke('select-diagram-file'),
   saveDiagramFile: (payload) => ipcRenderer.invoke('save-diagram-file', payload),
   createProjectDirectory: () => ipcRenderer.invoke('create-project-directory'),
@@ -33,5 +42,6 @@ contextBridge.exposeInMainWorld('nexusData', {
   setViewMenu: (view) => ipcRenderer.invoke('set-view-menu', view),
   onHtmlViewerMenuAction: (callback) => ipcRenderer.on('html-viewer-menu-action', (_event, action) => callback(action)),
   onDiagramMenuAction: (callback) => ipcRenderer.on('diagram-menu-action', (_event, action) => callback(action)),
-  onPreferencesMenuAction: (callback) => ipcRenderer.on('preferences-menu-action', (_event, action, value) => callback(action, value))
+  onPreferencesMenuAction: (callback) => ipcRenderer.on('preferences-menu-action', (_event, action, value) => callback(action, value)),
+  onWorkspaceMenuAction: (callback) => ipcRenderer.on('workspace-menu-action', (_event, action) => callback(action))
 });

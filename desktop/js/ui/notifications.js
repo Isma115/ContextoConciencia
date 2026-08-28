@@ -11,6 +11,7 @@ export function showToast(message, error = false) {
 
 export function setConnection(status, text) {
   const node = $('#api-status');
+  if (!node) return;
   node.className = `connection-status ${status}`;
   node.innerHTML = `<i></i>${escapeHtml(text)}`;
 }

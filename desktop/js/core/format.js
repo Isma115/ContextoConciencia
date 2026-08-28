@@ -7,6 +7,10 @@ export function typeLabel(type) {
   return ({ markdown: 'md', json: 'json', csv: 'csv', text: 'txt', html: 'html', css: 'css', javascript: 'js', diagram: 'nxd', rest: 'api' }[type] || type || 'doc');
 }
 
+export function documentTypeClass(type) {
+  return ({ markdown: 'markdown', json: 'json', csv: 'csv', text: 'text', html: 'html', css: 'css', javascript: 'javascript', diagram: 'diagram', rest: 'rest' }[type] || 'generic');
+}
+
 export function statusLabel(status) {
   return ({ ready: 'Lista', pending: 'Pendiente', syncing: 'Sincronizando', error: 'Con errores' }[status] || status);
 }

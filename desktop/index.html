@@ -12,14 +12,11 @@
     <div class="app-shell app-hidden" aria-hidden="true">
       <aside id="sidebar" class="sidebar" aria-label="Panel lateral">
         <div class="sidebar-pane">
-          <div class="brand">
-            <div><strong>NexusData</strong></div>
-          </div>
           <div class="sidebar-label">EXPLORER</div>
           <nav class="main-nav" aria-label="Navegación principal">
             <div class="sidebar-search-group">
               <div class="sidebar-search-row">
-                <button id="sidebar-search-toggle" class="sidebar-search-toggle" type="button" aria-controls="sidebar-search-field" aria-expanded="false" aria-label="Mostrar búsqueda rápida" title="Mostrar búsqueda rápida">›</button>
+                <button id="sidebar-search-toggle" class="sidebar-search-toggle" type="button" aria-controls="sidebar-search-field" aria-expanded="false" aria-label="Mostrar búsqueda rápida" title="Mostrar búsqueda rápida">⌄</button>
                 <button class="nav-item active" data-view="global-search"><span class="nav-icon">⌕</span>Buscar</button>
               </div>
               <div id="sidebar-search-field" class="sidebar-search-field" hidden>
@@ -35,17 +32,8 @@
             <button class="nav-item nav-item-sub" data-view="diagrams"><span class="nav-icon">◇</span>Diagramas</button>
             <button class="nav-item" data-view="code-map"><span class="nav-icon">⌘</span>Mapa de código</button>
             <button class="nav-item" data-view="sources"><span class="nav-icon">◈</span>Fuentes</button>
+            <button class="nav-item" data-view="file-explorer"><span class="nav-icon">▤</span>Explorador de ficheros</button>
           </nav>
-          <div class="sidebar-workspace-tools" aria-label="Espacio de trabajo">
-            <div class="sidebar-label">ESPACIO</div>
-            <div class="sidebar-workspace-actions">
-              <button id="workspace-export" class="sidebar-workspace-button" type="button">Exportar</button>
-              <button id="workspace-import" class="sidebar-workspace-button" type="button">Importar</button>
-            </div>
-          </div>
-          <div class="sidebar-session">
-            <div class="sidebar-session-status"><span id="api-status" class="connection-status offline"><i></i></span><span id="active-user" class="active-user"></span></div>
-          </div>
         </div>
       </aside>
 
@@ -59,6 +47,7 @@
         <section id="view-diagrams" class="view"></section>
         <section id="view-code-map" class="view"></section>
         <section id="view-sources" class="view"></section>
+        <section id="view-file-explorer" class="view"></section>
       </main>
     </div>
 

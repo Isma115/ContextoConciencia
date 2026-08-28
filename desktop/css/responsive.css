@@ -22,6 +22,21 @@
   .global-source-main { align-items: start; }
   .global-source-footer { align-items: start; flex-direction: column; margin-left: 38px; }
   .global-source-actions { justify-content: flex-start; }
+  .search-toolbar .search-bar { min-width: 0; }
+  .file-explorer-toolbar { align-items: stretch; flex-wrap: wrap; padding: 7px 12px; }
+  .file-explorer-navigation-actions { width: 100%; }
+  .file-explorer-path-form { flex-basis: 100%; }
+  .file-explorer-filterbar { align-items: stretch; flex-wrap: wrap; padding: 7px 12px; }
+  .file-explorer-search-form { flex-basis: 100%; }
+  .file-explorer-view-switcher { margin-left: auto; }
+  .file-explorer-selectionbar { align-items: start; flex-direction: column; padding: 7px 12px; }
+  .file-explorer-selection-actions { justify-content: flex-start; }
+  .file-explorer-content { padding: 12px 12px 24px; }
+  .file-explorer-root-row { grid-template-columns: 27px minmax(0, 1fr) auto; }
+  .file-explorer-entry-list-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }
+  .file-explorer-entry-details-head { grid-template-columns: 18px 27px minmax(120px, 1fr) 70px 70px 18px; }
+  .file-explorer-entry-list-details .file-explorer-entry { grid-template-columns: 18px 27px minmax(120px, 1fr) 70px 70px 18px; }
+  .file-explorer-entry-detail-modified { display: none; }
   .code-map-toolbar { align-items: start; flex-direction: column; gap: 10px; padding: 11px 12px 9px; }
   .code-map-config { width: 100%; align-items: stretch; flex-wrap: wrap; }
   .code-map-field { min-width: 0; flex: 1 1 190px; }

@@ -2,11 +2,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const { startServer } = require('../server/app');
+const { createFileExplorerService } = require('./file-explorer-service');
 
 let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
 const DIAGRAM_MENU_NAME = 'Diagrama';
 const PREFERENCES_MENU_NAME = 'Preferencias';
+const EXPORT_MENU_NAME = 'Espacio';
 const PROMPTS_MENU_NAME = 'Prompts';
 const SEARCH_PREFERENCES_FILENAME = 'search-preferences.json';
 const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -15,6 +17,7 @@ const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DESKTOP_PORT = Number(process.env.PORT) || 3000;
 const OFFLINE_ONLY = true;
 const closeConfirmationStates = new WeakMap();
+const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
 
 function searchPreferencesPath() {
   return path.join(app.getPath('userData'), SEARCH_PREFERENCES_FILENAME);
@@ -83,6 +86,37 @@ function setApplicationMenuForView(window, view) {
             click: () => window.webContents.send('preferences-menu-action', 'palette', 'plum')
           }
         ]
+      },
+      {
+        label: 'Contraste de líneas',
+        submenu: [
+          {
+            label: 'Bajo',
+            click: () => window.webContents.send('preferences-menu-action', 'diagram-line-contrast', 'low')
+          },
+          {
+            label: 'Medio',
+            click: () => window.webContents.send('preferences-menu-action', 'diagram-line-contrast', 'normal')
+          },
+          {
+            label: 'Alto',
+            click: () => window.webContents.send('preferences-menu-action', 'diagram-line-contrast', 'high')
+          }
+        ]
+      }
+    ]
+  });
+
+  template.push({
+    label: EXPORT_MENU_NAME,
+    submenu: [
+      {
+        label: 'Exportar espacio de trabajo',
+        click: () => window.webContents.send('workspace-menu-action', 'export')
+      },
+      {
+        label: 'Importar espacio de trabajo',
+        click: () => window.webContents.send('workspace-menu-action', 'import')
       }
     ]
   });
@@ -254,6 +288,16 @@ app.whenReady().then(async () => {
     return result.canceled ? [] : result.filePaths;
   });
 
+  ipcMain.handle('get-file-system-roots', () => fileExplorerService.getRoots());
+  ipcMain.handle('list-file-system-directory', (_event, directoryPath) => fileExplorerService.listDirectory(directoryPath));
+  ipcMain.handle('search-file-system', (_event, payload) => fileExplorerService.searchDirectory(payload));
+  ipcMain.handle('open-file-system-entry', (_event, filePath) => fileExplorerService.openEntry(filePath));
+  ipcMain.handle('create-file-system-directory', (_event, payload) => fileExplorerService.createDirectory(payload));
+  ipcMain.handle('create-file-system-file', (_event, payload) => fileExplorerService.createFile(payload));
+  ipcMain.handle('rename-file-system-entry', (_event, payload) => fileExplorerService.renameEntry(payload));
+  ipcMain.handle('delete-file-system-entries', (_event, payload) => fileExplorerService.deleteEntries(payload));
+  ipcMain.handle('transfer-file-system-entries', (_event, payload) => fileExplorerService.transferEntries(payload));
+
   ipcMain.handle('select-diagram-file', async () => {
     const result = await dialog.showOpenDialog({
       title: 'Importar diagrama por texto',
@@ -320,17 +364,7 @@ app.whenReady().then(async () => {
     return projectPath;
   });
 
-  ipcMain.handle('reveal-file', async (_event, filePath) => {
-    if (typeof filePath !== 'string' || !path.isAbsolute(filePath)) {
-      throw new Error('La ruta del documento no es válida');
-    }
-    const normalizedPath = path.normalize(filePath);
-    if (!fs.existsSync(normalizedPath)) {
-      throw new Error('El archivo ya no existe en esa ubicación');
-    }
-    shell.showItemInFolder(normalizedPath);
-    return { ok: true };
-  });
+  ipcMain.handle('reveal-file', (_event, filePath) => fileExplorerService.revealEntry(filePath));
 
   try {
     apiServer = await startServer({

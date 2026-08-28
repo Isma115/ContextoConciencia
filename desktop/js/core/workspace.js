@@ -8,6 +8,7 @@ import {
   state
 } from './state.js';
 import { currentPalette, savePalettePreference } from './theme.js';
+import { currentDiagramLineContrast, saveDiagramLineContrast } from './diagram-settings.js';
 import { getDiagramWorkspaceState, restoreDiagramWorkspaceState } from '../views/diagrams.js';
 import { bindModalClose, closeModal } from '../ui/modals.js';
 import { showToast } from '../ui/notifications.js';
@@ -50,6 +51,7 @@ export function getClientWorkspaceState() {
   return {
     version: CLIENT_WORKSPACE_VERSION,
     palette: currentPalette(),
+    diagramLineContrast: currentDiagramLineContrast(),
     searchPreferences: getSearchPreferences(),
     sidebarSearchExpanded: state.sidebarSearchExpanded === true,
     diagrams: getDiagramWorkspaceState(),
@@ -85,6 +87,7 @@ function restoreClientWorkspaceState(clientState) {
   if (!clientState || typeof clientState !== 'object' || Array.isArray(clientState)) return;
   if (Number(clientState.version) === CLIENT_WORKSPACE_VERSION) {
     if (typeof clientState.palette === 'string') savePalettePreference(clientState.palette);
+    if (typeof clientState.diagramLineContrast === 'string') saveDiagramLineContrast(clientState.diagramLineContrast);
     restoreSearchPreferences(clientState.searchPreferences);
     if (typeof clientState.sidebarSearchExpanded === 'boolean') persistSidebarSearchPreference(clientState.sidebarSearchExpanded);
     restoreDiagramWorkspaceState(clientState.diagrams);
@@ -218,6 +221,8 @@ async function importWorkspace(button) {
 }
 
 export function bindWorkspaceControls() {
-  $('#workspace-export')?.addEventListener('click', (event) => { void exportWorkspace(event.currentTarget); });
-  $('#workspace-import')?.addEventListener('click', (event) => { void importWorkspace(event.currentTarget); });
+  window.nexusData?.onWorkspaceMenuAction?.((action) => {
+    if (action === 'export') void exportWorkspace();
+    if (action === 'import') void importWorkspace();
+  });
 }

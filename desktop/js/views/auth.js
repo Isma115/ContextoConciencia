@@ -8,7 +8,8 @@ export function showApplication() {
   authScreen?.setAttribute('aria-hidden', 'true');
   $('.app-shell').classList.remove('app-hidden');
   $('.app-shell').setAttribute('aria-hidden', 'false');
-  $('#active-user').textContent = state.user?.offline ? '' : state.user?.username || '';
+  const activeUser = $('#active-user');
+  if (activeUser) activeUser.textContent = state.user?.offline ? '' : state.user?.username || '';
 }
 
 export function showAuthentication() {

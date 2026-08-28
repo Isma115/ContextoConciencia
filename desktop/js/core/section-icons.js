@@ -6,6 +6,7 @@ const SECTION_ICONS = Object.freeze({
   diagrams: '<circle cx="8" cy="9" r="3"></circle><circle cx="24" cy="9" r="3"></circle><circle cx="16" cy="24" r="3"></circle><path d="m10.7 10.3 3.7 10.8M21.3 10.3l-3.7 10.8M11 9h10"></path>',
   code: '<path d="m12 7-7 9 7 9"></path><path d="m20 7 7 9-7 9"></path><path d="m17 5-2 22"></path>',
   sources: '<path d="M4.5 9.5h8l2.2-3h12.8v19H4.5z"></path><path d="M4.5 10.5h23"></path><path d="M16 14.5v6M13 17.5h6"></path>',
+  files: '<path d="M5 7.5h8l2.5 3H27v14H5z"></path><path d="M5 11h22"></path><path d="M10 16h.01M15 16h.01M20 16h.01"></path>',
   default: '<path d="M16 4v24M4 16h24"></path><circle cx="16" cy="16" r="9"></circle>'
 });
 

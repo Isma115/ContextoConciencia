@@ -50,6 +50,7 @@ function resetCodeMapForSource(codeMap, source) {
   codeMap.files = [];
   codeMap.folders = [];
   codeMap.filesLoading = false;
+  codeMap.filesLoaded = false;
   codeMap.filesWarnings = [];
   codeMap.filesFingerprint = '';
   codeMap.scope = 'project';
@@ -377,7 +378,7 @@ export function renderCodeMap() {
     bindCodeMapEvents($('#view-code-map'));
     return;
   }
-  if (!codeMap.filesLoading && !codeMap.files.length && !codeMap.error) loadCodeMapFiles();
+  if (!codeMap.filesLoading && !codeMap.filesLoaded && !codeMap.files.length && !codeMap.error) loadCodeMapFiles();
   if (codeMap.filesLoading && !codeMap.files.length) {
     $('#view-code-map').innerHTML = '<div class="code-map-loading panel"><span class="spinner"></span><strong>Descubriendo ficheros compatibles…</strong></div>';
     return;
@@ -415,6 +416,7 @@ async function loadCodeMapFiles() {
     const previousFingerprint = codeMap.filesFingerprint;
     codeMap.files = result.files || [];
     codeMap.folders = result.folders || deriveFolders(codeMap.files);
+    codeMap.filesLoaded = true;
     codeMap.filesWarnings = result.warnings || [];
     codeMap.filesFingerprint = result.project?.fingerprint || '';
     codeMap.stale = Boolean(codeMap.result && (codeMap.stale || (previousFingerprint && previousFingerprint !== codeMap.filesFingerprint)));
@@ -575,7 +577,7 @@ function bindCodeMapEvents(container) {
     const target = event.target.closest('[data-code-map-go-global], [data-code-map-refresh-files], [data-code-map-generate], [data-code-map-cancel], [data-code-map-file], [data-code-map-file-select], [data-code-map-tree-file], [data-code-map-toggle], [data-code-map-symbol], [data-code-map-relation], [data-code-map-open], [data-code-map-zoom], [data-code-map-fit], [data-code-map-close-modal]');
     if (!target) return;
     if (target.matches('[data-code-map-go-global]')) { navigateToView('global-search'); return; }
-    if (target.matches('[data-code-map-refresh-files]')) { codeMapState().files = []; codeMapState().folders = []; await loadCodeMapFiles(); return; }
+    if (target.matches('[data-code-map-refresh-files]')) { codeMapState().files = []; codeMapState().folders = []; codeMapState().filesLoaded = false; await loadCodeMapFiles(); return; }
     if (target.matches('[data-code-map-generate]')) { await generateCodeMap(); return; }
     if (target.matches('[data-code-map-cancel]')) { analysisController?.abort(); return; }
     if (target.matches('[data-code-map-toggle]')) { const id = target.dataset.codeMapToggle; codeMapState().expanded[id] = !codeMapState().expanded[id]; renderGraphAndDetails(); return; }

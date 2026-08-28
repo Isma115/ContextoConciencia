@@ -11,8 +11,10 @@ import { bindHtmlViewerMenu, configureHtmlViewer, openPersistedHtmlSource, rende
 import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/diagrams.js';
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
+import { renderFileExplorer } from './views/file-explorer.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
+import { loadDiagramLineContrast } from './core/diagram-settings.js';
 import { bindWorkspaceControls, configureWorkspace } from './core/workspace.js';
 
 let nativeMenuView = null;
@@ -37,6 +39,7 @@ async function refreshData() {
       state.codeMap.files = [];
       state.codeMap.folders = [];
       state.codeMap.filesWarnings = [];
+      state.codeMap.filesLoaded = false;
       state.codeMap.filesFingerprint = '';
       state.codeMap.scope = 'project';
       state.codeMap.entryFile = '';
@@ -71,6 +74,7 @@ function renderView() {
   if (state.view === 'diagrams') renderDiagrams();
   if (state.view === 'code-map') renderCodeMap();
   if (state.view === 'sources') renderSources();
+  if (state.view === 'file-explorer') renderFileExplorer();
 }
 
 async function initialiseSession() {
@@ -113,7 +117,7 @@ function renderSidebarSearch() {
   toggle.setAttribute('aria-expanded', String(expanded));
   toggle.setAttribute('aria-label', expanded ? 'Ocultar búsqueda rápida' : 'Mostrar búsqueda rápida');
   toggle.title = expanded ? 'Ocultar búsqueda rápida' : 'Mostrar búsqueda rápida';
-  toggle.textContent = expanded ? '‹' : '›';
+  toggle.textContent = expanded ? '⌃' : '⌄';
 }
 
 function bindSidebarSearchToggle() {
@@ -170,6 +174,7 @@ bindSidebarSearchToggle();
 bindSidebarSearch();
 bindCloseConfirmation();
 loadPalettePreference();
+loadDiagramLineContrast();
 
 async function startApplication() {
   await loadSearchPreferences();

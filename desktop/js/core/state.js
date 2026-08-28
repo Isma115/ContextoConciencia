@@ -16,6 +16,7 @@ export const state = {
   stats: { documents: 0, sources: 0, collections: 0, lastSyncAt: null },
   searchQuery: '',
   filters: { ...DEFAULT_FILTERS },
+  searchFiltersExpanded: true,
   includeCommonPaths: false,
   sidebarSearchExpanded: false,
   globalProject: null,
@@ -34,6 +35,7 @@ export const state = {
     files: [],
     folders: [],
     filesLoading: false,
+    filesLoaded: false,
     filesWarnings: [],
     filesFingerprint: '',
     scope: 'project',
@@ -108,6 +110,7 @@ function normaliseSearchPreferences(preferences) {
     filters: normaliseFilters(preferences?.filters),
     globalSearchQuery: normaliseString(preferences?.globalSearchQuery, SEARCH_QUERY_MAX_LENGTH, true),
     globalFilters: normaliseFilters(preferences?.globalFilters),
+    filtersExpanded: preferences?.filtersExpanded !== false,
     includeCommonPaths: preferences?.includeCommonPaths === true
   };
 }
@@ -119,6 +122,7 @@ export function restoreSearchPreferences(preferences) {
   const unifiedFilters = hasActiveFilters(restored.globalFilters) ? restored.globalFilters : restored.filters;
   state.searchQuery = unifiedQuery;
   state.filters = { ...unifiedFilters };
+  state.searchFiltersExpanded = restored.filtersExpanded;
   state.includeCommonPaths = restored.includeCommonPaths;
   return true;
 }
@@ -140,6 +144,7 @@ export function getSearchPreferences() {
     filters,
     globalSearchQuery: query,
     globalFilters: filters,
+    filtersExpanded: state.searchFiltersExpanded !== false,
     includeCommonPaths: state.includeCommonPaths
   });
 }

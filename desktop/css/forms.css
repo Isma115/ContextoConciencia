@@ -1,7 +1,8 @@
 .form-grid { display: grid; gap: 12px; }
 .form-grid.two { grid-template-columns: 1fr 1fr; }
 .form-label { display: grid; gap: 6px; color: var(--muted); font-family: var(--mono); font-size: 9px; }
-.field, .textarea { width: 100%; }
+.field, .textarea { width: 100%; transition: background .12s, border-color .12s, box-shadow .12s, color .12s; }
+.form-grid .field:hover:not(:disabled), .form-grid .textarea:hover:not(:disabled) { border-color: var(--hover-border); background: var(--hover-surface); }
 .textarea { min-height: 88px; resize: vertical; line-height: 1.45; }
 .selection-box { min-height: 44px; padding: 8px; border: 1px dashed var(--line-strong); border-radius: 3px; background: var(--surface-code); }
 .selection-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; margin: 2px; padding: 4px 6px; border: 1px solid var(--accent-border); border-radius: 3px; color: var(--accent-text); background: var(--accent-surface); font-family: var(--mono); font-size: 9px; }
