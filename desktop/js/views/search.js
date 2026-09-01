@@ -123,13 +123,22 @@ function filterMarkup(prefix = '', filters = state.filters) {
   return `<div class="filter-controls"><button id="${toggleId}" class="filter-toggle btn btn-secondary btn-small" type="button" data-filter-toggle aria-controls="${panelId}" aria-expanded="${expanded}" aria-label="${toggleLabel}" title="${toggleLabel}"><span class="filter-toggle-arrow" aria-hidden="true">${expanded ? '⌄' : '›'}</span><span>Filtros</span></button><div id="${panelId}" class="filter-panel" data-filter-panel${expanded ? '' : ' hidden'}><div class="filter-row"><select id="${id('source')}" class="select source-filter-select">${sourceOptions(filters.source)}</select>${viewSourcesButton}<select id="${id('type')}" class="select type-filter-select">${typeOptions(filters.type)}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div></div></div>`;
 }
 
+function snippetMarkup(doc) {
+  if (doc.metadata?.contentDeferred) return escapeHtml('Contenido disponible al abrir');
+  const text = String(doc.snippet || doc.content?.slice(0, 220) || '');
+  const [start, end] = Array.isArray(doc.highlight) ? doc.highlight : [];
+  if (typeof start !== 'number' || typeof end !== 'number' || start < 0 || end <= start || start >= text.length) return escapeHtml(text);
+  const safeEnd = Math.min(end, text.length);
+  return `${escapeHtml(text.slice(0, start))}<mark class="search-hit">${escapeHtml(text.slice(start, safeEnd))}</mark>${escapeHtml(text.slice(safeEnd))}`;
+}
+
 function resultMarkup(results, prefix = '') {
   const resultItems = results || [];
   if (!resultItems.length) return '<div class="empty">Sin resultados</div>';
   return resultItems.map((doc) => `
     <article class="result-card document-hit document-type-${documentTypeClass(doc.type)}" data-view-document="${escapeHtml(doc.id)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(doc.title)}">
       <div class="result-head"><div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div><div class="result-title-wrap"><h3 class="result-title">${escapeHtml(doc.title)}</h3><div class="result-source">${escapeHtml(doc.source)}</div></div><span class="score">${Math.round((doc.score || 0) * 100)}%</span></div>
-      <div class="snippet">${escapeHtml(doc.metadata?.contentDeferred ? 'Contenido disponible al abrir' : doc.snippet || doc.content?.slice(0, 220))}</div>
+      <div class="snippet">${snippetMarkup(doc)}</div>
       <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}<button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
     </article>`).join('');
 }
