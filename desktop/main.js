@@ -340,13 +340,26 @@ app.whenReady().then(async () => {
 
 ## Título del requisito
 **Estado:** borrador
-**Prioridad:** media
 **Categoría:** 
 
 Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
 `;
     fs.writeFileSync(specsPath, template, { encoding: 'utf8', mode: 0o600 });
     return { path: specsPath, content: template, created: true };
+  });
+
+  ipcMain.handle('load-sdd-specs-markdown', async () => {
+    const result = await dialog.showOpenDialog({
+      title: 'Seleccionar markdown de specs',
+      buttonLabel: 'Cargar',
+      properties: ['openFile'],
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = path.normalize(result.filePaths[0]);
+    if (!fs.statSync(filePath).isFile()) throw new Error('La ubicación elegida no es un archivo');
+    if (fs.statSync(filePath).size > 2 * 1024 * 1024) throw new Error('El markdown supera el límite de 2 MB');
+    return { path: filePath, content: fs.readFileSync(filePath, 'utf8') };
   });
 
   ipcMain.handle('write-sdd-specs-markdown', async (_event, payload = {}) => {

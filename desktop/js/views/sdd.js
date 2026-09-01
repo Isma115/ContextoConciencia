@@ -6,11 +6,11 @@ import { closeModal, bindModalClose } from '../ui/modals.js';
 import { shortDate } from '../core/format.js';
 
 const SPEC_STATUS = Object.freeze({ draft: 'Borrador', active: 'Activa', approved: 'Aprobada', implemented: 'Implementada' });
-const SPEC_PRIORITY = Object.freeze({ low: 'Baja', medium: 'Media', high: 'Alta' });
 const MEDIA_KIND = Object.freeze({ text: 'Texto', image: 'Imagen', video: 'Vídeo' });
 const SPECS_PATH_STORAGE_KEY = 'sdd.specsPath';
 let renderRequestId = 0;
 let selectedMedia = { dataUrl: null, name: '' };
+let loadedSpecsMarkdown = null;
 
 function isViewActive(viewId) {
   const node = document.getElementById(viewId);
@@ -21,8 +21,8 @@ function sddHeader(icon, eyebrow, title, lead) {
   return `<div class="section-top"><div class="section-heading-with-icon">${sectionIconMarkup(icon)}<div class="section-heading-copy"><span class="diagram-eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p class="lead">${escapeHtml(lead)}</p></div></div></div>`;
 }
 
-function sddToolbar(label, count, addId, addLabel) {
-  return `<div class="sdd-toolbar"><div class="sdd-toolbar-copy"><h2>${escapeHtml(label)}</h2><span id="${addId}-count" class="sdd-count">${escapeHtml(count)}</span></div><button id="${addId}" class="btn btn-primary" type="button">${escapeHtml(addLabel)}</button></div>`;
+function sddToolbar(label, count, addId, addLabel, extraButton = '') {
+  return `<div class="sdd-toolbar"><div class="sdd-toolbar-copy"><h2>${escapeHtml(label)}</h2><span id="${addId}-count" class="sdd-count">${escapeHtml(count)}</span></div><div class="sdd-toolbar-actions">${extraButton}<button id="${addId}" class="btn btn-primary" type="button">${escapeHtml(addLabel)}</button></div></div>`;
 }
 
 function emptyState(title, description) {
@@ -94,11 +94,59 @@ export function bindSddInject() {
   });
 }
 
+/* -------------------------------------------------------------------- Cargar */
+
+function openSpecsMarkdownEditor() {
+  if (!loadedSpecsMarkdown) return;
+  const { path, content } = loadedSpecsMarkdown;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal sdd-md-modal" role="dialog" aria-modal="true" aria-labelledby="sdd-md-modal-title"><div class="modal-head"><div><h2 id="sdd-md-modal-title">Editar specs en memoria</h2><p>${escapeHtml(path)}</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><textarea id="sdd-md-content" class="textarea sdd-md-textarea" spellcheck="false">${escapeHtml(content)}</textarea></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="sdd-md-apply" class="btn btn-primary" type="button">Aplicar a specs</button></div></div></div>`;
+  bindModalClose();
+  $('#sdd-md-apply').addEventListener('click', async () => {
+    const markdown = $('#sdd-md-content').value;
+    const button = $('#sdd-md-apply');
+    button.disabled = true;
+    try {
+      const result = await api('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown }) });
+      loadedSpecsMarkdown = { path, content: markdown };
+      closeModal();
+      showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} sincronizados desde el markdown editado`);
+      if (isViewActive('view-sdd-specs')) renderSddSpecs();
+    } catch (error) {
+      showToast(error.message, true);
+      button.disabled = false;
+    }
+  });
+}
+
+export function bindSddLoad() {
+  const button = $('#sdd-load');
+  if (!button) return;
+  button.addEventListener('click', async () => {
+    if (typeof window.nexusData?.loadSddSpecsMarkdown !== 'function') {
+      showToast('El selector de archivos no está disponible en esta ventana', true);
+      return;
+    }
+    button.disabled = true;
+    button.textContent = '…';
+    try {
+      const selection = await window.nexusData.loadSddSpecsMarkdown();
+      if (!selection) return;
+      loadedSpecsMarkdown = selection;
+      openSpecsMarkdownEditor();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Cargar';
+    }
+  });
+}
+
 /* ------------------------------------------------------------------ Specs */
 
 function specBadges(spec) {
   const category = spec.category ? `<span class="sdd-badge sdd-badge-category">${escapeHtml(spec.category)}</span>` : '';
-  return `${category}<span class="sdd-badge sdd-status-${escapeHtml(spec.status)}">${SPEC_STATUS[spec.status] || escapeHtml(spec.status)}</span><span class="sdd-badge sdd-priority-${escapeHtml(spec.priority)}">Prioridad ${SPEC_PRIORITY[spec.priority] || escapeHtml(spec.priority)}</span>`;
+  return `${category}<span class="sdd-badge sdd-status-${escapeHtml(spec.status)}">${SPEC_STATUS[spec.status] || escapeHtml(spec.status)}</span>`;
 }
 
 function specCard(spec) {
@@ -145,15 +193,13 @@ function renderSpecList(specs) {
 
 function openSpecModal(existing = null) {
   const statusOptions = Object.entries(SPEC_STATUS).map(([value, label]) => `<option value="${value}"${existing?.status === value ? ' selected' : ''}>${label}</option>`).join('');
-  const priorityOptions = Object.entries(SPEC_PRIORITY).map(([value, label]) => `<option value="${value}"${existing?.priority === value ? ' selected' : ''}>${label}</option>`).join('');
-  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-spec-modal-title"><div class="modal-head"><div><h2 id="sdd-spec-modal-title">${existing ? 'Editar spec' : 'Añadir spec'}</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><div class="form-grid"><label class="form-label">Título<input id="spec-title" class="field" type="text" value="${escapeHtml(existing?.title || '')}" placeholder="Ej. El usuario debe poder buscar documentos" maxlength="200" autocomplete="off" autofocus /></label><div class="form-grid two"><label class="form-label">Estado<select id="spec-status" class="select">${statusOptions}</select></label><label class="form-label">Prioridad<select id="spec-priority" class="select">${priorityOptions}</select></label></div><label class="form-label">Categoría<input id="spec-category" class="field" type="text" value="${escapeHtml(existing?.category || '')}" placeholder="Ej. Búsqueda, Seguridad, API" maxlength="60" autocomplete="off" /></label><label class="form-label">Descripción<textarea id="spec-description" class="textarea" maxlength="10000" placeholder="Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones…">${escapeHtml(existing?.description || '')}</textarea></label></div></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="spec-save" class="btn btn-primary" type="button">${existing ? 'Guardar cambios' : 'Añadir spec'}</button></div></div></div>`;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-spec-modal-title"><div class="modal-head"><div><h2 id="sdd-spec-modal-title">${existing ? 'Editar spec' : 'Añadir spec'}</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><div class="form-grid"><label class="form-label">Título<input id="spec-title" class="field" type="text" value="${escapeHtml(existing?.title || '')}" placeholder="Ej. El usuario debe poder buscar documentos" maxlength="200" autocomplete="off" autofocus /></label><label class="form-label">Estado<select id="spec-status" class="select">${statusOptions}</select></label><label class="form-label">Categoría<input id="spec-category" class="field" type="text" value="${escapeHtml(existing?.category || '')}" placeholder="Ej. Búsqueda, Seguridad, API" maxlength="60" autocomplete="off" /></label><label class="form-label">Descripción<textarea id="spec-description" class="textarea" maxlength="10000" placeholder="Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones…">${escapeHtml(existing?.description || '')}</textarea></label></div></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="spec-save" class="btn btn-primary" type="button">${existing ? 'Guardar cambios' : 'Añadir spec'}</button></div></div></div>`;
   bindModalClose();
   $('#spec-save').addEventListener('click', async () => {
     try {
       const body = {
         title: $('#spec-title').value.trim(),
         status: $('#spec-status').value,
-        priority: $('#spec-priority').value,
         category: $('#spec-category').value.trim(),
         description: $('#spec-description').value
       };
@@ -170,8 +216,10 @@ export function renderSddSpecs() {
   const container = $('#view-sdd-specs');
   if (!container) return;
   const requestId = ++renderRequestId;
-  container.innerHTML = `${sddHeader('specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.')}${sddToolbar('Requisitos', '…', 'sdd-spec-add', '＋ Añadir spec')}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
+  container.innerHTML = `${sddHeader('specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.')}${sddToolbar('Requisitos', '…', 'sdd-spec-add', '＋ Añadir spec', loadedSpecsMarkdown ? `<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Reabrir el markdown cargado en memoria (${escapeHtml(loadedSpecsMarkdown.path)})">Editar markdown</button>` : '')}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
   $('#sdd-spec-add').addEventListener('click', () => openSpecModal());
+  const mdEdit = $('#sdd-md-edit');
+  if (mdEdit) mdEdit.addEventListener('click', openSpecsMarkdownEditor);
   api('/sdd/specs').then(({ specs }) => {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-specs')) return;
     renderSpecList(specs);

@@ -6,13 +6,9 @@ const { now } = require('../database/db');
 
 const ID = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const SPEC_STATUSES = Object.freeze(['draft', 'active', 'approved', 'implemented']);
-const SPEC_PRIORITIES = Object.freeze(['low', 'medium', 'high']);
 const SPEC_STATUS_BY_LABEL = Object.freeze({
   draft: 'draft', borrador: 'draft', active: 'active', activa: 'active',
   approved: 'approved', aprobada: 'approved', implemented: 'implemented', implementada: 'implemented'
-});
-const SPEC_PRIORITY_BY_LABEL = Object.freeze({
-  low: 'low', baja: 'low', medium: 'medium', media: 'medium', high: 'high', alta: 'high'
 });
 const MEDIA_KINDS = Object.freeze(['text', 'image', 'video']);
 const MEDIA_MIME_BY_EXTENSION = Object.freeze({
@@ -45,7 +41,6 @@ function specForResponse(row) {
     title: row.title,
     description: row.description,
     status: row.status,
-    priority: row.priority,
     category: row.category,
     createdAt: row.created_at,
     updatedAt: row.updated_at
@@ -102,7 +97,6 @@ function specInput(body, existing = null) {
     title,
     description: sliceText(body?.description, 10000),
     status: SPEC_STATUSES.includes(body?.status) ? body.status : (existing?.status || 'draft'),
-    priority: SPEC_PRIORITIES.includes(body?.priority) ? body.priority : (existing?.priority || 'medium'),
     category: asText(body?.category).slice(0, 60)
   };
 }
@@ -132,7 +126,7 @@ function parseSddSpecsMarkdown(markdown) {
     if (headingMatch) {
       flush();
       const title = headingMatch[1].trim().replace(/\*\*/g, '').slice(0, 200);
-      if (title) current = { title, description: '', status: 'draft', priority: 'medium', category: '' };
+      if (title) current = { title, description: '', status: 'draft', category: '' };
       continue;
     }
     if (!current) continue;
@@ -143,7 +137,7 @@ function parseSddSpecsMarkdown(markdown) {
       const key = metadataMatch[1].toLowerCase();
       const value = metadataMatch[2].trim().replace(/^\*+\s*|\s*\*+$/g, '').trim();
       if (key === 'estado') current.status = normalizeSpecValue(value, SPEC_STATUS_BY_LABEL, current.status);
-      else if (key === 'prioridad') current.priority = normalizeSpecValue(value, SPEC_PRIORITY_BY_LABEL, current.priority);
+      else if (key === 'prioridad') continue;
       else current.category = value.slice(0, 60);
       continue;
     }
@@ -154,11 +148,10 @@ function parseSddSpecsMarkdown(markdown) {
 }
 
 const SPEC_STATUS_LABELS = Object.freeze({ draft: 'Borrador', active: 'Activa', approved: 'Aprobada', implemented: 'Implementada' });
-const SPEC_PRIORITY_LABELS = Object.freeze({ low: 'Baja', medium: 'Media', high: 'Alta' });
 
 function sddSpecsToMarkdown(specs) {
   const blocks = specs.map((spec) => {
-    const lines = [`## ${spec.title}`, `**Estado:** ${SPEC_STATUS_LABELS[spec.status] || spec.status}`, `**Prioridad:** ${SPEC_PRIORITY_LABELS[spec.priority] || spec.priority}`];
+    const lines = [`## ${spec.title}`, `**Estado:** ${SPEC_STATUS_LABELS[spec.status] || spec.status}`];
     if (spec.category) lines.push(`**Categoría:** ${spec.category}`);
     if (spec.description) lines.push('', spec.description.trim());
     return lines.join('\n');
@@ -217,8 +210,8 @@ function installSddRoutes(app, db, { mediaRoot } = {}) {
       const input = specInput(req.body);
       const id = ID('spec');
       const timestamp = now();
-      db.run('INSERT INTO sdd_specs (id, title, description, status, priority, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-        id, input.title, input.description, input.status, input.priority, input.category, timestamp, timestamp);
+      db.run('INSERT INTO sdd_specs (id, title, description, status, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        id, input.title, input.description, input.status, input.category, timestamp, timestamp);
       res.status(201).json(specForResponse(db.get('SELECT * FROM sdd_specs WHERE id = ?', id)));
     } catch (error) {
       res.status(400).json({ error: error.message });
@@ -230,8 +223,8 @@ function installSddRoutes(app, db, { mediaRoot } = {}) {
     if (!existing) return res.status(404).json({ error: 'Especificación no encontrada' });
     try {
       const input = specInput(req.body, existing);
-      db.run('UPDATE sdd_specs SET title = ?, description = ?, status = ?, priority = ?, category = ?, updated_at = ? WHERE id = ?',
-        input.title, input.description, input.status, input.priority, input.category, now(), existing.id);
+      db.run('UPDATE sdd_specs SET title = ?, description = ?, status = ?, category = ?, updated_at = ? WHERE id = ?',
+        input.title, input.description, input.status, input.category, now(), existing.id);
       res.json(specForResponse(db.get('SELECT * FROM sdd_specs WHERE id = ?', existing.id)));
     } catch (error) {
       res.status(400).json({ error: error.message });
@@ -253,8 +246,8 @@ function installSddRoutes(app, db, { mediaRoot } = {}) {
         const timestamp = now();
         for (const spec of parsed) {
           const id = ID('spec');
-          db.run('INSERT INTO sdd_specs (id, title, description, status, priority, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-            id, spec.title, spec.description, spec.status, spec.priority, spec.category, timestamp, timestamp);
+          db.run('INSERT INTO sdd_specs (id, title, description, status, category, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+            id, spec.title, spec.description, spec.status, spec.category, timestamp, timestamp);
         }
       });
       const rows = db.all('SELECT * FROM sdd_specs ORDER BY updated_at DESC');

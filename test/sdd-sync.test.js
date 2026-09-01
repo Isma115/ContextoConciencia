@@ -35,7 +35,7 @@ async function request(route, options = {}) {
   return { status: response.status, ok: response.ok, body };
 }
 
-test('parsea encabezados de specs.md con estado, prioridad y categoría', () => {
+test('parsea encabezados de specs.md con estado y categoría', () => {
   const specs = parseSddSpecsMarkdown(`# Specs
 
 Introducción del documento, se ignora antes del primer encabezado.
@@ -56,12 +56,11 @@ El usuario puede exportar el diagrama como PNG.
   assert.equal(specs.length, 2);
   assert.equal(specs[0].title, 'El usuario puede buscar documentos');
   assert.equal(specs[0].status, 'active');
-  assert.equal(specs[0].priority, 'high');
+  assert.equal(specs[0].priority, undefined);
   assert.equal(specs[0].category, 'Búsqueda');
   assert.match(specs[0].description, /buscar documentos por título/);
   assert.equal(specs[1].title, 'Exportar diagrama');
   assert.equal(specs[1].status, 'implemented');
-  assert.equal(specs[1].priority, 'low');
   assert.equal(specs[1].category, '');
   assert.match(specs[1].description, /exportar el diagrama como PNG/);
 });
@@ -76,23 +75,22 @@ Solo una descripción.
 `);
   assert.equal(specs.length, 2);
   assert.deepEqual(
-    { status: specs[0].status, priority: specs[0].priority, category: specs[0].category },
-    { status: 'draft', priority: 'medium', category: '' }
+    { status: specs[0].status, category: specs[0].category },
+    { status: 'draft', category: '' }
   );
   assert.equal(specs[1].status, 'draft');
-  assert.equal(specs[1].priority, 'medium');
   assert.equal(specs[1].description, '');
 });
 
 test('genera markdown que vuelve a parsearse sin perder datos', () => {
   const original = [
-    { title: 'Buscar documentos', description: 'Permite buscar por contenido.', status: 'active', priority: 'high', category: 'Búsqueda' },
-    { title: 'Exportar diagramas', description: '', status: 'implemented', priority: 'low', category: '' }
+    { title: 'Buscar documentos', description: 'Permite buscar por contenido.', status: 'active', category: 'Búsqueda' },
+    { title: 'Exportar diagramas', description: '', status: 'implemented', category: '' }
   ];
   const markdown = sddSpecsToMarkdown(original);
   assert.match(markdown, /^# Specs/);
   assert.match(markdown, /\*\*Estado:\*\* Activa/);
-  assert.match(markdown, /\*\*Prioridad:\*\* Baja/);
+  assert.doesNotMatch(markdown, /Prioridad/);
   assert.match(markdown, /\*\*Categoría:\*\* Búsqueda/);
   const reparsed = parseSddSpecsMarkdown(markdown);
   assert.deepEqual(reparsed, original);
@@ -140,10 +138,10 @@ test('reemplaza las specs previas al volver a inyectar', async () => {
   const before = await request('/sdd/specs');
   assert.equal(before.body.specs.length, 3);
 
-  const synced = await request('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: '## Solo esta spec\n**Prioridad:** alta\nNueva descripción.' }) });
+  const synced = await request('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: '## Solo esta spec\n**Estado:** activa\nNueva descripción.' }) });
   assert.equal(synced.body.total, 1);
   assert.equal(synced.body.specs[0].title, 'Solo esta spec');
-  assert.equal(synced.body.specs[0].priority, 'high');
+  assert.equal(synced.body.specs[0].priority, undefined);
 
   const after = await request('/sdd/specs');
   assert.equal(after.body.specs.length, 1);

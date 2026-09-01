@@ -12,7 +12,7 @@ import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/di
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
 import { renderFileExplorer } from './views/file-explorer.js';
-import { renderSddSpecs, renderSddDatabase, renderSddUi, bindSddInject } from './views/sdd.js';
+import { renderSddSpecs, renderSddDatabase, renderSddUi, bindSddInject, bindSddLoad } from './views/sdd.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 import { loadDiagramLineContrast } from './core/diagram-settings.js';
@@ -178,6 +178,7 @@ bindSidebarSearchToggle();
 bindSidebarSearch();
 bindCloseConfirmation();
 bindSddInject();
+bindSddLoad();
 loadPalettePreference();
 loadDiagramLineContrast();
 

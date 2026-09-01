@@ -503,6 +503,7 @@ body.is-code-map-resizing, body.is-code-map-resizing * { cursor: col-resize !imp
 
 /* ------------------------------------------------------------------ S.D.D */
 .sdd-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
+.sdd-toolbar-actions { display: flex; align-items: center; gap: 6px; }
 .sdd-toolbar-copy { min-width: 0; display: grid; gap: 4px; }
 .sdd-toolbar-copy h2 { font-size: 13px; }
 .sdd-count { color: var(--muted-2); font-family: var(--mono); font-size: 9px; }
@@ -526,10 +527,10 @@ body.is-code-map-resizing, body.is-code-map-resizing * { cursor: col-resize !imp
 .sdd-status-active { color: var(--blue); border-color: var(--blue); background: var(--blue-soft); }
 .sdd-status-approved { color: var(--green); border-color: var(--success-border); background: var(--success-surface); }
 .sdd-status-implemented { color: var(--cyan); border-color: var(--accent-border-strong); background: var(--accent-surface); }
-.sdd-priority-high { color: var(--red); border-color: var(--error-border); background: var(--error-surface); }
-.sdd-priority-medium { color: var(--amber); border-color: var(--warning-border); background: var(--warning-surface); }
-.sdd-priority-low { color: var(--muted-2); }
 .sdd-table-card { overflow-x: auto; }
+.sdd-md-modal { width: min(860px, 100%); display: flex; flex-direction: column; max-height: calc(100dvh - 48px); }
+.sdd-md-modal .modal-body { min-height: 0; display: flex; flex: 1; }
+.sdd-md-textarea { flex: 1; min-height: min(60vh, 560px); resize: none; font-family: var(--mono); font-size: 11px; line-height: 1.55; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
 .sdd-table-name { font-family: var(--mono); font-size: 12px; }
 .sdd-table-columns { width: 100%; min-width: 560px; margin-top: 11px; border-collapse: collapse; }
 .sdd-table-columns th { padding: 5px 8px; border-top: 1px solid var(--line); color: var(--muted-2); font-family: var(--mono); font-size: 8px; letter-spacing: .5px; text-align: left; text-transform: uppercase; }

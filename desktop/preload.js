@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('nexusData', {
   selectLocalPaths: (options) => ipcRenderer.invoke('select-local-paths', options),
   selectSddMedia: (kind) => ipcRenderer.invoke('select-sdd-media', kind),
   selectSddSpecsPath: (lastPath) => ipcRenderer.invoke('select-sdd-specs-path', lastPath),
+  loadSddSpecsMarkdown: () => ipcRenderer.invoke('load-sdd-specs-markdown'),
   writeSddSpecsMarkdown: (payload) => ipcRenderer.invoke('write-sdd-specs-markdown', payload),
   getFileSystemRoots: () => ipcRenderer.invoke('get-file-system-roots'),
   listFileSystemDirectory: (directoryPath) => ipcRenderer.invoke('list-file-system-directory', directoryPath),
