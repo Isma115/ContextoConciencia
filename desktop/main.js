@@ -30,6 +30,45 @@ const SDD_MEDIA_MIME_BY_EXTENSION = Object.freeze({
 const closeConfirmationStates = new WeakMap();
 const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
 
+const SDD_SPECS_MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+
+function collectSpecsMarkdownFiles(directoryPath) {
+  const found = [];
+  const stack = [directoryPath];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(entryPath);
+      } else if (entry.isFile() && /\.(md|markdown)$/i.test(entry.name)) {
+        found.push(entryPath);
+      }
+    }
+  }
+  return found.sort((a, b) => (path.basename(a).toLowerCase() === 'specs.md' ? -1 : 0) - (path.basename(b).toLowerCase() === 'specs.md' ? -1 : 0) || a.localeCompare(b));
+}
+
+function readSpecsFolderMarkdown(directoryPath) {
+  const files = collectSpecsMarkdownFiles(directoryPath);
+  let totalBytes = 0;
+  const parts = [];
+  for (const filePath of files) {
+    const stats = fs.statSync(filePath);
+    totalBytes += stats.size;
+    if (totalBytes > SDD_SPECS_MAX_TOTAL_BYTES) throw new Error('Los markdown de specs superan el límite de 10 MB');
+    const content = fs.readFileSync(filePath, 'utf8').trim();
+    if (content) parts.push(`<!-- ${path.relative(directoryPath, filePath)} -->\n\n${content}`);
+  }
+  return parts.join('\n\n');
+}
+
 function searchPreferencesPath() {
   return path.join(app.getPath('userData'), SEARCH_PREFERENCES_FILENAME);
 }
@@ -324,7 +363,7 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('select-sdd-specs-path', async (_event, lastPath = '') => {
     const result = await dialog.showOpenDialog({
-      title: 'Seleccionar ruta de specs.md',
+      title: 'Seleccionar carpeta de specs',
       buttonLabel: 'Inyectar',
       defaultPath: path.normalize(String(lastPath || '')),
       properties: ['openDirectory']
@@ -332,10 +371,8 @@ app.whenReady().then(async () => {
     if (result.canceled || !result.filePaths[0]) return null;
     const directoryPath = path.normalize(result.filePaths[0]);
     if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
-    const specsPath = path.join(directoryPath, 'specs.md');
-    if (fs.existsSync(specsPath)) {
-      return { path: specsPath, content: fs.readFileSync(specsPath, 'utf8'), created: false };
-    }
+    const markdown = readSpecsFolderMarkdown(directoryPath);
+    if (markdown) return { path: directoryPath, content: markdown, created: false };
     const template = `# Specs
 
 ## Título del requisito
@@ -344,31 +381,34 @@ app.whenReady().then(async () => {
 
 Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
 `;
-    fs.writeFileSync(specsPath, template, { encoding: 'utf8', mode: 0o600 });
-    return { path: specsPath, content: template, created: true };
+    fs.writeFileSync(path.join(directoryPath, 'specs.md'), template, { encoding: 'utf8', mode: 0o600 });
+    return { path: directoryPath, content: template, created: true };
   });
 
   ipcMain.handle('load-sdd-specs-markdown', async () => {
     const result = await dialog.showOpenDialog({
-      title: 'Seleccionar markdown de specs',
+      title: 'Seleccionar carpeta de specs',
       buttonLabel: 'Cargar',
-      properties: ['openFile'],
-      filters: [{ name: 'Markdown', extensions: ['md', 'markdown'] }]
+      properties: ['openDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return null;
-    const filePath = path.normalize(result.filePaths[0]);
-    if (!fs.statSync(filePath).isFile()) throw new Error('La ubicación elegida no es un archivo');
-    if (fs.statSync(filePath).size > 2 * 1024 * 1024) throw new Error('El markdown supera el límite de 2 MB');
-    return { path: filePath, content: fs.readFileSync(filePath, 'utf8') };
+    const directoryPath = path.normalize(result.filePaths[0]);
+    if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
+    const markdown = readSpecsFolderMarkdown(directoryPath);
+    if (!markdown) throw new Error('La carpeta no contiene archivos markdown de specs');
+    return { path: directoryPath, content: markdown };
   });
 
   ipcMain.handle('write-sdd-specs-markdown', async (_event, payload = {}) => {
-    const specsPath = path.normalize(String(payload?.path || ''));
-    if (!specsPath || path.basename(specsPath) !== 'specs.md') throw new Error('La ruta de specs.md no es válida');
-    if (typeof payload?.content !== 'string') throw new Error('El contenido de specs.md no es válido');
-    if (!fs.existsSync(specsPath)) throw new Error('specs.md ya no existe en la ruta configurada');
+    const directoryPath = path.normalize(String(payload?.path || ''));
+    if (!directoryPath || !fs.existsSync(directoryPath) || !fs.statSync(directoryPath).isDirectory()) {
+      throw new Error('La carpeta de specs no es válida o ya no existe');
+    }
+    if (typeof payload?.content !== 'string') throw new Error('El contenido de las specs no es válido');
+    const specsPath = path.join(directoryPath, 'specs.md');
+    if (fs.existsSync(specsPath) && !fs.statSync(specsPath).isFile()) throw new Error('specs.md no es un archivo en la carpeta configurada');
     fs.writeFileSync(specsPath, payload.content, { encoding: 'utf8', mode: 0o600 });
-    return { path: specsPath };
+    return { path: directoryPath };
   });
 
   ipcMain.handle('get-file-system-roots', () => fileExplorerService.getRoots());

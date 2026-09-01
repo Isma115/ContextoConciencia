@@ -7,7 +7,7 @@ import { shortDate } from '../core/format.js';
 
 const SPEC_STATUS = Object.freeze({ draft: 'Borrador', active: 'Activa', approved: 'Aprobada', implemented: 'Implementada' });
 const MEDIA_KIND = Object.freeze({ text: 'Texto', image: 'Imagen', video: 'Vídeo' });
-const SPECS_PATH_STORAGE_KEY = 'sdd.specsPath';
+const SPECS_FOLDER_STORAGE_KEY = 'sdd.specsFolderPath';
 let renderRequestId = 0;
 let selectedMedia = { dataUrl: null, name: '' };
 let loadedSpecsMarkdown = null;
@@ -44,19 +44,28 @@ async function confirmDelete(message) {
 
 /* ----------------------------------------------------------------- Inyectar */
 
-function specsPathStored() {
-  try { return localStorage.getItem(SPECS_PATH_STORAGE_KEY) || ''; } catch { return ''; }
+function specsFolderStored() {
+  try {
+    const folder = localStorage.getItem(SPECS_FOLDER_STORAGE_KEY);
+    if (folder) return folder;
+    const legacy = localStorage.getItem('sdd.specsPath');
+    if (legacy) {
+      const parent = legacy.replace(/[\\/]specs\.md$/i, '');
+      return parent && parent !== legacy ? parent : '';
+    }
+    return '';
+  } catch { return ''; }
 }
 
-function storeSpecsPath(specsPath) {
-  try { localStorage.setItem(SPECS_PATH_STORAGE_KEY, specsPath); } catch { /* Sin almacenamiento disponible. */ }
+function storeSpecsFolder(specsFolderPath) {
+  try { localStorage.setItem(SPECS_FOLDER_STORAGE_KEY, specsFolderPath); } catch { /* Sin almacenamiento disponible. */ }
 }
 
 async function persistSpecsMarkdown() {
-  const specsPath = specsPathStored();
-  if (!specsPath || typeof window.nexusData?.writeSddSpecsMarkdown !== 'function') return;
+  const specsFolderPath = specsFolderStored();
+  if (!specsFolderPath || typeof window.nexusData?.writeSddSpecsMarkdown !== 'function') return;
   const { markdown } = await api('/sdd/specs/markdown');
-  await window.nexusData.writeSddSpecsMarkdown({ path: specsPath, content: markdown });
+  await window.nexusData.writeSddSpecsMarkdown({ path: specsFolderPath, content: markdown });
 }
 
 async function persistSpecsMarkdownQuietly() {
@@ -66,24 +75,24 @@ async function persistSpecsMarkdownQuietly() {
 export function bindSddInject() {
   const button = $('#sdd-inject');
   if (!button) return;
-  const storedPath = specsPathStored();
-  if (storedPath) button.title = `Sincronizar specs.md (${storedPath})`;
+  const storedPath = specsFolderStored();
+  if (storedPath) button.title = `Sincronizar carpeta de specs (${storedPath})`;
   button.addEventListener('click', async () => {
     if (button.disabled) return;
     if (typeof window.nexusData?.selectSddSpecsPath !== 'function') {
-      showToast('El selector de ruta no está disponible en esta ventana', true);
+      showToast('El selector de carpetas no está disponible en esta ventana', true);
       return;
     }
     button.disabled = true;
     button.textContent = '…';
     try {
-      const selection = await window.nexusData.selectSddSpecsPath(specsPathStored());
+      const selection = await window.nexusData.selectSddSpecsPath(specsFolderStored());
       if (!selection) return;
       const result = await api('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: selection.content }) });
-      storeSpecsPath(selection.path);
-      button.title = `Sincronizar specs.md (${selection.path})`;
+      storeSpecsFolder(selection.path);
+      button.title = `Sincronizar carpeta de specs (${selection.path})`;
       await persistSpecsMarkdownQuietly();
-      showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} sincronizados desde specs.md${selection.created ? ' (specs.md creado)' : ''}`);
+      showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} sincronizados desde la carpeta de specs${selection.created ? ' (specs.md creado)' : ''}`);
       if (isViewActive('view-sdd-specs')) renderSddSpecs();
     } catch (error) {
       showToast(error.message, true);
@@ -123,7 +132,7 @@ export function bindSddLoad() {
   if (!button) return;
   button.addEventListener('click', async () => {
     if (typeof window.nexusData?.loadSddSpecsMarkdown !== 'function') {
-      showToast('El selector de archivos no está disponible en esta ventana', true);
+      showToast('El selector de carpetas no está disponible en esta ventana', true);
       return;
     }
     button.disabled = true;
