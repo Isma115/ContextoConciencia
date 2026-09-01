@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS documents (
   is_favorite INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL,
+  last_opened_at TEXT,
   UNIQUE(source_id, external_id)
 );
 
@@ -112,6 +113,9 @@ function ensureSchemaCompatibility(database) {
   if (!columns.some((column) => column.name === 'is_favorite')) {
     database.exec('ALTER TABLE documents ADD COLUMN is_favorite INTEGER NOT NULL DEFAULT 0');
   }
+  if (!columns.some((column) => column.name === 'last_opened_at')) {
+    database.exec('ALTER TABLE documents ADD COLUMN last_opened_at TEXT');
+  }
 }
 
 function openDatabase(dbPath) {
@@ -121,6 +125,7 @@ function openDatabase(dbPath) {
   database.exec(SCHEMA);
   ensureSchemaCompatibility(database);
   database.exec('CREATE INDEX IF NOT EXISTS idx_documents_favorite ON documents(is_favorite)');
+  database.exec('CREATE INDEX IF NOT EXISTS idx_documents_last_opened ON documents(last_opened_at DESC)');
 
   const api = {
     raw: database,
@@ -208,7 +213,8 @@ function withDocumentShape(db, row) {
     metadata: parseJson(row.metadata_json),
     tags: documentTags(db, row.id).map((tag) => tag.name),
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    lastOpenedAt: row.last_opened_at || null
   };
 }
 

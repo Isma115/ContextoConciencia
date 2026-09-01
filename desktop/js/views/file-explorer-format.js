@@ -134,8 +134,3 @@ export function breadcrumbSegments(filePath) {
   return segments;
 }
 
-export function selectionSummary(state) {
-  const count = state.selectedPaths.size;
-  if (!count) return 'Sin selección';
-  return `${count} elemento${count === 1 ? '' : 's'} seleccionado${count === 1 ? '' : 's'}`;
-}

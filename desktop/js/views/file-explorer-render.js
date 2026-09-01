@@ -11,7 +11,6 @@ import {
   rootIconTone,
   formatBytes,
   formatModifiedAt,
-  selectionSummary,
   visibleFileExplorerEntries
 } from './file-explorer-format.js';
 
@@ -51,17 +50,6 @@ function breadcrumbsMarkup(state) {
   return `<nav class="file-explorer-breadcrumbs" aria-label="Ruta actual">${crumbs}${state.searchActive ? '<span class="file-explorer-search-badge">Resultados</span>' : ''}</nav>`;
 }
 
-function selectionMarkup(state) {
-  const selectedCount = state.selectedPaths.size;
-  const canManage = Boolean(state.currentPath && selectedCount);
-  const hasSingleSelection = selectedCount === 1;
-  const canPaste = Boolean(state.currentPath && state.clipboard.paths.length && !state.loading);
-  const clipboardLabel = state.clipboard.paths.length
-    ? `${state.clipboard.operation === 'cut' ? 'Cortar' : 'Copiar'} · ${state.clipboard.paths.length}`
-    : '';
-  return `<div class="file-explorer-selectionbar"><span class="file-explorer-selection-summary">${escapeHtml(selectionSummary(state))}${clipboardLabel ? ` <small>(${escapeHtml(clipboardLabel)})</small>` : ''}</span><div class="file-explorer-selection-actions">${actionButton('new-folder', '＋ Carpeta', !state.currentPath || state.loading, 'btn btn-secondary btn-small')}${actionButton('new-file', '＋ Fichero', !state.currentPath || state.loading, 'btn btn-secondary btn-small')}${actionButton('rename', 'Renombrar', !canManage || !hasSingleSelection || state.loading)}${actionButton('copy', 'Copiar', !canManage || state.loading)}${actionButton('cut', 'Cortar', !canManage || state.loading)}${actionButton('paste', 'Pegar', !canPaste, 'btn btn-secondary btn-small')}${actionButton('copy-path', 'Copiar ruta', !canManage || state.loading)}${actionButton('reveal', 'Mostrar', !canManage || state.loading)}${actionButton('delete', 'Eliminar', !canManage || state.loading, 'btn btn-danger btn-small')}</div></div>`;
-}
-
 function rootMarkup(root) {
   const iconTone = rootIconTone(root);
   return `<button type="button" class="file-explorer-root-row" data-file-explorer-action="open-root" data-file-explorer-path="${escapeHtml(root.path)}"><span class="file-explorer-root-icon file-explorer-icon-tone-${iconTone}" aria-hidden="true">${fileExplorerIconMarkup(iconTone)}</span><span class="file-explorer-root-copy"><strong>${escapeHtml(root.label)}</strong><small title="${escapeHtml(root.path)}">${escapeHtml(root.path)}</small></span><span class="file-explorer-entry-arrow" aria-hidden="true">›</span></button>`;
@@ -82,11 +70,11 @@ function entryMarkup(entry, index, state) {
   const details = viewMode === 'details'
     ? `<span class="file-explorer-entry-detail file-explorer-entry-detail-type">${escapeHtml(entryTypeLabel(entry))}</span><span class="file-explorer-entry-detail file-explorer-entry-detail-size">${escapeHtml(formatBytes(entry.size))}</span><span class="file-explorer-entry-detail file-explorer-entry-detail-modified">${escapeHtml(formatModifiedAt(entry.modifiedAt) || '—')}</span>`
     : '';
-  return `<button type="button" class="file-explorer-entry file-explorer-entry-${escapeHtml(entry.kind)}${selected ? ' is-selected' : ''}" data-file-explorer-entry="${escapeHtml(entry.path)}" data-file-explorer-kind="${escapeHtml(entry.kind)}" data-file-explorer-index="${index}" role="option" aria-selected="${selected}" aria-label="${action} ${escapeHtml(entry.name)}"><span class="file-explorer-entry-check" aria-hidden="true">${selected ? '✓' : ''}</span><span class="file-explorer-entry-icon file-explorer-icon-tone-${entryIconTone(entry)}" aria-hidden="true">${entryIcon(entry)}</span><span class="file-explorer-entry-copy"><strong title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</strong><small title="${escapeHtml(entry.relativePath || '')}">${escapeHtml(entrySecondaryText(entry, { search }))}</small></span>${details}<span class="file-explorer-entry-arrow" aria-hidden="true">${entry.kind === 'directory' ? '›' : '↗'}</span></button>`;
+  return `<button type="button" class="file-explorer-entry file-explorer-entry-${escapeHtml(entry.kind)}${selected ? ' is-selected' : ''}" data-file-explorer-entry="${escapeHtml(entry.path)}" data-file-explorer-kind="${escapeHtml(entry.kind)}" data-file-explorer-index="${index}" role="option" aria-selected="${selected}" aria-label="${action} ${escapeHtml(entry.name)}"><span class="file-explorer-entry-icon file-explorer-icon-tone-${entryIconTone(entry)}" aria-hidden="true">${entryIcon(entry)}</span><span class="file-explorer-entry-copy"><strong title="${escapeHtml(entry.name)}">${escapeHtml(entry.name)}</strong><small title="${escapeHtml(entry.relativePath || '')}">${escapeHtml(entrySecondaryText(entry, { search }))}</small></span>${details}<span class="file-explorer-entry-arrow" aria-hidden="true">${entry.kind === 'directory' ? '›' : '↗'}</span></button>`;
 }
 
 function entryDetailsHeader() {
-  return '<div class="file-explorer-entry-details-head" aria-hidden="true"><span></span><span></span><span>Nombre</span><span>Tipo</span><span>Tamaño</span><span class="file-explorer-entry-detail-modified">Modificado</span><span></span></div>';
+  return '<div class="file-explorer-entry-details-head" aria-hidden="true"><span></span><span>Nombre</span><span>Tipo</span><span>Tamaño</span><span class="file-explorer-entry-detail-modified">Modificado</span><span></span></div>';
 }
 
 function directoryMarkup(state) {
@@ -118,5 +106,5 @@ function contextMenuMarkup(state) {
 }
 
 export function renderFileExplorerView(container, state) {
-  container.innerHTML = `<div class="file-explorer-shell">${navigationMarkup(state)}${filterMarkup(state)}${breadcrumbsMarkup(state)}${selectionMarkup(state)}<main class="file-explorer-content">${bodyMarkup(state)}</main>${contextMenuMarkup(state)}</div>`;
+  container.innerHTML = `<div class="file-explorer-shell">${navigationMarkup(state)}${filterMarkup(state)}${breadcrumbsMarkup(state)}<main class="file-explorer-content">${bodyMarkup(state)}</main>${contextMenuMarkup(state)}</div>`;
 }

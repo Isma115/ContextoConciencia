@@ -39,6 +39,9 @@
 .result-card.document-type-css, .doc-row.document-type-css { --document-type-color: #b8a0f2; --document-type-border: #8068b1; --document-type-surface: rgba(184, 160, 242, .14); }
 .result-card.document-type-javascript, .doc-row.document-type-javascript { --document-type-color: #d9d26c; --document-type-border: #a39c4a; --document-type-surface: rgba(217, 210, 108, .14); }
 .result-card.document-type-rest, .doc-row.document-type-rest { --document-type-color: #8dcc9f; --document-type-border: #57906a; --document-type-surface: rgba(141, 204, 159, .14); }
+.result-card.document-type-image, .doc-row.document-type-image { --document-type-color: #79dfe8; --document-type-border: #469ba3; --document-type-surface: rgba(121, 223, 232, .14); }
+.result-card.document-type-gif, .doc-row.document-type-gif { --document-type-color: #f0a35e; --document-type-border: #a86a34; --document-type-surface: rgba(240, 163, 94, .14); }
+.result-card.document-type-video, .doc-row.document-type-video { --document-type-color: #e08fe8; --document-type-border: #9d5aa3; --document-type-surface: rgba(224, 143, 232, .14); }
 .result-card.document-type-generic, .doc-row.document-type-generic { --document-type-color: #aeb8c3; --document-type-border: #697888; --document-type-surface: rgba(174, 184, 195, .13); }
 .result-head { display: flex; align-items: start; gap: 10px; }
 .result-head .doc-icon { flex: 0 0 29px; }

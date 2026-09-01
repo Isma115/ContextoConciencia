@@ -4,7 +4,7 @@ import { persistSearchPreferences, state, resetFilters } from '../core/state.js'
 import { documentTypeClass, shortDate, sourceIcon, statusLabel, typeLabel } from '../core/format.js';
 import { bindModalClose, closeModal } from '../ui/modals.js';
 import { showToast } from '../ui/notifications.js';
-import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, copyPathButtonMarkup, favoriteButtonMarkup } from './documents.js';
+import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, bindRevealActions, copyPathButtonMarkup, favoriteButtonMarkup, mediaSnippetLabel, revealButtonMarkup } from './documents.js';
 import { openSourceModal } from './source-modal.js';
 import { deleteSource, syncSource } from './sources.js';
 
@@ -59,7 +59,7 @@ function collectionOptions(selected = '') {
 }
 
 function typeOptions(selected = '') {
-  return `<option value="">Tipo</option><option value="any" ${selected === 'any' ? 'selected' : ''}>Cualquier tipo de fichero</option><option value="markdown" ${selected === 'markdown' ? 'selected' : ''}>Markdown</option><option value="json" ${selected === 'json' ? 'selected' : ''}>JSON</option><option value="csv" ${selected === 'csv' ? 'selected' : ''}>CSV</option><option value="text" ${selected === 'text' ? 'selected' : ''}>TXT</option><option value="diagram" ${selected === 'diagram' ? 'selected' : ''}>Diagrama NexusData</option><option value="html" ${selected === 'html' ? 'selected' : ''}>HTML</option><option value="css" ${selected === 'css' ? 'selected' : ''}>CSS</option><option value="javascript" ${selected === 'javascript' ? 'selected' : ''}>JavaScript</option>`;
+  return `<option value="">Tipo</option><option value="any" ${selected === 'any' ? 'selected' : ''}>Cualquier tipo de fichero</option><option value="markdown" ${selected === 'markdown' ? 'selected' : ''}>Markdown</option><option value="json" ${selected === 'json' ? 'selected' : ''}>JSON</option><option value="csv" ${selected === 'csv' ? 'selected' : ''}>CSV</option><option value="text" ${selected === 'text' ? 'selected' : ''}>TXT</option><option value="diagram" ${selected === 'diagram' ? 'selected' : ''}>Diagrama NexusData</option><option value="html" ${selected === 'html' ? 'selected' : ''}>HTML</option><option value="css" ${selected === 'css' ? 'selected' : ''}>CSS</option><option value="javascript" ${selected === 'javascript' ? 'selected' : ''}>JavaScript</option><option value="image" ${selected === 'image' ? 'selected' : ''}>Imagen</option><option value="gif" ${selected === 'gif' ? 'selected' : ''}>GIF</option><option value="video" ${selected === 'video' ? 'selected' : ''}>Vídeo</option>`;
 }
 
 function commonPathsMarkup(prefix = '') {
@@ -124,6 +124,8 @@ function filterMarkup(prefix = '', filters = state.filters) {
 }
 
 function snippetMarkup(doc) {
+  const mediaLabel = mediaSnippetLabel(doc);
+  if (mediaLabel) return escapeHtml(mediaLabel);
   if (doc.metadata?.contentDeferred) return escapeHtml('Contenido disponible al abrir');
   const text = String(doc.snippet || doc.content?.slice(0, 220) || '');
   const [start, end] = Array.isArray(doc.highlight) ? doc.highlight : [];
@@ -139,7 +141,7 @@ function resultMarkup(results, prefix = '') {
     <article class="result-card document-hit document-type-${documentTypeClass(doc.type)}" data-view-document="${escapeHtml(doc.id)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(doc.title)}">
       <div class="result-head"><div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div><div class="result-title-wrap"><h3 class="result-title">${escapeHtml(doc.title)}</h3><div class="result-source">${escapeHtml(doc.source)}</div></div><span class="score">${Math.round((doc.score || 0) * 100)}%</span></div>
       <div class="snippet">${snippetMarkup(doc)}</div>
-      <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}<button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
+      <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}${revealButtonMarkup(doc)}<button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
     </article>`).join('');
 }
 
@@ -211,6 +213,7 @@ export function renderSearch(results = null, { restoreFocus = false, selectionSt
   const surface = $('#view-search');
   bindCollectionAndTagActions(surface);
   bindCopyPathActions(surface);
+  bindRevealActions(surface);
   bindDocumentFavoriteActions(surface);
   bindDocumentOpeners(surface);
   if (restoreFocus) restoreSearchFocus($('#search-input'), selectionStart, selectionEnd);
@@ -345,6 +348,7 @@ function renderGlobalSearchSurface(results = null) {
   surface.innerHTML = `<div class="panel search-results-panel global-documents-panel"><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
   bindCollectionAndTagActions(surface, 'global');
   bindCopyPathActions(surface);
+  bindRevealActions(surface);
   bindDocumentFavoriteActions(surface);
   bindDocumentOpeners(surface);
 }

@@ -2,7 +2,7 @@ import { $, escapeHtml } from '../core/dom.js';
 import { api } from '../core/api.js';
 import { documentTypeClass, shortDate, typeLabel } from '../core/format.js';
 import { sectionIconMarkup } from '../core/section-icons.js';
-import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, copyPathButtonMarkup, favoriteButtonMarkup } from './documents.js';
+import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, copyPathButtonMarkup, favoriteButtonMarkup, mediaSnippetLabel } from './documents.js';
 
 let collectionRequestId = 0;
 let favoriteSearchTerm = '';
@@ -10,12 +10,12 @@ let favoriteSearchTerm = '';
 const COLLECTIONS = Object.freeze({
   recent: {
     viewId: 'view-recent-documents',
-    endpoint: '/documents/recent',
+    endpoint: '/documents/recent?limit=15',
     title: 'Documentos recientes',
     showHeading: false,
     panelTitle: 'Últimos documentos',
     emptyTitle: 'Aún no hay documentos recientes',
-    emptyDescription: 'Los documentos sincronizados o editados aparecerán aquí.'
+    emptyDescription: 'Los documentos que abras o edites aparecerán aquí.'
   },
   favorites: {
     viewId: 'view-favorites',
@@ -40,14 +40,14 @@ function documentCard(doc) {
   const title = doc.title || 'Sin título';
   const source = doc.source || 'Fuente desconocida';
   const path = doc.path || 'Sin ruta';
-  const content = doc.metadata?.contentDeferred ? 'Contenido disponible al abrir' : compactContent(doc.content);
+  const content = mediaSnippetLabel(doc) || (doc.metadata?.contentDeferred ? 'Contenido disponible al abrir' : compactContent(doc.content));
   const tags = (doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('');
   const searchText = [title, source, path, content, typeLabel(doc.type), ...(doc.tags || [])].join(' ');
   return `<article class="result-card document-hit document-collection-card document-type-${documentTypeClass(doc.type)}" data-view-document="${escapeHtml(doc.id)}" data-document-search="${escapeHtml(searchText)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(title)}">
     <div class="result-head">
       <div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div>
       <div class="result-title-wrap"><h3 class="result-title">${escapeHtml(title)}</h3><div class="result-source" title="${escapeHtml(path)}">${escapeHtml(source)} · ${escapeHtml(path)}</div></div>
-      <span class="document-collection-date">${escapeHtml(shortDate(doc.updatedAt))}</span>
+      <span class="document-collection-date">${escapeHtml(shortDate(doc.lastOpenedAt || doc.updatedAt))}</span>
     </div>
     <div class="snippet">${escapeHtml(content || 'Documento vacío')}</div>
     <div class="result-foot"><div class="document-collection-tags">${tags}</div><div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}</div></div>

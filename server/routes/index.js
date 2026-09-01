@@ -2,7 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { now, parseJson, sourceForResponse, withDocumentShape, documentSelect } = require('../database/db');
-const { importLocalSource, readFileDocument } = require('../importers/local');
+const { importLocalSource, readFileDocument, mediaForPath, mediaByteLimit } = require('../importers/local');
 const { syncRestSource, testRestSource } = require('../services/rest');
 const { inspectHtmlProject } = require('../services/html-viewer');
 const { createHtmlPreview, getHtmlPreview } = require('../services/html-viewer-preview');
@@ -642,6 +642,51 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
     }
   });
 
+  app.get('/api/documents/:id/file', (req, res) => {
+    const where = isOffline(req) ? " AND s.type = 'local'" : '';
+    const row = db.get(`${documentSelect()} WHERE d.id = ?${where}`, req.params.id);
+    if (!row) return res.status(404).json({ error: 'Documento no encontrado' });
+    const filePath = path.resolve(row.external_id || row.path || '');
+    const media = mediaForPath(filePath);
+    if (row.source_type !== 'local' || !media) return res.status(404).json({ error: 'Archivo multimedia no encontrado' });
+    let stats;
+    try {
+      stats = fs.statSync(filePath);
+    } catch {
+      return res.status(404).json({ error: 'El archivo ya no existe en su ubicación original' });
+    }
+    if (!stats.isFile() || !documentPathBelongsToSource({ ...row, external_id: filePath, path: filePath })) {
+      return res.status(404).json({ error: 'Archivo multimedia no encontrado' });
+    }
+    if (stats.size > mediaByteLimit(media)) {
+      return res.status(413).json({ error: 'El archivo supera el tamaño máximo compatible' });
+    }
+    res.set('Content-Type', media.mime);
+    res.set('Accept-Ranges', 'bytes');
+    res.set('Cache-Control', 'private, max-age=3600');
+    const range = /^bytes=(\d*)-(\d*)$/.exec(String(req.headers.range || '').trim());
+    try {
+      if (range && (range[1] || range[2])) {
+        let start = range[1] ? Number(range[1]) : 0;
+        let end = range[2] ? Number(range[2]) : stats.size - 1;
+        if (!range[1]) { start = Math.max(stats.size - Number(range[2]), 0); end = stats.size - 1; }
+        end = Math.min(end, stats.size - 1);
+        if (Number.isNaN(start) || Number.isNaN(end) || start > end || start >= stats.size) {
+          return res.status(416).set('Content-Range', `bytes */${stats.size}`).end();
+        }
+        res.status(206);
+        res.set('Content-Range', `bytes ${start}-${end}/${stats.size}`);
+        res.set('Content-Length', String(end - start + 1));
+        return fs.createReadStream(filePath, { start, end }).pipe(res);
+      }
+      res.set('Content-Length', String(stats.size));
+      return fs.createReadStream(filePath).pipe(res);
+    } catch (error) {
+      if (!res.headersSent) return res.status(500).json({ error: 'No se pudo leer el archivo' });
+      res.destroy();
+    }
+  });
+
   app.put('/api/documents/:id', (req, res) => {
     const where = isOffline(req) ? " AND s.type = 'local'" : '';
     const existing = db.get(`SELECT d.id, d.title, d.metadata_json FROM documents d JOIN sources s ON s.id = d.source_id WHERE d.id = ?${where}`, req.params.id);
@@ -652,6 +697,15 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
     if (content === null || content.length > 1500000) return res.status(400).json({ error: 'El contenido debe ser texto y no superar 1,5 MB' });
     const metadata = { ...parseJson(existing.metadata_json), contentDeferred: false, contentLoaded: true };
     db.run('UPDATE documents SET title = ?, content = ?, metadata_json = ?, updated_at = ? WHERE id = ?', title, content, JSON.stringify(metadata), now(), existing.id);
+    const updated = db.get(`${documentSelect()} WHERE d.id = ?${where}`, existing.id);
+    res.json(withDocumentShape(db, updated));
+  });
+
+  app.post('/api/documents/:id/open', (req, res) => {
+    const where = isOffline(req) ? " AND s.type = 'local'" : '';
+    const existing = db.get(`SELECT d.id FROM documents d JOIN sources s ON s.id = d.source_id WHERE d.id = ?${where}`, req.params.id);
+    if (!existing) return res.status(404).json({ error: 'Documento no encontrado' });
+    db.run('UPDATE documents SET last_opened_at = ? WHERE id = ?', now(), existing.id);
     const updated = db.get(`${documentSelect()} WHERE d.id = ?${where}`, existing.id);
     res.json(withDocumentShape(db, updated));
   });

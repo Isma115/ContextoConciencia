@@ -9,6 +9,10 @@ export function configureApi({ onUnauthorized } = {}) {
   unauthorizedHandler = onUnauthorized || null;
 }
 
+export function apiUrl(path) {
+  return `${API}${path}`;
+}
+
 export async function api(path, options = {}) {
   const response = await fetch(`${API}${path}`, {
     credentials: 'include',

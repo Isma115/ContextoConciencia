@@ -8,6 +8,8 @@ import { renderFileExplorerView } from './file-explorer-render.js';
 
 const explorerState = createFileExplorerState();
 let boundContainer = null;
+const DOUBLE_CLICK_MS = 400;
+let lastEntryClick = { path: '', time: 0 };
 
 function redraw() {
   if (boundContainer) renderFileExplorerView(boundContainer, explorerState);
@@ -467,13 +469,21 @@ function bindFileExplorerEvents(container) {
       return;
     }
     const entry = event.target.closest?.('[data-file-explorer-entry]');
-    if (entry && container.contains(entry) && !explorerState.loading) selectEntry(entry, event);
+    if (entry && container.contains(entry) && !explorerState.loading) {
+      const filePath = entry.dataset.fileExplorerEntry || '';
+      const now = Date.now();
+      const isDoubleClick = filePath
+        && filePath === lastEntryClick.path
+        && now - lastEntryClick.time < DOUBLE_CLICK_MS
+        && !event.shiftKey && !event.ctrlKey && !event.metaKey;
+      lastEntryClick = { path: filePath, time: now };
+      selectEntry(entry, event);
+      if (isDoubleClick) {
+        lastEntryClick = { path: '', time: 0 };
+        openEntry(entryForPath(filePath));
+      }
+    }
     if (explorerState.contextMenu) redraw();
-  });
-  container.addEventListener('dblclick', (event) => {
-    const entryElement = event.target.closest?.('[data-file-explorer-entry]');
-    if (!entryElement || explorerState.loading) return;
-    openEntry(entryForPath(entryElement.dataset.fileExplorerEntry));
   });
   container.addEventListener('contextmenu', (event) => {
     const entryElement = event.target.closest?.('[data-file-explorer-entry]');

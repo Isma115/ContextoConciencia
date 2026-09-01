@@ -38,13 +38,15 @@ function documentRows(db, query = {}, { localOnly = false, includeCommonPaths = 
   const limit = Math.min(Math.max(Number(query.limit) || 200, 1), 500);
   const order = query.sort === 'recent'
     ? 'd.updated_at DESC, d.created_at DESC, d.id ASC'
-    : 'LOWER(COALESCE(d.path, d.title)) ASC, LOWER(d.title) ASC, d.id ASC';
+    : query.sort === 'opened'
+      ? '(d.last_opened_at IS NULL) ASC, COALESCE(d.last_opened_at, d.updated_at) DESC, d.updated_at DESC, d.id ASC'
+      : 'LOWER(COALESCE(d.path, d.title)) ASC, LOWER(d.title) ASC, d.id ASC';
   const rows = db.all(`${documentSelect()}${where} ORDER BY ${order} LIMIT ${limit}`, ...params);
   return rows.map((row) => withDocumentShape(db, row));
 }
 
 function recentDocuments(db, query = {}, options = {}) {
-  return documentRows(db, { ...query, sort: 'recent' }, options);
+  return documentRows(db, { ...query, sort: 'opened' }, options);
 }
 
 function favoriteDocuments(db, query = {}, options = {}) {
