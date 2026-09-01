@@ -31,6 +31,12 @@ const closeConfirmationStates = new WeakMap();
 const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
 
 const SDD_SPECS_MAX_TOTAL_BYTES = 10 * 1024 * 1024;
+const SDD_SPECS_RESOURCES_DIR = 'specs_resources';
+const SDD_SPECS_RESOURCES_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+const SDD_SPECS_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+const SDD_SPECS_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+
+const SDD_SPECS_SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'out', 'coverage']);
 
 function collectSpecsMarkdownFiles(directoryPath) {
   const found = [];
@@ -46,6 +52,7 @@ function collectSpecsMarkdownFiles(directoryPath) {
     for (const entry of entries) {
       const entryPath = path.join(current, entry.name);
       if (entry.isDirectory()) {
+        if (entry.name.startsWith('.') || SDD_SPECS_SKIP_DIRECTORIES.has(entry.name)) continue;
         stack.push(entryPath);
       } else if (entry.isFile() && /\.(md|markdown)$/i.test(entry.name)) {
         found.push(entryPath);
@@ -67,6 +74,64 @@ function readSpecsFolderMarkdown(directoryPath) {
     if (content) parts.push(`<!-- ${path.relative(directoryPath, filePath)} -->\n\n${content}`);
   }
   return parts.join('\n\n');
+}
+
+function collectSpecsResourceFiles(directoryPath) {
+  const resourcesDirectory = path.join(directoryPath, SDD_SPECS_RESOURCES_DIR);
+  if (!fs.existsSync(resourcesDirectory) || !fs.statSync(resourcesDirectory).isDirectory()) return [];
+  const found = [];
+  const stack = [resourcesDirectory];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name.startsWith('.') || SDD_SPECS_SKIP_DIRECTORIES.has(entry.name)) continue;
+        stack.push(entryPath);
+      } else if (entry.isFile() && SDD_MEDIA_MIME_BY_EXTENSION[path.extname(entry.name).toLowerCase().replace('.', '')]) {
+        found.push(entryPath);
+      }
+    }
+  }
+  return found.sort((a, b) => a.localeCompare(b));
+}
+
+function readSpecsFolderResources(directoryPath) {
+  let totalBytes = 0;
+  return collectSpecsResourceFiles(directoryPath).map((filePath) => {
+    const stats = fs.statSync(filePath);
+    const extension = path.extname(filePath).toLowerCase().replace('.', '');
+    const type = SDD_MEDIA_MIME_BY_EXTENSION[extension];
+    const kind = type.startsWith('video/') ? 'video' : 'image';
+    const maxBytes = kind === 'video' ? SDD_SPECS_VIDEO_MAX_BYTES : SDD_SPECS_IMAGE_MAX_BYTES;
+    if (stats.size > maxBytes) {
+      throw new Error(`El recurso “${path.basename(filePath)}” supera el límite de ${kind === 'video' ? '100 MB' : '20 MB'}`);
+    }
+    totalBytes += stats.size;
+    if (totalBytes > SDD_SPECS_RESOURCES_MAX_TOTAL_BYTES) throw new Error('Los recursos de specs superan el límite de 200 MB');
+    const buffer = fs.readFileSync(filePath);
+    return {
+      name: path.basename(filePath),
+      path: filePath,
+      kind,
+      type,
+      size: stats.size,
+      modifiedAt: stats.mtime.toISOString(),
+      dataUrl: `data:${type};base64,${buffer.toString('base64')}`
+    };
+  });
+}
+
+function ensureSpecsResourcesDirectory(directoryPath) {
+  const resourcesDirectory = path.join(directoryPath, SDD_SPECS_RESOURCES_DIR);
+  if (!fs.existsSync(resourcesDirectory)) fs.mkdirSync(resourcesDirectory, { recursive: true });
+  return resourcesDirectory;
 }
 
 function searchPreferencesPath() {
@@ -371,6 +436,7 @@ app.whenReady().then(async () => {
     if (result.canceled || !result.filePaths[0]) return null;
     const directoryPath = path.normalize(result.filePaths[0]);
     if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
+    ensureSpecsResourcesDirectory(directoryPath);
     const markdown = readSpecsFolderMarkdown(directoryPath);
     if (markdown) return { path: directoryPath, content: markdown, created: false };
     const template = `# Specs
@@ -396,7 +462,15 @@ Describe el requisito: contexto, criterios de aceptación, condiciones y excepci
     if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
     const markdown = readSpecsFolderMarkdown(directoryPath);
     if (!markdown) throw new Error('La carpeta no contiene archivos markdown de specs');
-    return { path: directoryPath, content: markdown };
+    return { path: directoryPath, content: markdown, resources: readSpecsFolderResources(directoryPath) };
+  });
+
+  ipcMain.handle('read-sdd-specs-resources', (_event, folderPath = '') => {
+    const directoryPath = path.normalize(String(folderPath || ''));
+    if (!directoryPath || !fs.existsSync(directoryPath) || !fs.statSync(directoryPath).isDirectory()) {
+      throw new Error('La carpeta de specs no es válida o ya no existe');
+    }
+    return { path: directoryPath, resources: readSpecsFolderResources(directoryPath) };
   });
 
   ipcMain.handle('write-sdd-specs-markdown', async (_event, payload = {}) => {

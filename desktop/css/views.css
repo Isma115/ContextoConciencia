@@ -553,3 +553,4 @@ body.is-code-map-resizing, body.is-code-map-resizing * { cursor: col-resize !imp
 .sdd-media-picker { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .sdd-media-preview { margin-top: 9px; }
 .sdd-media-preview img, .sdd-media-preview video { display: block; width: 100%; max-width: 360px; max-height: 260px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-deep); }
+.sdd-resource-folder { margin: 0 0 9px; overflow-wrap: anywhere; }

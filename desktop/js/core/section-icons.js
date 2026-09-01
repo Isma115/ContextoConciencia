@@ -11,6 +11,7 @@ const SECTION_ICONS = Object.freeze({
   specs: '<rect x="6" y="5" width="16" height="22" rx="1.5"></rect><path d="M9.5 9h9M9.5 13h9M9.5 17h6"></path><path d="M22 8.5 22 5l6 6-6 6V13.5"></path>',
   database: '<ellipse cx="16" cy="8" rx="9" ry="4.5"></ellipse><path d="M7 8v10c0 2.5 4 4.5 9 4.5s9-2 9-4.5V8"></path><path d="M7 12.5c0 2.5 4 4.5 9 4.5s9-2 9-4.5"></path>',
   ui: '<rect x="4" y="6" width="24" height="18" rx="2"></rect><path d="M4 10h24"></path><circle cx="7.5" cy="8" r="1"></circle><circle cx="11" cy="8" r="1"></circle><path d="M8 14h8M8 18h12"></path><path d="M19 13.5h4v5h-4z"></path>',
+  resources: '<rect x="8.5" y="11" width="15.5" height="13.5" rx="1.5"></rect><path d="M12.5 8.5h11A3 3 0 0 1 26.5 11.5v10"></path><circle cx="13.5" cy="15.5" r="1.6"></circle><path d="m10 22 4-4 3 2.5 3.5-3.5 3.5 4"></path>',
   default: '<path d="M16 4v24M4 16h24"></path><circle cx="16" cy="16" r="9"></circle>'
 });
 

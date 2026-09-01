@@ -8,9 +8,12 @@ import { shortDate } from '../core/format.js';
 const SPEC_STATUS = Object.freeze({ draft: 'Borrador', active: 'Activa', approved: 'Aprobada', implemented: 'Implementada' });
 const MEDIA_KIND = Object.freeze({ text: 'Texto', image: 'Imagen', video: 'Vídeo' });
 const SPECS_FOLDER_STORAGE_KEY = 'sdd.specsFolderPath';
+const SPECS_RESOURCES_FOLDER_NAME = 'specs_resources';
 let renderRequestId = 0;
 let selectedMedia = { dataUrl: null, name: '' };
 let loadedSpecsMarkdown = null;
+let loadedSpecsResources = null;
+let loadedSpecsResourcesFolder = '';
 
 function isViewActive(viewId) {
   const node = document.getElementById(viewId);
@@ -94,6 +97,7 @@ export function bindSddInject() {
       await persistSpecsMarkdownQuietly();
       showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} sincronizados desde la carpeta de specs${selection.created ? ' (specs.md creado)' : ''}`);
       if (isViewActive('view-sdd-specs')) renderSddSpecs();
+      if (isViewActive('view-sdd-resources')) renderSddResources();
     } catch (error) {
       showToast(error.message, true);
     } finally {
@@ -141,7 +145,10 @@ export function bindSddLoad() {
       const selection = await window.nexusData.loadSddSpecsMarkdown();
       if (!selection) return;
       loadedSpecsMarkdown = selection;
+      loadedSpecsResources = Array.isArray(selection.resources) ? selection.resources : [];
+      loadedSpecsResourcesFolder = selection.path;
       openSpecsMarkdownEditor();
+      if (isViewActive('view-sdd-resources')) renderSddResources();
     } catch (error) {
       showToast(error.message, true);
     } finally {
@@ -499,4 +506,96 @@ export function renderSddUi() {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-ui')) return;
     $('#sdd-ui-list').innerHTML = emptyState('No se pudo cargar', error.message);
   });
+}
+
+/* ---------------------------------------------------------------- Recursos */
+
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value < 1024) return `${value} B`;
+  const units = ['KB', 'MB', 'GB'];
+  let size = value / 1024;
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return `${size >= 10 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
+}
+
+function resourceCard(resource) {
+  const frame = resource.kind === 'video'
+    ? `<video src="${escapeHtml(resource.dataUrl)}" controls preload="metadata"></video>`
+    : `<img src="${escapeHtml(resource.dataUrl)}" alt="${escapeHtml(resource.name)}" loading="lazy" />`;
+  return `<article class="sdd-media-card">
+    <div class="sdd-media-frame">${frame}</div>
+    <div class="sdd-media-copy">
+      <h3 class="sdd-card-title">${escapeHtml(resource.name)}</h3>
+      <div class="sdd-media-meta">${mediaBadge(resource.kind)}<span>${escapeHtml(formatBytes(resource.size))}</span><span>${escapeHtml(shortDate(resource.modifiedAt))}</span></div>
+    </div>
+    <div class="sdd-card-actions sdd-media-actions">
+      <button class="btn btn-secondary btn-small" type="button" data-reveal-resource="${escapeHtml(resource.path)}" title="Mostrar “${escapeHtml(resource.name)}” en el explorador del sistema">Mostrar</button>
+    </div>
+  </article>`;
+}
+
+function renderResourceList(resources) {
+  const count = $('#sdd-resource-count');
+  if (count) count.textContent = `${resources.length} ${resources.length === 1 ? 'recurso' : 'recursos'}`;
+  const list = $('#sdd-resource-list');
+  if (!list) return;
+  list.innerHTML = resources.length
+    ? resources.map(resourceCard).join('')
+    : emptyState('Sin recursos multimedia', `Coloca imágenes o vídeos en la carpeta “${SPECS_RESOURCES_FOLDER_NAME}”.`);
+  list.querySelectorAll('[data-reveal-resource]').forEach((button) => button.addEventListener('click', () => {
+    const reveal = window.nexusData?.revealFile;
+    if (typeof reveal !== 'function') {
+      showToast('Mostrar en el explorador no está disponible en esta ventana', true);
+      return;
+    }
+    reveal(button.dataset.revealResource).catch((error) => showToast(error.message, true));
+  }));
+}
+
+function specsResourcesFolder() {
+  return loadedSpecsResources !== null ? loadedSpecsResourcesFolder : specsFolderStored();
+}
+
+async function readSpecsResources(force) {
+  const folder = specsResourcesFolder();
+  if (!folder) return null;
+  if (loadedSpecsResources !== null && !force) return { folder, resources: loadedSpecsResources };
+  if (typeof window.nexusData?.readSddSpecsResources !== 'function') {
+    throw new Error('El acceso a la carpeta de recursos no está disponible en esta ventana');
+  }
+  const result = await window.nexusData.readSddSpecsResources(folder);
+  if (loadedSpecsResources !== null) loadedSpecsResources = result.resources;
+  return { folder: result.path, resources: result.resources };
+}
+
+export function renderSddResources() {
+  const container = $('#view-sdd-resources');
+  if (!container) return;
+  container.innerHTML = `${sddHeader('resources', 'S.D.D · RECURSOS', 'Recursos', `Imágenes y vídeos de la carpeta “${SPECS_RESOURCES_FOLDER_NAME}”.`)}<div class="sdd-toolbar"><div class="sdd-toolbar-copy"><h2>Recursos multimedia</h2><span id="sdd-resource-count" class="sdd-count">…</span></div><div class="sdd-toolbar-actions"><button id="sdd-resource-refresh" class="btn btn-secondary" type="button" title="Volver a leer la carpeta de recursos">Actualizar</button></div></div><div class="sdd-card-meta sdd-resource-folder" id="sdd-resource-folder"></div><div class="sdd-media-grid" id="sdd-resource-list"><div class="empty">Cargando recursos…</div></div>`;
+  const showResources = (data, id) => {
+    if (id !== renderRequestId || !isViewActive('view-sdd-resources')) return;
+    const folderNode = $('#sdd-resource-folder');
+    if (folderNode) folderNode.textContent = data?.folder ? `Carpeta: ${data.folder}/${SPECS_RESOURCES_FOLDER_NAME}` : '';
+    if (!data) {
+      const count = $('#sdd-resource-count');
+      if (count) count.textContent = '…';
+      $('#sdd-resource-list').innerHTML = emptyState('Sin carpeta de specs', 'Usa “Inyectar” o “Cargar” para elegir la carpeta de specs.');
+      return;
+    }
+    renderResourceList(data.resources);
+  };
+  const load = (force) => {
+    const id = ++renderRequestId;
+    $('#sdd-resource-list').innerHTML = '<div class="empty">Cargando recursos…</div>';
+    readSpecsResources(force).then((data) => showResources(data, id)).catch((error) => {
+      if (id !== renderRequestId || !isViewActive('view-sdd-resources')) return;
+      const count = $('#sdd-resource-count');
+      if (count) count.textContent = '…';
+      $('#sdd-resource-list').innerHTML = emptyState('No se pudieron cargar', error.message);
+    });
+  };
+  $('#sdd-resource-refresh').addEventListener('click', () => load(true));
+  load(false);
 }
