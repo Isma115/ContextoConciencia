@@ -34,6 +34,17 @@
             <button class="nav-item" data-view="sources"><span class="nav-icon">◈</span>Fuentes</button>
             <button class="nav-item" data-view="file-explorer"><span class="nav-icon">▤</span>Explorador de ficheros</button>
           </nav>
+          <div class="sidebar-section" aria-label="Sección S.D.D">
+            <div class="sidebar-label-row">
+              <div class="sidebar-label">S.D.D</div>
+              <button id="sdd-inject" class="sidebar-inject-button" type="button" title="Sincronizar specs.md">Inyectar</button>
+            </div>
+            <nav class="main-nav" aria-label="Navegación S.D.D">
+              <button class="nav-item nav-item-sub" data-view="sdd-specs"><span class="nav-icon">≡</span>Specs</button>
+              <button class="nav-item nav-item-sub" data-view="sdd-database"><span class="nav-icon">▦</span>Base de datos</button>
+              <button class="nav-item nav-item-sub" data-view="sdd-ui"><span class="nav-icon">◧</span>UI</button>
+            </nav>
+          </div>
         </div>
       </aside>
 
@@ -48,6 +59,9 @@
         <section id="view-code-map" class="view"></section>
         <section id="view-sources" class="view"></section>
         <section id="view-file-explorer" class="view"></section>
+        <section id="view-sdd-specs" class="view"></section>
+        <section id="view-sdd-database" class="view"></section>
+        <section id="view-sdd-ui" class="view"></section>
       </main>
     </div>
 

@@ -13,6 +13,7 @@ const { createWorkspaceSnapshot, importWorkspaceSnapshot } = require('../service
 const { createSearchWorker } = require('../services/search/runner');
 const { Worker } = require('node:worker_threads');
 const { installAuthRoutes, requireAuth } = require('../auth');
+const { installSddRoutes } = require('./sdd');
 
 const ID = (prefix) => `${prefix}_${crypto.randomUUID()}`;
 const CODE_MAP_JOBS = new Map();
@@ -308,6 +309,7 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
   app.get('/api/health', (req, res) => res.json({ ok: true, name: 'NexusData API', timestamp: now() }));
   installAuthRoutes(app, authDb, environment, { offlineOnly });
   app.use('/api', requireAuth(authDb, environment, { offlineOnly }));
+  installSddRoutes(app, db, { mediaRoot: path.join(path.dirname(db.path), 'sdd-media') });
 
   app.post('/api/html-viewer/inspect', (req, res) => {
     try {

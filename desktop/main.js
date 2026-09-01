@@ -16,6 +16,17 @@ const DIAGRAM_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DESKTOP_PORT = Number(process.env.PORT) || 3000;
 const OFFLINE_ONLY = true;
+const SDD_MEDIA_MIME_BY_EXTENSION = Object.freeze({
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  svg: 'image/svg+xml',
+  mp4: 'video/mp4',
+  webm: 'video/webm',
+  ogv: 'video/ogg'
+});
 const closeConfirmationStates = new WeakMap();
 const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
 
@@ -286,6 +297,65 @@ app.whenReady().then(async () => {
       filters: directory ? undefined : [{ name: 'Documentos compatibles', extensions: ['json', 'csv', 'txt', 'md', 'markdown', 'html', 'htm'] }]
     });
     return result.canceled ? [] : result.filePaths;
+  });
+
+  ipcMain.handle('select-sdd-media', async (_event, kind = 'image') => {
+    const isVideo = kind === 'video';
+    const filters = isVideo
+      ? [{ name: 'Vídeos', extensions: ['mp4', 'webm', 'ogv'] }]
+      : [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }];
+    const result = await dialog.showOpenDialog({
+      title: isVideo ? 'Seleccionar vídeo' : 'Seleccionar imagen',
+      properties: ['openFile'],
+      filters
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = path.normalize(result.filePaths[0]);
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile()) throw new Error('La ubicación elegida no es un archivo');
+    const extension = path.extname(filePath).toLowerCase().replace('.', '');
+    const type = SDD_MEDIA_MIME_BY_EXTENSION[extension];
+    if (!type) throw new Error('El formato del archivo no es compatible');
+    const maxBytes = isVideo ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
+    if (stats.size > maxBytes) throw new Error(isVideo ? 'El vídeo supera el límite de 100 MB' : 'La imagen supera el límite de 20 MB');
+    const buffer = fs.readFileSync(filePath);
+    return { name: path.basename(filePath), type, dataUrl: `data:${type};base64,${buffer.toString('base64')}` };
+  });
+
+  ipcMain.handle('select-sdd-specs-path', async (_event, lastPath = '') => {
+    const result = await dialog.showOpenDialog({
+      title: 'Seleccionar ruta de specs.md',
+      buttonLabel: 'Inyectar',
+      defaultPath: path.normalize(String(lastPath || '')),
+      properties: ['openDirectory']
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const directoryPath = path.normalize(result.filePaths[0]);
+    if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
+    const specsPath = path.join(directoryPath, 'specs.md');
+    if (fs.existsSync(specsPath)) {
+      return { path: specsPath, content: fs.readFileSync(specsPath, 'utf8'), created: false };
+    }
+    const template = `# Specs
+
+## Título del requisito
+**Estado:** borrador
+**Prioridad:** media
+**Categoría:** 
+
+Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
+`;
+    fs.writeFileSync(specsPath, template, { encoding: 'utf8', mode: 0o600 });
+    return { path: specsPath, content: template, created: true };
+  });
+
+  ipcMain.handle('write-sdd-specs-markdown', async (_event, payload = {}) => {
+    const specsPath = path.normalize(String(payload?.path || ''));
+    if (!specsPath || path.basename(specsPath) !== 'specs.md') throw new Error('La ruta de specs.md no es válida');
+    if (typeof payload?.content !== 'string') throw new Error('El contenido de specs.md no es válido');
+    if (!fs.existsSync(specsPath)) throw new Error('specs.md ya no existe en la ruta configurada');
+    fs.writeFileSync(specsPath, payload.content, { encoding: 'utf8', mode: 0o600 });
+    return { path: specsPath };
   });
 
   ipcMain.handle('get-file-system-roots', () => fileExplorerService.getRoots());

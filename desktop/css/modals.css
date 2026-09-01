@@ -42,7 +42,7 @@
 .diagram-prompt-preview-text { display: block; width: 100%; height: min(52vh, 560px); max-height: calc(100dvh - 300px); min-height: 140px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; margin: 6px 0 0; padding: 13px; border: 1px solid var(--line-dark); border-radius: 3px; color: var(--text); background: var(--surface-code); font-family: var(--mono); font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .viewer-modal { width: min(1440px, calc(100vw - 48px)); height: min(940px, calc(100dvh - 24px)); max-height: calc(100dvh - 24px); display: flex; flex-direction: column; overflow: hidden; }
 .viewer-modal .modal-head, .viewer-modal .modal-actions { flex: 0 0 auto; }
-.viewer-modal .modal-head { padding: 10px 17px 8px; }
+.viewer-modal .modal-head { padding: 10px 17px 8px; gap: 9px; }
 .viewer-title-wrap { min-width: 0; flex: 1; }
 .viewer-title-line { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
 .viewer-head-actions { display: flex; align-items: center; gap: 7px; margin-left: 12px; }
