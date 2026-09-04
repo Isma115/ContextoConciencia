@@ -14,7 +14,7 @@ El texto importado se muestra primero en el editor. El diagrama actual solo camb
 
 ## Estructura básica
 
-Un archivo puede contener tres instrucciones:
+Un archivo puede contener cuatro instrucciones:
 
 ```text
 diagram "Flujo de acceso"
@@ -22,6 +22,8 @@ diagram "Flujo de acceso"
 node inicio "Inicio" start at 100, 180
 node validar "Validar credenciales" decision at 430, 180
 node panel "Panel principal" end at 760, 180
+
+description validar "Comprueba los datos recibidos antes de continuar."
 
 edge inicio -> validar "Enviar datos" forward
 edge validar -> panel "Credenciales válidas" forward
@@ -31,7 +33,8 @@ El orden recomendado es:
 
 1. Una declaración `diagram` con el título.
 2. Todas las declaraciones `node`.
-3. Todas las declaraciones `edge`.
+3. Las declaraciones `description` opcionales.
+4. Todas las declaraciones `edge`.
 
 Las conexiones también pueden aparecer antes que los nodos, pero sus identificadores tienen que existir cuando se genera el diagrama.
 
@@ -75,6 +78,14 @@ node terminado "Proceso terminado" fin at 800, 80
 ```
 
 Si no se indica `at`, NexusData coloca los nodos automáticamente en una cuadrícula. Las posiciones negativas o fuera del lienzo se ajustan a sus límites.
+
+## Descripciones de las tarjetas
+
+```text
+description identificador "Detalle visible dentro de la tarjeta"
+```
+
+La instrucción añade un componente editable de descripción a la tarjeta indicada. El texto puede quedar vacío para crear el componente y completarlo después desde la vista visual. Cada nodo puede tener como máximo una descripción de hasta 2.000 caracteres.
 
 ## Conexiones
 
@@ -147,7 +158,7 @@ edge error -> formulario "Corregir" backward
 - **Etiqueta sin comillas**: usa `"texto con espacios"`, no `texto con espacios`.
 - **Flecha incorrecta**: escribe `->` entre el origen y el destino.
 - **Posición inválida**: usa dos números separados por una coma, por ejemplo `at 420, 180`.
-- **Instrucción desconocida**: las únicas instrucciones son `diagram`, `node` y `edge` (también se acepta `connect` como alias de `edge`).
+- **Instrucción desconocida**: las instrucciones son `diagram`, `node`, `description` y `edge` (también se acepta `connect` como alias de `edge`).
 
 El editor indica la línea del primer error encontrado. Corrige ese error y vuelve a pulsar **Generar diagrama**.
 

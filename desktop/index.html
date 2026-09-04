@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; frame-src 'self' data:;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; media-src 'self' data:; frame-src 'self' data:;" />
     <title>NexusData</title>
     <style>
       html,
@@ -36,10 +36,26 @@
             <button class="nav-item" data-view="favorites"><span class="nav-icon">★</span>Favoritos</button>
             <button class="nav-item" data-view="html-viewer"><span class="nav-icon">▣</span>Visor HTML</button>
             <button class="nav-item nav-item-sub" data-view="diagrams"><span class="nav-icon">◇</span>Diagramas</button>
-            <button class="nav-item" data-view="code-map"><span class="nav-icon">⌘</span>Mapa de código</button>
+            <button class="nav-item" data-view="code-map" hidden><span class="nav-icon">⌘</span>Mapa de código</button>
             <button class="nav-item" data-view="sources"><span class="nav-icon">◈</span>Fuentes</button>
             <button class="nav-item" data-view="file-explorer"><span class="nav-icon">▤</span>Explorador de ficheros</button>
           </nav>
+          <div class="sidebar-section" aria-label="Sección S.D.D">
+            <div class="sidebar-label-row">
+              <div class="sidebar-label">S.D.D</div>
+              <div class="sidebar-inject-group">
+                <button id="sdd-load" class="sidebar-inject-button" type="button" title="Cargar un proyecto S.D.D con specs.md y specs_resources">Cargar</button>
+                <button id="sdd-reload" class="sidebar-inject-button" type="button" title="Recargar specs.md y specs_resources desde disco (sin diálogo)" aria-label="Recargar">⟳</button>
+                <button id="sdd-inject" class="sidebar-inject-button" type="button" title="Crear specs.md y specs_resources en una carpeta">Inyectar</button>
+              </div>
+            </div>
+            <nav class="main-nav" aria-label="Navegación S.D.D">
+              <button class="nav-item nav-item-sub" data-view="sdd-specs"><span class="nav-icon">≡</span>Specs</button>
+              <button class="nav-item nav-item-sub" data-view="sdd-database"><span class="nav-icon">▦</span>Base de datos</button>
+              <button class="nav-item nav-item-sub" data-view="sdd-ui"><span class="nav-icon">◧</span>UI</button>
+              <button class="nav-item nav-item-sub" data-view="sdd-resources"><span class="nav-icon">⧉</span>Recursos</button>
+            </nav>
+          </div>
         </div>
       </aside>
 
@@ -54,6 +70,10 @@
         <section id="view-code-map" class="view"></section>
         <section id="view-sources" class="view"></section>
         <section id="view-file-explorer" class="view"></section>
+        <section id="view-sdd-specs" class="view"></section>
+        <section id="view-sdd-database" class="view"></section>
+        <section id="view-sdd-ui" class="view"></section>
+        <section id="view-sdd-resources" class="view"></section>
       </main>
     </div>
 

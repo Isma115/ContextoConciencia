@@ -27,8 +27,6 @@
   .file-explorer-filterbar { align-items: stretch; flex-wrap: wrap; padding: 7px 12px; }
   .file-explorer-search-form { flex-basis: 100%; }
   .file-explorer-view-switcher { margin-left: auto; }
-  .file-explorer-selectionbar { align-items: start; flex-direction: column; padding: 7px 12px; }
-  .file-explorer-selection-actions { justify-content: flex-start; }
   .file-explorer-content { padding: 12px 12px 24px; }
   .file-explorer-root-row { grid-template-columns: 27px minmax(0, 1fr) auto; }
   .file-explorer-entry-list-grid { grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); }

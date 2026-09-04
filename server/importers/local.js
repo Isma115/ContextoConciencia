@@ -16,12 +16,56 @@ const SUPPORTED = new Map([
   ['.css', 'css'],
   ['.js', 'javascript'],
   ['.mjs', 'javascript'],
-  ['.cjs', 'javascript']
+  ['.cjs', 'javascript'],
+  // Multimedia: se indexan por metadatos y se sirven en streaming desde su archivo original.
+  ['.png', 'image'],
+  ['.jpg', 'image'],
+  ['.jpeg', 'image'],
+  ['.webp', 'image'],
+  ['.avif', 'image'],
+  ['.bmp', 'image'],
+  ['.tif', 'image'],
+  ['.tiff', 'image'],
+  ['.svg', 'image'],
+  ['.gif', 'gif'],
+  ['.mp4', 'video'],
+  ['.m4v', 'video'],
+  ['.webm', 'video'],
+  ['.ogv', 'video'],
+  ['.mov', 'video']
 ]);
 const DOCUMENT_SUPPORTED = new Map([...SUPPORTED].filter(([, type]) => !['css', 'javascript'].includes(type)));
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
 const MAX_FILES = 2000;
 const BINARY_SAMPLE_BYTES = 8192;
+
+const MEDIA_BY_EXTENSION = new Map([
+  ['.png', { type: 'image', kind: 'image', mime: 'image/png' }],
+  ['.jpg', { type: 'image', kind: 'image', mime: 'image/jpeg' }],
+  ['.jpeg', { type: 'image', kind: 'image', mime: 'image/jpeg' }],
+  ['.webp', { type: 'image', kind: 'image', mime: 'image/webp' }],
+  ['.avif', { type: 'image', kind: 'image', mime: 'image/avif' }],
+  ['.bmp', { type: 'image', kind: 'image', mime: 'image/bmp' }],
+  ['.tif', { type: 'image', kind: 'image', mime: 'image/tiff' }],
+  ['.tiff', { type: 'image', kind: 'image', mime: 'image/tiff' }],
+  ['.svg', { type: 'image', kind: 'image', mime: 'image/svg+xml' }],
+  ['.gif', { type: 'gif', kind: 'image', mime: 'image/gif' }],
+  ['.mp4', { type: 'video', kind: 'video', mime: 'video/mp4' }],
+  ['.m4v', { type: 'video', kind: 'video', mime: 'video/x-m4v' }],
+  ['.webm', { type: 'video', kind: 'video', mime: 'video/webm' }],
+  ['.ogv', { type: 'video', kind: 'video', mime: 'video/ogg' }],
+  ['.mov', { type: 'video', kind: 'video', mime: 'video/quicktime' }]
+]);
+const MAX_MEDIA_IMAGE_BYTES = 25 * 1024 * 1024;
+const MAX_MEDIA_VIDEO_BYTES = 200 * 1024 * 1024;
+
+function mediaForPath(filePath) {
+  return MEDIA_BY_EXTENSION.get(path.extname(filePath).toLowerCase()) || null;
+}
+
+function mediaByteLimit(media) {
+  return media.kind === 'video' ? MAX_MEDIA_VIDEO_BYTES : MAX_MEDIA_IMAGE_BYTES;
+}
 
 function collectFiles(inputPath, files = [], options = {}) {
   const scanOptions = options.skipDirectories instanceof Set
@@ -62,6 +106,38 @@ function collectFiles(inputPath, files = [], options = {}) {
   return files;
 }
 
+function collectFilesFromInputs(inputs, options, errors) {
+  const filesByInput = [];
+  for (const input of inputs) {
+    const inputFiles = [];
+    try {
+      collectFiles(input, inputFiles, options);
+    } catch (error) {
+      errors.push({ path: input, message: error.message });
+    }
+    filesByInput.push(inputFiles);
+  }
+
+  // Reparte el límite entre las rutas: una carpeta grande no debe impedir
+  // que las siguientes rutas comunes aporten documentos al índice.
+  const uniqueFiles = [];
+  const seen = new Set();
+  for (let index = 0; uniqueFiles.length < MAX_FILES; index += 1) {
+    let hasFiles = false;
+    for (const inputFiles of filesByInput) {
+      const filePath = inputFiles[index];
+      if (!filePath) continue;
+      hasFiles = true;
+      if (seen.has(filePath)) continue;
+      seen.add(filePath);
+      uniqueFiles.push(filePath);
+      if (uniqueFiles.length >= MAX_FILES) break;
+    }
+    if (!hasFiles) break;
+  }
+  return uniqueFiles;
+}
+
 function parseCsvSummary(content) {
   const lines = content.split(/\r?\n/).filter(Boolean);
   if (!lines.length) return { columns: [], rows: 0 };
@@ -84,15 +160,28 @@ function readFileDocument(filePath, { allowLargeMetadata = false, deferContent =
   const extension = path.extname(filePath).toLowerCase();
   const type = SUPPORTED.get(extension) || (extension ? extension.slice(1) : 'file');
   const stats = fs.statSync(filePath);
-  if (stats.size > MAX_FILE_BYTES && !allowLargeMetadata && !deferContent) {
-    throw new Error(`El archivo supera el límite de ${MAX_FILE_BYTES / 1024 / 1024} MB`);
-  }
   const baseName = path.basename(filePath, extension);
   let metadata = {
     extension: extension.slice(1),
     size: stats.size,
     modifiedAt: stats.mtime.toISOString()
   };
+  const media = MEDIA_BY_EXTENSION.get(extension);
+  if (media) {
+    metadata = { ...metadata, mediaKind: media.kind, mediaMime: media.mime, searchTitleOnly: true, contentLoaded: true };
+    if (stats.size > mediaByteLimit(media)) metadata = { ...metadata, contentSkipped: 'too-large' };
+    return {
+      externalId: filePath,
+      title: baseName.replace(/[-_]+/g, ' '),
+      content: '',
+      type: media.type,
+      path: filePath,
+      metadata
+    };
+  }
+  if (stats.size > MAX_FILE_BYTES && !allowLargeMetadata && !deferContent) {
+    throw new Error(`El archivo supera el límite de ${MAX_FILE_BYTES / 1024 / 1024} MB`);
+  }
   let content = '';
   if (deferContent) {
     if (stats.size > MAX_FILE_BYTES) metadata = { ...metadata, contentSkipped: 'too-large' };
@@ -130,7 +219,6 @@ function readFileDocument(filePath, { allowLargeMetadata = false, deferContent =
 function importLocalSource(db, source, { prune = false, includeUnsupported = true } = {}) {
   const config = parseJson(source.config_json);
   const inputs = Array.isArray(config.paths) ? config.paths : [];
-  const files = [];
   const errors = [];
   const scanOptions = {
     skipDirectories: config.excludeDirectories,
@@ -138,14 +226,7 @@ function importLocalSource(db, source, { prune = false, includeUnsupported = tru
     followSymlinks: config.followSymlinks,
     includeUnsupported
   };
-  for (const input of inputs) {
-    try {
-      collectFiles(input, files, scanOptions);
-    } catch (error) {
-      errors.push({ path: input, message: error.message });
-    }
-  }
-  const uniqueFiles = [...new Set(files)].slice(0, MAX_FILES);
+  const uniqueFiles = collectFilesFromInputs(inputs, scanOptions, errors);
   let created = 0;
   let updated = 0;
   db.transaction(() => {
@@ -181,4 +262,4 @@ function importLocalSource(db, source, { prune = false, includeUnsupported = tru
   return { created, updated, total: created + updated, errors, files: uniqueFiles.length };
 }
 
-module.exports = { SUPPORTED, DOCUMENT_SUPPORTED, MAX_FILE_BYTES, MAX_FILES, collectFiles, readFileDocument, importLocalSource };
+module.exports = { SUPPORTED, DOCUMENT_SUPPORTED, MAX_FILE_BYTES, MAX_FILES, MEDIA_BY_EXTENSION, collectFiles, mediaForPath, mediaByteLimit, readFileDocument, importLocalSource };

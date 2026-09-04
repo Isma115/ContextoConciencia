@@ -4,7 +4,7 @@ import { persistSearchPreferences, state, resetFilters } from '../core/state.js'
 import { documentTypeClass, shortDate, sourceIcon, statusLabel, typeLabel } from '../core/format.js';
 import { bindModalClose, closeModal } from '../ui/modals.js';
 import { showToast } from '../ui/notifications.js';
-import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, copyPathButtonMarkup, favoriteButtonMarkup } from './documents.js';
+import { bindCopyPathActions, bindDocumentFavoriteActions, bindDocumentOpeners, bindRevealActions, copyPathButtonMarkup, favoriteButtonMarkup, mediaSnippetLabel, revealButtonMarkup } from './documents.js';
 import { openSourceModal } from './source-modal.js';
 import { deleteSource, syncSource } from './sources.js';
 
@@ -59,7 +59,7 @@ function collectionOptions(selected = '') {
 }
 
 function typeOptions(selected = '') {
-  return `<option value="">Tipo</option><option value="any" ${selected === 'any' ? 'selected' : ''}>Cualquier tipo de fichero</option><option value="markdown" ${selected === 'markdown' ? 'selected' : ''}>Markdown</option><option value="json" ${selected === 'json' ? 'selected' : ''}>JSON</option><option value="csv" ${selected === 'csv' ? 'selected' : ''}>CSV</option><option value="text" ${selected === 'text' ? 'selected' : ''}>TXT</option><option value="diagram" ${selected === 'diagram' ? 'selected' : ''}>Diagrama NexusData</option><option value="html" ${selected === 'html' ? 'selected' : ''}>HTML</option><option value="css" ${selected === 'css' ? 'selected' : ''}>CSS</option><option value="javascript" ${selected === 'javascript' ? 'selected' : ''}>JavaScript</option>`;
+  return `<option value="">Tipo</option><option value="any" ${selected === 'any' ? 'selected' : ''}>Cualquier tipo de fichero</option><option value="markdown" ${selected === 'markdown' ? 'selected' : ''}>Markdown</option><option value="json" ${selected === 'json' ? 'selected' : ''}>JSON</option><option value="csv" ${selected === 'csv' ? 'selected' : ''}>CSV</option><option value="text" ${selected === 'text' ? 'selected' : ''}>TXT</option><option value="diagram" ${selected === 'diagram' ? 'selected' : ''}>Diagrama NexusData</option><option value="html" ${selected === 'html' ? 'selected' : ''}>HTML</option><option value="css" ${selected === 'css' ? 'selected' : ''}>CSS</option><option value="javascript" ${selected === 'javascript' ? 'selected' : ''}>JavaScript</option><option value="image" ${selected === 'image' ? 'selected' : ''}>Imagen</option><option value="gif" ${selected === 'gif' ? 'selected' : ''}>GIF</option><option value="video" ${selected === 'video' ? 'selected' : ''}>Vídeo</option>`;
 }
 
 function commonPathsMarkup(prefix = '') {
@@ -84,7 +84,7 @@ export function bindSidebarSearch() {
     if (event.key !== 'Enter') return;
     cancelGlobalSearchDebounce();
     if (state.view !== 'global-search') navigateToSearch('global-search');
-    performGlobalSearch();
+    performGlobalSearch({ syncCommonPathsBeforeSearch: true });
   });
 }
 
@@ -123,15 +123,35 @@ function filterMarkup(prefix = '', filters = state.filters) {
   return `<div class="filter-controls"><button id="${toggleId}" class="filter-toggle btn btn-secondary btn-small" type="button" data-filter-toggle aria-controls="${panelId}" aria-expanded="${expanded}" aria-label="${toggleLabel}" title="${toggleLabel}"><span class="filter-toggle-arrow" aria-hidden="true">${expanded ? '⌄' : '›'}</span><span>Filtros</span></button><div id="${panelId}" class="filter-panel" data-filter-panel${expanded ? '' : ' hidden'}><div class="filter-row"><select id="${id('source')}" class="select source-filter-select">${sourceOptions(filters.source)}</select>${viewSourcesButton}<select id="${id('type')}" class="select type-filter-select">${typeOptions(filters.type)}</select><label class="form-label date-filter">Desde<input id="${id('date')}" type="date" class="field" value="${escapeHtml(filters.date)}" /></label>${commonPathsMarkup(prefix)}<button id="${prefix ? 'global-clear-filters' : 'clear-filters'}" class="btn btn-secondary btn-small">Limpiar</button></div></div></div>`;
 }
 
+function snippetMarkup(doc) {
+  const mediaLabel = mediaSnippetLabel(doc);
+  if (mediaLabel) return escapeHtml(mediaLabel);
+  if (doc.metadata?.contentDeferred) return escapeHtml('Contenido disponible al abrir');
+  const text = String(doc.snippet || doc.content?.slice(0, 220) || '');
+  const [start, end] = Array.isArray(doc.highlight) ? doc.highlight : [];
+  if (typeof start !== 'number' || typeof end !== 'number' || start < 0 || end <= start || start >= text.length) return escapeHtml(text);
+  const safeEnd = Math.min(end, text.length);
+  return `${escapeHtml(text.slice(0, start))}<mark class="search-hit">${escapeHtml(text.slice(start, safeEnd))}</mark>${escapeHtml(text.slice(safeEnd))}`;
+}
+
+function resultSourceLabel(doc) {
+  const source = String(doc?.source || '').trim();
+  const filePath = String(doc?.path || '').trim();
+  return source === 'Rutas comunes' && filePath ? filePath : source || filePath || 'Fuente desconocida';
+}
+
 function resultMarkup(results, prefix = '') {
   const resultItems = results || [];
   if (!resultItems.length) return '<div class="empty">Sin resultados</div>';
-  return resultItems.map((doc) => `
+  return resultItems.map((doc) => {
+    const sourceLabel = resultSourceLabel(doc);
+    return `
     <article class="result-card document-hit document-type-${documentTypeClass(doc.type)}" data-view-document="${escapeHtml(doc.id)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(doc.title)}">
-      <div class="result-head"><div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div><div class="result-title-wrap"><h3 class="result-title">${escapeHtml(doc.title)}</h3><div class="result-source">${escapeHtml(doc.source)}</div></div><span class="score">${Math.round((doc.score || 0) * 100)}%</span></div>
-      <div class="snippet">${escapeHtml(doc.metadata?.contentDeferred ? 'Contenido disponible al abrir' : doc.snippet || doc.content?.slice(0, 220))}</div>
-      <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}<button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
-    </article>`).join('');
+      <div class="result-head"><div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div><div class="result-title-wrap"><h3 class="result-title">${escapeHtml(doc.title)}</h3><div class="result-source" title="${escapeHtml(sourceLabel)}">${escapeHtml(sourceLabel)}</div></div><span class="score">${Math.round((doc.score || 0) * 100)}%</span></div>
+      <div class="snippet">${snippetMarkup(doc)}</div>
+      <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}${revealButtonMarkup(doc)}<button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
+    </article>`;
+  }).join('');
 }
 
 function bindSearchControls({ prefix = '', perform, cancel, clear }) {
@@ -139,7 +159,7 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
   const submit = $(`#${prefix ? 'global-search-submit' : 'search-submit'}`);
   const filterToggle = $(`#${prefix ? 'global-filter-toggle' : 'filter-toggle'}`);
   const commonPaths = $(`#${prefix ? 'global-common-paths' : 'common-paths'}`);
-  submit.addEventListener('click', () => { cancel(); perform(); });
+  submit.addEventListener('click', () => { cancel(); perform({ syncCommonPathsBeforeSearch: true }); });
   input.addEventListener('input', () => {
     syncSearchQuery(input.value);
     if (prefix) globalSearchRequestId += 1;
@@ -147,32 +167,17 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
     persistSearchPreferences();
     schedule(prefix);
   });
-  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { cancel(); perform(); } });
+  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { cancel(); perform({ syncCommonPathsBeforeSearch: true }); } });
   ['source', 'type', 'date'].forEach((name) => $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`).addEventListener('change', () => { cancel(); perform(); }));
   filterToggle?.addEventListener('click', () => setSearchFiltersExpanded(state.searchFiltersExpanded === false));
   $(`#${prefix ? 'global-view-sources' : 'view-sources'}`)?.addEventListener('click', openSourcesModal);
-  commonPaths?.addEventListener('change', async () => {
+  commonPaths?.addEventListener('change', () => {
     state.includeCommonPaths = commonPaths.checked;
-    persistSearchPreferences();
+    if (prefix) globalSearchRequestId += 1;
+    else searchRequestId += 1;
     cancel();
-    if (!state.includeCommonPaths) {
-      commonPathsReady = false;
-      await perform();
-      return;
-    }
-    commonPaths.disabled = true;
-    try {
-      const result = await ensureCommonPathsReady();
-      showToast(result?.directories?.length ? 'Rutas comunes activadas' : 'No se encontraron rutas comunes');
-      await perform();
-    } catch (error) {
-      state.includeCommonPaths = false;
-      commonPaths.checked = false;
-      persistSearchPreferences();
-      showToast(error.message, true);
-    } finally {
-      commonPaths.disabled = false;
-    }
+    if (!state.includeCommonPaths) commonPathsReady = false;
+    persistSearchPreferences();
   });
   $(`#${prefix ? 'global-clear-filters' : 'clear-filters'}`).addEventListener('click', () => { cancel(); clear(); });
 }
@@ -202,6 +207,7 @@ export function renderSearch(results = null, { restoreFocus = false, selectionSt
   const surface = $('#view-search');
   bindCollectionAndTagActions(surface);
   bindCopyPathActions(surface);
+  bindRevealActions(surface);
   bindDocumentFavoriteActions(surface);
   bindDocumentOpeners(surface);
   if (restoreFocus) restoreSearchFocus($('#search-input'), selectionStart, selectionEnd);
@@ -253,7 +259,7 @@ function ensureCommonPathsReady() {
   return syncCommonPaths();
 }
 
-async function performSearchRequest({ prefix = '', view, renderResults }) {
+async function performSearchRequest({ prefix = '', view, renderResults, syncCommonPathsBeforeSearch = false }) {
   const input = $(`#${prefix ? 'global-search-input' : 'search-input'}`);
   if (!input) return;
   const restoreFocus = document.activeElement === input;
@@ -273,19 +279,25 @@ async function performSearchRequest({ prefix = '', view, renderResults }) {
   syncSearchFilters(filters);
   persistSearchPreferences();
   try {
-    await ensureCommonPathsReady();
-    if (state.includeCommonPaths) params.set('includeCommonPaths', 'true');
+    const syncResult = syncCommonPathsBeforeSearch ? await ensureCommonPathsReady() : null;
+    if (syncResult) showToast(syncResult.directories?.length ? 'Rutas comunes activadas' : 'No se encontraron rutas comunes');
+    if (state.includeCommonPaths && commonPathsReady) params.set('includeCommonPaths', 'true');
     const response = await api(`/search?${params}`);
     const latestRequestId = prefix ? globalSearchRequestId : searchRequestId;
     if (requestId === latestRequestId && state.view === view) renderResults(response.results, { restoreFocus, selectionStart, selectionEnd });
   } catch (error) {
+    if (syncCommonPathsBeforeSearch && state.includeCommonPaths && !commonPathsReady) {
+      state.includeCommonPaths = false;
+      document.querySelectorAll('#common-paths, #global-common-paths').forEach((checkbox) => { checkbox.checked = false; });
+      persistSearchPreferences();
+    }
     const latestRequestId = prefix ? globalSearchRequestId : searchRequestId;
     if (requestId === latestRequestId && state.view === view) showToast(error.message, true);
   }
 }
 
-export function performSearch() {
-  return performSearchRequest({ view: 'search', renderResults: renderSearch });
+export function performSearch(options = {}) {
+  return performSearchRequest({ view: 'search', renderResults: renderSearch, ...options });
 }
 
 function globalSourceMarkup(sources) {
@@ -336,12 +348,13 @@ function renderGlobalSearchSurface(results = null) {
   surface.innerHTML = `<div class="panel search-results-panel global-documents-panel"><div class="result-list">${resultMarkup(results, 'global')}</div></div>`;
   bindCollectionAndTagActions(surface, 'global');
   bindCopyPathActions(surface);
+  bindRevealActions(surface);
   bindDocumentFavoriteActions(surface);
   bindDocumentOpeners(surface);
 }
 
-export function performGlobalSearch() {
-  return performSearchRequest({ prefix: 'global', view: 'global-search', renderResults: renderGlobalSearchSurface });
+export function performGlobalSearch(options = {}) {
+  return performSearchRequest({ prefix: 'global', view: 'global-search', renderResults: renderGlobalSearchSurface, ...options });
 }
 
 function bindGlobalSourceActions() {

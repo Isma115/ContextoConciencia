@@ -107,12 +107,13 @@ test('importa fuentes locales y conserva el origen', async () => {
   assert.ok(docs.documents.every((doc) => doc.source === 'Fixtures locales'));
   assert.ok(docs.documents.some((doc) => doc.path.endsWith('README.md')));
   const media = docs.documents.find((doc) => doc.path.endsWith('foto.png'));
+  assert.equal(media.type, 'image');
   assert.equal(media.content, '');
-  assert.equal(media.metadata.contentDeferred, true);
+  assert.equal(media.metadata.mediaKind, 'image');
   const mediaDetail = await request(`/documents/${media.id}`);
   assert.equal(mediaDetail.content, '');
-  assert.equal(mediaDetail.metadata.binary, true);
-  assert.equal(mediaDetail.metadata.contentDeferred, false);
+  assert.equal(mediaDetail.metadata.mediaKind, 'image');
+  assert.notEqual(mediaDetail.metadata.binary, true);
   const diagram = docs.documents.find((doc) => doc.path.endsWith('registro-de-usuario.nxd'));
   assert.equal(diagram.type, 'diagram');
   assert.equal(diagram.metadata.contentDeferred, true);

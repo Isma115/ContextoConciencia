@@ -20,6 +20,7 @@ export const state = {
   includeCommonPaths: false,
   sidebarSearchExpanded: false,
   globalProject: null,
+  sddProject: null,
   htmlViewer: {
     paths: [],
     sourceId: null,

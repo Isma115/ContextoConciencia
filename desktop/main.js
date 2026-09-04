@@ -16,12 +16,92 @@ const DIAGRAM_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DESKTOP_PORT = Number(process.env.PORT) || 3000;
 const OFFLINE_ONLY = true;
+const SDD_MEDIA_MIME_BY_EXTENSION = Object.freeze({
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  gif: 'image/gif',
+  webp: 'image/webp',
+  avif: 'image/avif',
+  bmp: 'image/bmp',
+  tif: 'image/tiff',
+  tiff: 'image/tiff',
+  svg: 'image/svg+xml',
+  mp4: 'video/mp4',
+  m4v: 'video/x-m4v',
+  webm: 'video/webm',
+  ogv: 'video/ogg',
+  mov: 'video/quicktime'
+});
 const closeConfirmationStates = new WeakMap();
 const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
 
 // Evita un destello blanco y cierres del proceso GPU en equipos Windows sin
 // un proceso de composición acelerado disponible.
 app.disableHardwareAcceleration();
+const SDD_SPECS_RESOURCES_DIR = 'specs_resources';
+const SDD_SPECS_RESOURCES_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
+const SDD_SPECS_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
+const SDD_SPECS_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+const SDD_SPECS_SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'out', 'coverage']);
+
+function collectSpecsResourceFiles(directoryPath) {
+  const resourcesDirectory = path.join(directoryPath, SDD_SPECS_RESOURCES_DIR);
+  if (!fs.existsSync(resourcesDirectory) || !fs.statSync(resourcesDirectory).isDirectory()) return [];
+  const found = [];
+  const stack = [resourcesDirectory];
+  while (stack.length) {
+    const current = stack.pop();
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name.startsWith('.') || SDD_SPECS_SKIP_DIRECTORIES.has(entry.name)) continue;
+        stack.push(entryPath);
+      } else if (entry.isFile() && SDD_MEDIA_MIME_BY_EXTENSION[path.extname(entry.name).toLowerCase().replace('.', '')]) {
+        found.push(entryPath);
+      }
+    }
+  }
+  return found.sort((a, b) => a.localeCompare(b));
+}
+
+function readSpecsFolderResources(directoryPath) {
+  let totalBytes = 0;
+  return collectSpecsResourceFiles(directoryPath).map((filePath) => {
+    const stats = fs.statSync(filePath);
+    const extension = path.extname(filePath).toLowerCase().replace('.', '');
+    const type = SDD_MEDIA_MIME_BY_EXTENSION[extension];
+    const kind = type.startsWith('video/') ? 'video' : 'image';
+    const maxBytes = kind === 'video' ? SDD_SPECS_VIDEO_MAX_BYTES : SDD_SPECS_IMAGE_MAX_BYTES;
+    if (stats.size > maxBytes) {
+      throw new Error(`El recurso “${path.basename(filePath)}” supera el límite de ${kind === 'video' ? '100 MB' : '20 MB'}`);
+    }
+    totalBytes += stats.size;
+    if (totalBytes > SDD_SPECS_RESOURCES_MAX_TOTAL_BYTES) throw new Error('Los recursos de specs superan el límite de 200 MB');
+    const buffer = fs.readFileSync(filePath);
+    return {
+      name: path.basename(filePath),
+      path: filePath,
+      kind,
+      type,
+      size: stats.size,
+      modifiedAt: stats.mtime.toISOString(),
+      dataUrl: `data:${type};base64,${buffer.toString('base64')}`
+    };
+  });
+}
+
+function ensureSpecsResourcesDirectory(directoryPath) {
+  const resourcesDirectory = path.join(directoryPath, SDD_SPECS_RESOURCES_DIR);
+  if (!fs.existsSync(resourcesDirectory)) fs.mkdirSync(resourcesDirectory, { recursive: true });
+  return resourcesDirectory;
+}
 
 function searchPreferencesPath() {
   return path.join(app.getPath('userData'), SEARCH_PREFERENCES_FILENAME);
@@ -205,6 +285,10 @@ function setApplicationMenuForView(window, view) {
       {
         label: 'Analizar diff de git',
         click: () => window.webContents.send('html-viewer-menu-action', 'copy-git-diff-prompt')
+      },
+      {
+        label: 'Generar specs.md completado',
+        click: () => window.webContents.send('html-viewer-menu-action', 'copy-completed-specs-prompt')
       }
     ]
   });
@@ -321,6 +405,98 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('get-file-system-roots', (_event, additionalRoots) => fileExplorerService.getRoots(additionalRoots));
+  ipcMain.handle('select-sdd-media', async (_event, kind = 'image') => {
+    const isVideo = kind === 'video';
+    const filters = isVideo
+      ? [{ name: 'Vídeos', extensions: ['mp4', 'm4v', 'webm', 'ogv', 'mov'] }]
+      : [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg'] }];
+    const result = await dialog.showOpenDialog({
+      title: isVideo ? 'Seleccionar vídeo' : 'Seleccionar imagen',
+      properties: ['openFile'],
+      filters
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const filePath = path.normalize(result.filePaths[0]);
+    const stats = fs.statSync(filePath);
+    if (!stats.isFile()) throw new Error('La ubicación elegida no es un archivo');
+    const extension = path.extname(filePath).toLowerCase().replace('.', '');
+    const type = SDD_MEDIA_MIME_BY_EXTENSION[extension];
+    if (!type) throw new Error('El formato del archivo no es compatible');
+    const maxBytes = isVideo ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
+    if (stats.size > maxBytes) throw new Error(isVideo ? 'El vídeo supera el límite de 100 MB' : 'La imagen supera el límite de 20 MB');
+    const buffer = fs.readFileSync(filePath);
+    return { name: path.basename(filePath), type, dataUrl: `data:${type};base64,${buffer.toString('base64')}` };
+  });
+
+  ipcMain.handle('select-sdd-specs-path', async (_event, lastPath = '') => {
+    const result = await dialog.showOpenDialog({
+      title: 'Seleccionar carpeta de specs',
+      buttonLabel: 'Inyectar',
+      defaultPath: path.normalize(String(lastPath || '')),
+      properties: ['openDirectory']
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const directoryPath = path.normalize(result.filePaths[0]);
+    if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
+    ensureSpecsResourcesDirectory(directoryPath);
+    const specsPath = path.join(directoryPath, 'specs.md');
+    if (fs.existsSync(specsPath) && !fs.statSync(specsPath).isFile()) throw new Error('specs.md no es un archivo en la carpeta configurada');
+    if (!fs.existsSync(specsPath)) {
+      const example = `# Specs
+
+## Requisito de ejemplo
+**Estado:** borrador
+
+Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
+`;
+      fs.writeFileSync(specsPath, example, { encoding: 'utf8', mode: 0o600 });
+      return { path: directoryPath, created: true };
+    }
+    return { path: directoryPath, created: false };
+  });
+
+  const loadSddProject = async (folderPath = '') => {
+    const requestedPath = String(folderPath || '').trim();
+    let directoryPath = requestedPath ? path.normalize(requestedPath) : '';
+    if (!directoryPath || !fs.existsSync(directoryPath) || !fs.statSync(directoryPath).isDirectory()) {
+      const result = await dialog.showOpenDialog({
+        title: 'Seleccionar proyecto S.D.D',
+        buttonLabel: 'Cargar',
+        defaultPath: directoryPath || undefined,
+        properties: ['openDirectory']
+      });
+      if (result.canceled || !result.filePaths[0]) return null;
+      directoryPath = path.normalize(result.filePaths[0]);
+    }
+    if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
+    const specsPath = path.join(directoryPath, 'specs.md');
+    if (!fs.existsSync(specsPath) || !fs.statSync(specsPath).isFile()) throw new Error('El proyecto no contiene un archivo specs.md');
+    const resourcesDir = path.join(directoryPath, SDD_SPECS_RESOURCES_DIR);
+    if (!fs.existsSync(resourcesDir) || !fs.statSync(resourcesDir).isDirectory()) throw new Error('El proyecto no contiene la carpeta specs_resources');
+    const content = fs.readFileSync(specsPath, 'utf8');
+    if (!content.trim()) throw new Error('specs.md está vacío');
+    return {
+      name: path.basename(directoryPath) || directoryPath,
+      path: directoryPath,
+      specsPath,
+      resourcesPath: resourcesDir,
+      content,
+      resources: readSpecsFolderResources(directoryPath)
+    };
+  };
+
+  ipcMain.handle('load-sdd-project', (_event, folderPath = '') => loadSddProject(folderPath));
+  // Compatibilidad con versiones del renderer que todavía usan el nombre anterior.
+  ipcMain.handle('load-sdd-specs-markdown', (_event, folderPath = '') => loadSddProject(folderPath));
+
+  ipcMain.handle('read-sdd-specs-resources', (_event, folderPath = '') => {
+    const directoryPath = path.normalize(String(folderPath || ''));
+    if (!directoryPath || !fs.existsSync(directoryPath) || !fs.statSync(directoryPath).isDirectory()) {
+      throw new Error('La carpeta de specs no es válida o ya no existe');
+    }
+    return { path: directoryPath, resources: readSpecsFolderResources(directoryPath) };
+  });
+
   ipcMain.handle('list-file-system-directory', (_event, directoryPath) => fileExplorerService.listDirectory(directoryPath));
   ipcMain.handle('search-file-system', (_event, payload) => fileExplorerService.searchDirectory(payload));
   ipcMain.handle('open-file-system-entry', (_event, filePath) => fileExplorerService.openEntry(filePath));

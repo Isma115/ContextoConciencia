@@ -493,7 +493,7 @@ function bindFileExplorerEvents(container) {
     }
     const entry = event.target.closest?.('[data-file-explorer-entry]');
     if (entry && container.contains(entry) && !explorerState.loading) {
-      const filePath = entry.dataset.fileExplorerEntry;
+      const filePath = entry.dataset.fileExplorerEntry || '';
       const additiveSelection = event.ctrlKey || event.metaKey || event.shiftKey;
       const now = Date.now();
       const isDoubleClick = !additiveSelection
@@ -529,6 +529,12 @@ function bindFileExplorerEvents(container) {
     }
   });
   container.addEventListener('submit', (event) => {
+    if (event.target.id === 'file-explorer-path-form') {
+      event.preventDefault();
+      const input = $('#file-explorer-path', event.target);
+      if (input?.value.trim()) void loadDirectory(input.value);
+      return;
+    }
     if (event.target.id === 'file-explorer-search-form') {
       event.preventDefault();
       const input = $('#file-explorer-search', event.target);

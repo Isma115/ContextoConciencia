@@ -4,11 +4,11 @@ export function shortDate(value) {
 }
 
 export function typeLabel(type) {
-  return ({ markdown: 'md', json: 'json', csv: 'csv', text: 'txt', html: 'html', css: 'css', javascript: 'js', diagram: 'nxd', rest: 'api' }[type] || type || 'doc');
+  return ({ markdown: 'md', json: 'json', csv: 'csv', text: 'txt', html: 'html', css: 'css', javascript: 'js', diagram: 'nxd', rest: 'api', image: 'img', gif: 'gif', video: 'vid' }[type] || type || 'doc');
 }
 
 export function documentTypeClass(type) {
-  return ({ markdown: 'markdown', json: 'json', csv: 'csv', text: 'text', html: 'html', css: 'css', javascript: 'javascript', diagram: 'diagram', rest: 'rest' }[type] || 'generic');
+  return ({ markdown: 'markdown', json: 'json', csv: 'csv', text: 'text', html: 'html', css: 'css', javascript: 'javascript', diagram: 'diagram', rest: 'rest', image: 'image', gif: 'gif', video: 'video' }[type] || 'generic');
 }
 
 export function statusLabel(status) {

@@ -12,6 +12,7 @@ import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/di
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
 import { renderFileExplorer } from './views/file-explorer.js';
+import { renderSddSpecs, renderSddDatabase, renderSddUi, renderSddResources, bindSddInject, bindSddLoad, bindSddReload } from './views/sdd.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 import { loadDiagramLineContrast } from './core/diagram-settings.js';
@@ -75,6 +76,10 @@ function renderView() {
   if (state.view === 'code-map') renderCodeMap();
   if (state.view === 'sources') renderSources();
   if (state.view === 'file-explorer') renderFileExplorer();
+  if (state.view === 'sdd-specs') renderSddSpecs();
+  if (state.view === 'sdd-database') renderSddDatabase();
+  if (state.view === 'sdd-ui') renderSddUi();
+  if (state.view === 'sdd-resources') renderSddResources();
 }
 
 async function initialiseSession() {
@@ -173,6 +178,9 @@ bindNavigation();
 bindSidebarSearchToggle();
 bindSidebarSearch();
 bindCloseConfirmation();
+bindSddInject();
+bindSddLoad();
+bindSddReload();
 loadPalettePreference();
 loadDiagramLineContrast();
 
