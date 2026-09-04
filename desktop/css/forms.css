@@ -6,6 +6,8 @@
 .textarea { min-height: 88px; resize: vertical; line-height: 1.45; }
 .selection-box { min-height: 44px; padding: 8px; border: 1px dashed var(--line-strong); border-radius: 3px; background: var(--surface-code); }
 .selection-chip { display: inline-flex; align-items: center; gap: 5px; max-width: 100%; margin: 2px; padding: 4px 6px; border: 1px solid var(--accent-border); border-radius: 3px; color: var(--accent-text); background: var(--accent-surface); font-family: var(--mono); font-size: 9px; }
-.selection-chip span { max-width: 390px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-chip-path { max-width: 390px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-chip-remove { width: 15px; height: 15px; flex: 0 0 15px; display: grid; place-items: center; margin: -2px -3px -2px 0; border: 0; border-radius: 2px; padding: 0; color: inherit; background: transparent; font-family: var(--mono); font-size: 13px; line-height: 1; }
+.selection-chip-remove:hover, .selection-chip-remove:focus-visible { color: var(--strong); background: var(--hover-surface); outline: 0; }
 .form-note { margin: 0; color: var(--muted); font-family: var(--mono); font-size: 9px; line-height: 1.5; }
 .modal-inline-actions { display: flex; gap: 8px; margin-top: 8px; }

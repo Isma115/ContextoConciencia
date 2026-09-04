@@ -9,7 +9,7 @@ function requireOperation(name) {
 }
 
 export const fileExplorerOperations = Object.freeze({
-  getRoots: () => requireOperation('getFileSystemRoots')(),
+  getRoots: (additionalRoots) => requireOperation('getFileSystemRoots')(additionalRoots),
   listDirectory: (directoryPath) => requireOperation('listFileSystemDirectory')(directoryPath),
   searchDirectory: (payload) => requireOperation('searchFileSystem')(payload),
   openEntry: (filePath) => requireOperation('openFileSystemEntry')(filePath),

@@ -60,6 +60,7 @@ let focusNodeId = null;
 let contextMenuEdgeId = '';
 let contextMenuNodeId = '';
 let contextMenuCanvasPoint = null;
+let edgeLabelEditor = null;
 let undoStack = [];
 let redoStack = [];
 let diagramResizeObserver = null;
@@ -364,9 +365,13 @@ async function importDiagramFile() {
 export function bindDiagramMenu() {
   window.nexusData?.onDiagramMenuAction?.((action) => {
     if (!$('#view-diagrams')?.classList.contains('active')) return;
+    if (action === 'new') createNewDiagram();
+    if (action === 'duplicate') duplicateActiveDiagram();
+    if (action === 'code') openDiagramCodeModal();
     if (action === 'import') importDiagramFile();
     if (action === 'export') exportDiagramText(serializeDiagram(activeDiagram()));
     if (action === 'export-image') exportDiagramImage();
+    if (action === 'delete') openDeleteDiagramConfirmation();
     if (action === 'undo') undoDiagramChange();
     if (action === 'redo') redoDiagramChange();
   });
@@ -401,6 +406,7 @@ function recordHistory(before) {
 }
 
 function resetDiagramInteraction() {
+  cancelEdgeLabelEditing();
   selection = { type: '', id: '' };
   connectMode = false;
   connectionStart = null;
@@ -576,27 +582,98 @@ function handleEdgeContextMenuAction(event) {
     editEdgeLabel();
     return;
   }
+  if (option.dataset.edgeAction === 'delete') {
+    removeEdge(contextMenuEdgeId || (selection.type === 'edge' ? selection.id : ''));
+    return;
+  }
   changeEdgeDirection(option.dataset.edgeDirection);
 }
 
-function editEdgeLabel() {
-  const edgeId = contextMenuEdgeId || (selection.type === 'edge' ? selection.id : '');
-  const edge = edgeById(activeDiagram(), edgeId);
-  if (!edge) {
-    hideEdgeContextMenu();
-    return;
+function updateEdgeLabelEditorPosition() {
+  if (!edgeLabelEditor) return;
+  const diagram = activeDiagram();
+  const edge = edgeById(diagram, edgeLabelEditor.edgeId);
+  const geometry = edge ? edgeGeometry(edge, diagram) : null;
+  if (!geometry) return;
+  edgeLabelEditor.input.style.left = `${geometry.midpoint.x}px`;
+  edgeLabelEditor.input.style.top = `${geometry.midpoint.y}px`;
+}
+
+function finishEdgeLabelEditing(commit = true) {
+  const editor = edgeLabelEditor;
+  if (!editor) return;
+  edgeLabelEditor = null;
+
+  const edge = edgeById(activeDiagram(), editor.edgeId);
+  const nextLabel = editor.input.value.slice(0, 120);
+  if (commit && edge && nextLabel !== edge.label) {
+    edge.label = nextLabel;
+    recordHistory(editor.historyBefore);
+    persistDiagrams();
   }
-  const nextLabel = window.prompt('Texto de la línea', edge.label || '');
-  hideEdgeContextMenu();
-  if (nextLabel === null) return;
-  const label = nextLabel.slice(0, 120);
-  if (label === edge.label) return;
-  const before = historySnapshot();
-  edge.label = label;
-  recordHistory(before);
-  persistDiagrams();
+  editor.input.remove();
   renderEdges(activeDiagram());
   updateSelectionUI();
+}
+
+function cancelEdgeLabelEditing() {
+  const editor = edgeLabelEditor;
+  if (!editor) return;
+  edgeLabelEditor = null;
+  editor.input.remove();
+}
+
+function startEdgeLabelEditing(edgeId) {
+  const edge = edgeById(activeDiagram(), edgeId);
+  const board = $('#diagram-board');
+  if (!edge || !board) return;
+  if (edgeLabelEditor?.edgeId === edge.id) {
+    edgeLabelEditor.input.focus();
+    edgeLabelEditor.input.select();
+    return;
+  }
+
+  finishEdgeLabelEditing();
+  hideEdgeContextMenu();
+  setSelection('edge', edge.id);
+
+  const geometry = edgeGeometry(edge, activeDiagram());
+  if (!geometry) return;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'diagram-edge-label-editor';
+  input.value = edge.label || '';
+  input.maxLength = 120;
+  input.autocomplete = 'off';
+  input.spellcheck = true;
+  input.setAttribute('aria-label', 'Texto de la conexión');
+  input.addEventListener('pointerdown', (event) => event.stopPropagation());
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      finishEdgeLabelEditing();
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      finishEdgeLabelEditing(false);
+    }
+  });
+  input.addEventListener('blur', () => finishEdgeLabelEditing());
+  edgeLabelEditor = { edgeId: edge.id, input, historyBefore: historySnapshot() };
+  board.appendChild(input);
+  updateEdgeLabelEditorPosition();
+  input.focus();
+  input.select();
+}
+
+function editEdgeLabel(edgeId = '') {
+  const selectedEdgeId = edgeId || contextMenuEdgeId || (selection.type === 'edge' ? selection.id : '');
+  startEdgeLabelEditing(selectedEdgeId);
+}
+
+function edgeIdFromEvent(event) {
+  const hit = event.target.closest?.('[data-edge-id]');
+  if (hit) return hit.dataset.edgeId;
+  return event.target.closest?.('.diagram-edge-group')?.querySelector('[data-edge-id]')?.dataset.edgeId || '';
 }
 
 function syncNodeContextMenu() {
@@ -669,6 +746,22 @@ function focusNodeLabel(nodeId) {
   input.select();
 }
 
+function toggleConnectMode() {
+  connectMode = !connectMode;
+  connectionStart = null;
+  connectionAnchorNodeId = '';
+  updateSelectionUI();
+}
+
+function connectFromNode(nodeId) {
+  const node = nodeById(activeDiagram(), nodeId);
+  if (!node) return;
+  connectionStart = null;
+  connectionAnchorNodeId = node.id;
+  connectMode = false;
+  setSelection('node', node.id);
+}
+
 function handleNodeContextMenuAction(event) {
   const option = event.target.closest?.('[data-node-type], [data-node-action]');
   if (!option) return;
@@ -683,6 +776,11 @@ function handleNodeContextMenuAction(event) {
     hideEdgeContextMenu();
     setSelection('node', nodeId);
     requestAnimationFrame(() => focusNodeLabel(nodeId));
+    return;
+  }
+  if (option.dataset.nodeAction === 'connect') {
+    hideEdgeContextMenu();
+    connectFromNode(nodeId);
     return;
   }
   if (option.dataset.nodeAction === 'delete') {
@@ -706,6 +804,7 @@ function showCanvasContextMenu(event) {
   contextMenuCanvasPoint = boardPoint(event);
   menu.hidden = false;
   menu.setAttribute('aria-hidden', 'false');
+  syncCanvasContextMenu();
 
   const positionMenu = () => {
     if (menu.hidden) return;
@@ -729,6 +828,7 @@ function handleCanvasContextMenuAction(event) {
   const point = contextMenuCanvasPoint;
   hideCanvasContextMenu();
   if (option.dataset.canvasAction === 'add-node' && point) addNodeAt(point);
+  if (option.dataset.canvasAction === 'toggle-connect') toggleConnectMode();
 }
 
 function findPortElement(nodeId, portName) {
@@ -959,7 +1059,7 @@ function renderEdges(diagram) {
       : direction === 'backward'
         ? `<circle class="diagram-edge-endpoint diagram-edge-target" data-edge-role="target" cx="${geometry.end.x}" cy="${geometry.end.y}" r="5"></circle>`
         : `<circle class="diagram-edge-endpoint diagram-edge-source" data-edge-role="source" cx="${geometry.start.x}" cy="${geometry.start.y}" r="5"></circle><circle class="diagram-edge-endpoint diagram-edge-target" data-edge-role="target" cx="${geometry.end.x}" cy="${geometry.end.y}" r="5"></circle>`;
-    const label = edge.label ? `<text class="diagram-edge-label" x="${geometry.midpoint.x}" y="${geometry.midpoint.y}" text-anchor="middle">${escapeHtml(edge.label)}</text>` : '';
+    const label = edge.label ? `<text class="diagram-edge-label" x="${geometry.midpoint.x}" y="${geometry.midpoint.y}" text-anchor="middle" dominant-baseline="middle">${escapeHtml(edge.label)}</text>` : '';
     return `<g class="diagram-edge-group${selected}" data-edge-direction="${direction}" data-edge-color="${color}"><path class="diagram-edge-backplate" d="${geometry.path}"></path><path class="diagram-edge${selected}" d="${geometry.path}" data-edge-direction="${direction}"${marker}></path>${endpointMarkup}<path class="diagram-edge-hit" d="${geometry.path}" data-edge-id="${escapeHtml(edge.id)}" tabindex="0" role="button" aria-label="Seleccionar conexión"></path>${label}</g>`;
   }).join('');
   const previewMarkup = connectionDrag?.moved && connectionDrag.current
@@ -976,6 +1076,7 @@ function renderEdges(diagram) {
     })()
     : '';
   layer.innerHTML = `${edgesMarkup}${previewMarkup}`;
+  updateEdgeLabelEditorPosition();
 }
 
 function updateStatus() {
@@ -992,7 +1093,7 @@ function updateStatus() {
   } else if (selection.type === 'node') {
     status.textContent = 'Nodo seleccionado. Puedes editar su etiqueta o tipo.';
   } else if (selection.type === 'edge') {
-    status.textContent = 'Conexión seleccionada. Puedes editar su texto o cambiar la Dirección.';
+    status.textContent = 'Conexión seleccionada. Haz doble clic en la línea para escribir su texto o cambia la Dirección.';
   } else {
     status.textContent = 'Doble clic en un espacio vacío para añadir un nodo.';
   }
@@ -1013,13 +1114,7 @@ function updateSelectionUI() {
     edge.classList.toggle('is-selected', selection.type === 'edge' && selection.id === edgeHit?.dataset.edgeId);
   });
   root.querySelectorAll('[data-diagram-port]').forEach((port) => port.classList.toggle('is-source', Boolean(connectionStart && connectionStart.nodeId === port.dataset.nodeId && connectionStart.port === port.dataset.port)));
-  const deleteButton = $('#diagram-delete-selection');
-  if (deleteButton) deleteButton.disabled = false;
-  const connectButton = $('#diagram-connect');
-  if (connectButton) {
-    connectButton.classList.toggle('is-active', connectMode);
-    connectButton.textContent = connectMode ? '✓ Conectar' : '↗ Conectar';
-  }
+  syncCanvasContextMenu();
   updateStatus();
   updateHistoryControls();
 }
@@ -1037,9 +1132,8 @@ export function renderDiagrams() {
   if (!root) return;
   hideEdgeContextMenu();
   const diagram = activeDiagram();
-  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap">${sectionIconMarkup('diagrams')}<div class="diagram-title-copy"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label><button id="diagram-new" class="btn btn-secondary" type="button">＋ Nuevo</button><button id="diagram-add-node" class="btn btn-primary" type="button">＋ Nodo</button><button id="diagram-code" class="btn btn-secondary" type="button">⌘ Código</button><button id="diagram-export-image" class="btn btn-secondary" type="button">Exportar imagen</button><button id="diagram-connect" class="btn btn-secondary${connectMode ? ' is-active' : ''}" type="button">${connectMode ? '✓ Conectar' : '↗ Conectar'}</button><button id="diagram-delete-selection" class="btn btn-danger" type="button" disabled>Eliminar</button></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
+  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap">${sectionIconMarkup('diagrams')}<div class="diagram-title-copy"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
   ensureDiagramViewport();
-  root.querySelector('#diagram-new')?.insertAdjacentHTML('afterend', '<button id="diagram-duplicate" class="btn btn-secondary" type="button">Duplicar</button>');
   observeDiagramCanvas();
   const arrowMarker = root.querySelector('#diagram-arrow');
   if (arrowMarker) {
@@ -1060,7 +1154,9 @@ export function renderDiagrams() {
     previewArrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 12 7 L 0 14 z');
   }
   root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones de la conexión" aria-hidden="true" hidden><button type="button" role="menuitem" data-edge-action="edit-label">Editar texto</button><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div><div id="diagram-node-context-menu" class="diagram-context-menu" role="menu" aria-label="Modificar tarjeta" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Tarjeta</div><button type="button" role="menuitem" data-node-action="focus-label">Editar etiqueta</button><div class="diagram-context-menu-heading">Tipo</div><button type="button" role="menuitemradio" data-node-type="start" aria-checked="false">Inicio</button><button type="button" role="menuitemradio" data-node-type="step" aria-checked="false">Paso</button><button type="button" role="menuitemradio" data-node-type="decision" aria-checked="false">Decisión</button><button type="button" role="menuitemradio" data-node-type="end" aria-checked="false">Fin</button><button type="button" role="menuitem" data-node-action="delete">Eliminar tarjeta</button></div>');
-  root.insertAdjacentHTML('beforeend', '<div id="diagram-canvas-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones del canvas" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Canvas</div><button type="button" role="menuitem" data-canvas-action="add-node">＋ Agregar nodo</button></div>');
+  root.querySelector('#diagram-context-menu')?.insertAdjacentHTML('beforeend', '<button type="button" role="menuitem" data-edge-action="delete">Eliminar conexión</button>');
+  root.querySelector('#diagram-node-context-menu [data-node-action="delete"]')?.insertAdjacentHTML('beforebegin', '<button type="button" role="menuitem" data-node-action="connect">Conectar desde aquí</button>');
+  root.insertAdjacentHTML('beforeend', '<div id="diagram-canvas-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones del canvas" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Canvas</div><button type="button" role="menuitem" data-canvas-action="add-node">＋ Agregar nodo</button><button type="button" role="menuitem" data-canvas-action="toggle-connect">Activar modo conexión</button></div>');
   bindDiagramEvents(root);
   renderDiagramCanvas();
   updateSelectionUI();
@@ -1183,6 +1279,35 @@ function duplicateActiveDiagram() {
   renderDiagrams();
 }
 
+function createNewDiagram() {
+  const before = historySnapshot();
+  const next = createDiagram(`Diagrama ${diagrams.length + 1}`);
+  diagrams = [...diagrams, next];
+  activeDiagramId = next.id;
+  resetDiagramInteraction();
+  recordHistory(before);
+  persistDiagrams();
+  renderDiagrams();
+  showToast('Nuevo diagrama creado');
+}
+
+function removeEdge(edgeId) {
+  const diagram = activeDiagram();
+  const edge = edgeById(diagram, edgeId);
+  if (!edge) {
+    hideEdgeContextMenu();
+    return;
+  }
+  const before = historySnapshot();
+  diagram.edges = diagram.edges.filter((candidate) => candidate.id !== edge.id);
+  if (selection.type === 'edge' && selection.id === edge.id) selection = { type: '', id: '' };
+  recordHistory(before);
+  persistDiagrams();
+  hideEdgeContextMenu();
+  renderDiagrams();
+  showToast('Conexión eliminada');
+}
+
 function removeNode(nodeId) {
   const diagram = activeDiagram();
   const before = historySnapshot();
@@ -1197,18 +1322,12 @@ function removeNode(nodeId) {
 }
 
 function removeSelection() {
-  const diagram = activeDiagram();
   if (selection.type === 'node' && selection.id) {
     removeNode(selection.id);
     return;
   }
   if (selection.type === 'edge' && selection.id) {
-    const before = historySnapshot();
-    diagram.edges = diagram.edges.filter((edge) => edge.id !== selection.id);
-    selection = { type: '', id: '' };
-    recordHistory(before);
-    persistDiagrams();
-    renderDiagrams();
+    removeEdge(selection.id);
   }
 }
 
@@ -1473,10 +1592,18 @@ function handleNodeInput(event) {
 }
 
 function handleEdgeClick(event) {
-  const hit = event.target.closest('[data-edge-id]');
-  if (!hit) return;
+  const edgeId = edgeIdFromEvent(event);
+  if (!edgeId) return;
   event.stopPropagation();
-  setSelection('edge', hit.dataset.edgeId);
+  setSelection('edge', edgeId);
+}
+
+function handleEdgeDoubleClick(event) {
+  const edgeId = edgeIdFromEvent(event);
+  if (!edgeId) return;
+  event.preventDefault();
+  event.stopPropagation();
+  editEdgeLabel(edgeId);
 }
 
 function handleEdgeContextMenu(event) {
@@ -1709,6 +1836,13 @@ function canvasToPngDataUrl(canvas) {
   });
 }
 
+function syncCanvasContextMenu() {
+  const menu = $('#diagram-canvas-context-menu');
+  if (!menu) return;
+  const toggle = menu.querySelector('[data-canvas-action="toggle-connect"]');
+  if (toggle) toggle.textContent = connectMode ? 'Desactivar modo conexión' : 'Activar modo conexión';
+}
+
 function svgToPngDataUrl(svg) {
   return new Promise((resolve, reject) => {
     if (typeof window === 'undefined' || typeof document === 'undefined' || typeof window.Blob !== 'function' || typeof window.URL?.createObjectURL !== 'function' || typeof window.Image !== 'function') {
@@ -1933,37 +2067,6 @@ function bindDiagramEvents(root) {
     connectMode = false;
     renderDiagrams();
   });
-  $('#diagram-new').addEventListener('click', () => {
-    const before = historySnapshot();
-    const next = createDiagram(`Diagrama ${diagrams.length + 1}`);
-    diagrams = [...diagrams, next];
-    activeDiagramId = next.id;
-    selection = { type: '', id: '' };
-    connectionStart = null;
-    connectionAnchorNodeId = '';
-    connectMode = false;
-    recordHistory(before);
-    persistDiagrams();
-    renderDiagrams();
-    showToast('Nuevo diagrama creado');
-  });
-  $('#diagram-duplicate').addEventListener('click', duplicateActiveDiagram);
-  $('#diagram-add-node').addEventListener('click', () => {
-    const canvas = $('#diagram-canvas');
-    const point = canvas
-      ? boardPointFromCanvasCoordinates(canvas.clientWidth / 2, canvas.clientHeight / 2)
-      : { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
-    addNodeAt(point);
-  });
-  $('#diagram-code').addEventListener('click', () => openDiagramCodeModal());
-  $('#diagram-export-image').addEventListener('click', (event) => exportDiagramImage(event.currentTarget));
-  $('#diagram-connect').addEventListener('click', () => {
-    connectMode = !connectMode;
-    connectionStart = null;
-    connectionAnchorNodeId = '';
-    updateSelectionUI();
-  });
-  $('#diagram-delete-selection').addEventListener('click', openDeleteDiagramConfirmation);
   const nodeLayer = $('#diagram-node-layer');
   nodeLayer.addEventListener('pointerdown', handleNodePointerDown);
   nodeLayer.addEventListener('click', handleNodeClick);
@@ -1972,6 +2075,7 @@ function bindDiagramEvents(root) {
   nodeLayer.addEventListener('input', handleNodeInput);
   const edgeLayer = $('#diagram-edge-layer');
   edgeLayer.addEventListener('click', handleEdgeClick);
+  edgeLayer.addEventListener('dblclick', handleEdgeDoubleClick);
   edgeLayer.addEventListener('contextmenu', handleEdgeContextMenu);
   $('#diagram-context-menu').addEventListener('click', handleEdgeContextMenuAction);
   $('#diagram-node-context-menu').addEventListener('click', handleNodeContextMenuAction);

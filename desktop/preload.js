@@ -26,7 +26,7 @@ contextBridge.exposeInMainWorld('nexusData', {
   selectWorkspaceFile: () => ipcRenderer.invoke('select-workspace-file'),
   saveWorkspaceFile: (payload) => ipcRenderer.invoke('save-workspace-file', payload),
   selectLocalPaths: (options) => ipcRenderer.invoke('select-local-paths', options),
-  getFileSystemRoots: () => ipcRenderer.invoke('get-file-system-roots'),
+  getFileSystemRoots: (additionalRoots) => ipcRenderer.invoke('get-file-system-roots', additionalRoots),
   listFileSystemDirectory: (directoryPath) => ipcRenderer.invoke('list-file-system-directory', directoryPath),
   searchFileSystem: (payload) => ipcRenderer.invoke('search-file-system', payload),
   openFileSystemEntry: (filePath) => ipcRenderer.invoke('open-file-system-entry', filePath),

@@ -69,6 +69,29 @@ export function rootIconTone(root) {
   return 'folder';
 }
 
+function pathComparisonKey(value) {
+  return String(value || '').replace(/[\\/]+$/, '').toLocaleLowerCase();
+}
+
+export function sourceRoots(sources = []) {
+  const roots = [];
+  const seen = new Set();
+  sources
+    .filter((source) => source?.type === 'local' && source.config?.role !== 'common-paths')
+    .forEach((source) => {
+      const label = String(source.name || 'Fuente local').trim() || 'Fuente local';
+      const paths = Array.isArray(source.config?.paths) ? source.config.paths : [];
+      paths.forEach((sourcePath) => {
+        const path = String(sourcePath || '').trim();
+        const key = pathComparisonKey(path);
+        if (!path || !key || seen.has(key)) return;
+        seen.add(key);
+        roots.push({ path, label, kind: 'source', sourceId: source.id || '' });
+      });
+    });
+  return roots;
+}
+
 export function entryTypeLabel(entry) {
   if (entry.kind === 'directory') return 'Carpeta';
   if (entry.kind === 'link') return 'Enlace';
@@ -136,6 +159,6 @@ export function breadcrumbSegments(filePath) {
 
 export function selectionSummary(state) {
   const count = state.selectedPaths.size;
-  if (!count) return 'Sin selección';
+  if (!count) return '';
   return `${count} elemento${count === 1 ? '' : 's'} seleccionado${count === 1 ? '' : 's'}`;
 }

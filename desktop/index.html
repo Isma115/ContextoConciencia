@@ -5,6 +5,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:; frame-src 'self' data:;" />
     <title>NexusData</title>
+    <style>
+      html,
+      body {
+        background-color: #000;
+      }
+    </style>
     <link rel="stylesheet" href="css/styles.css" />
   </head>
   <body>
@@ -16,7 +22,7 @@
           <nav class="main-nav" aria-label="Navegación principal">
             <div class="sidebar-search-group">
               <div class="sidebar-search-row">
-                <button id="sidebar-search-toggle" class="sidebar-search-toggle" type="button" aria-controls="sidebar-search-field" aria-expanded="false" aria-label="Mostrar búsqueda rápida" title="Mostrar búsqueda rápida">⌄</button>
+                <button id="sidebar-search-toggle" class="sidebar-search-toggle" type="button" aria-controls="sidebar-search-field" aria-expanded="false" aria-label="Mostrar búsqueda rápida" title="Mostrar búsqueda rápida"><svg class="sidebar-search-toggle-icon" viewBox="0 0 16 16" focusable="false" aria-hidden="true"><path d="m3.5 6 4.5 4.5L12.5 6"></path></svg></button>
                 <button class="nav-item active" data-view="global-search"><span class="nav-icon">⌕</span>Buscar</button>
               </div>
               <div id="sidebar-search-field" class="sidebar-search-field" hidden>

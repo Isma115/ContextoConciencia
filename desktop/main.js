@@ -6,7 +6,7 @@ const { createFileExplorerService } = require('./file-explorer-service');
 
 let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
-const DIAGRAM_MENU_NAME = 'Diagrama';
+const DIAGRAM_MENU_NAME = 'Diagramas';
 const PREFERENCES_MENU_NAME = 'Preferencias';
 const EXPORT_MENU_NAME = 'Espacio';
 const PROMPTS_MENU_NAME = 'Prompts';
@@ -18,6 +18,10 @@ const DESKTOP_PORT = Number(process.env.PORT) || 3000;
 const OFFLINE_ONLY = true;
 const closeConfirmationStates = new WeakMap();
 const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
+
+// Evita un destello blanco y cierres del proceso GPU en equipos Windows sin
+// un proceso de composición acelerado disponible.
+app.disableHardwareAcceleration();
 
 function searchPreferencesPath() {
   return path.join(app.getPath('userData'), SEARCH_PREFERENCES_FILENAME);
@@ -64,8 +68,6 @@ function setApplicationMenuForView(window, view) {
   template.push({
     label: PREFERENCES_MENU_NAME,
     submenu: [
-      { label: 'Preferencias de búsqueda: activas', enabled: false },
-      { type: 'separator' },
       {
         label: 'Paleta de colores',
         submenu: [
@@ -99,8 +101,12 @@ function setApplicationMenuForView(window, view) {
             click: () => window.webContents.send('preferences-menu-action', 'diagram-line-contrast', 'normal')
           },
           {
-            label: 'Alto',
+            label: 'Intermedio',
             click: () => window.webContents.send('preferences-menu-action', 'diagram-line-contrast', 'high')
+          },
+          {
+            label: 'Alto',
+            click: () => window.webContents.send('preferences-menu-action', 'diagram-line-contrast', 'very-high')
           }
         ]
       }
@@ -147,6 +153,19 @@ function setApplicationMenuForView(window, view) {
       label: DIAGRAM_MENU_NAME,
       submenu: [
         {
+          label: 'Nuevo diagrama',
+          click: () => window.webContents.send('diagram-menu-action', 'new')
+        },
+        {
+          label: 'Duplicar diagrama',
+          click: () => window.webContents.send('diagram-menu-action', 'duplicate')
+        },
+        { type: 'separator' },
+        {
+          label: 'Código del diagrama',
+          click: () => window.webContents.send('diagram-menu-action', 'code')
+        },
+        {
           label: 'Importar',
           click: () => window.webContents.send('diagram-menu-action', 'import')
         },
@@ -157,6 +176,11 @@ function setApplicationMenuForView(window, view) {
         {
           label: 'Exportar como imagen',
           click: () => window.webContents.send('diagram-menu-action', 'export-image')
+        },
+        { type: 'separator' },
+        {
+          label: 'Eliminar diagrama',
+          click: () => window.webContents.send('diagram-menu-action', 'delete')
         },
         { type: 'separator' },
         {
@@ -209,7 +233,10 @@ function createWindow(apiBase) {
     height: 900,
     minWidth: 1120,
     minHeight: 720,
-    backgroundColor: '#09111f',
+    backgroundColor: '#000000',
+    show: false,
+    opacity: process.platform === 'win32' ? 0 : 1,
+    paintWhenInitiallyHidden: false,
     title: 'NexusData',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -219,8 +246,13 @@ function createWindow(apiBase) {
     }
   });
   bindCloseConfirmation(window);
-  window.maximize();
   setApplicationMenuForView(window, null);
+  const revealWindow = () => {
+    window.maximize();
+    window.show();
+    if (process.platform === 'win32') window.setOpacity(1);
+  };
+  window.webContents.once('did-finish-load', revealWindow);
   window.loadURL(apiBase);
   return window;
 }
@@ -288,7 +320,7 @@ app.whenReady().then(async () => {
     return result.canceled ? [] : result.filePaths;
   });
 
-  ipcMain.handle('get-file-system-roots', () => fileExplorerService.getRoots());
+  ipcMain.handle('get-file-system-roots', (_event, additionalRoots) => fileExplorerService.getRoots(additionalRoots));
   ipcMain.handle('list-file-system-directory', (_event, directoryPath) => fileExplorerService.listDirectory(directoryPath));
   ipcMain.handle('search-file-system', (_event, payload) => fileExplorerService.searchDirectory(payload));
   ipcMain.handle('open-file-system-entry', (_event, filePath) => fileExplorerService.openEntry(filePath));

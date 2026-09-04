@@ -5,7 +5,8 @@ export const DEFAULT_DIAGRAM_LINE_CONTRAST = 'normal';
 export const DIAGRAM_LINE_CONTRASTS = Object.freeze({
   low: Object.freeze({ label: 'Bajo' }),
   normal: Object.freeze({ label: 'Medio' }),
-  high: Object.freeze({ label: 'Alto' })
+  high: Object.freeze({ label: 'Intermedio' }),
+  'very-high': Object.freeze({ label: 'Alto' })
 });
 
 function isDiagramLineContrast(value) {

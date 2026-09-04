@@ -24,8 +24,6 @@
   .global-source-actions { justify-content: flex-start; }
   .search-toolbar .search-bar { min-width: 0; }
   .file-explorer-toolbar { align-items: stretch; flex-wrap: wrap; padding: 7px 12px; }
-  .file-explorer-navigation-actions { width: 100%; }
-  .file-explorer-path-form { flex-basis: 100%; }
   .file-explorer-filterbar { align-items: stretch; flex-wrap: wrap; padding: 7px 12px; }
   .file-explorer-search-form { flex-basis: 100%; }
   .file-explorer-view-switcher { margin-left: auto; }
@@ -46,6 +44,9 @@
   .code-map-resizer { display: none; }
   .code-map-tree { max-height: 180px; }
 }
+
+.file-explorer-breadcrumbs { overflow: hidden; }
+.file-explorer-breadcrumb-path { display: flex; align-items: center; gap: 4px; min-width: 0; flex: 1 1 auto; overflow-x: auto; scrollbar-width: thin; }
 
 @media (max-width: 520px) {
   .code-map-actions .btn { flex: 1 1 auto; }

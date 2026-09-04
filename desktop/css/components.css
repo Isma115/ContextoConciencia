@@ -27,7 +27,7 @@
 .pill.ready { border-color: var(--success-border); color: var(--green); background: var(--success-surface); }
 .pill.error { border-color: var(--error-border); color: var(--red); background: var(--error-surface); }
 .pill.syncing { border-color: color-mix(in srgb, var(--amber) 40%, var(--line)); color: var(--amber); background: color-mix(in srgb, var(--amber) 10%, var(--surface)); }
-.result-list { display: grid; gap: 6px; }
+.result-list { display: grid; grid-auto-rows: max-content; gap: 6px; }
 .result-card { padding: 12px 13px; border: 1px solid var(--line); border-radius: 3px; background: var(--surface-card); transition: background .12s, border-color .12s, box-shadow .12s; }
 .result-card:hover { border-color: var(--hover-border); background: var(--hover-surface); box-shadow: 0 0 0 1px var(--blue-soft); }
 .result-card.document-type-markdown, .doc-row.document-type-markdown { --document-type-color: #76b6ff; --document-type-border: #4c87bd; --document-type-surface: rgba(118, 182, 255, .14); }

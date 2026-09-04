@@ -56,10 +56,10 @@ function createFileExplorerService({ app, fs, path, shell }) {
     return name;
   }
 
-  function fileSystemRoots() {
+  function fileSystemRoots(additionalRoots = []) {
     const roots = [];
     const seen = new Set();
-    const addRoot = (candidate, label, kind = 'shortcut') => {
+    const addRoot = (candidate, label, kind = 'shortcut', sourceId = '') => {
       if (typeof candidate !== 'string' || !candidate.trim()) return;
       const normalized = path.normalize(candidate);
       const key = pathKey(normalized);
@@ -70,8 +70,15 @@ function createFileExplorerService({ app, fs, path, shell }) {
         return;
       }
       seen.add(key);
-      roots.push({ path: normalized, label, kind });
+      roots.push({ path: normalized, label, kind, ...(sourceId ? { sourceId } : {}) });
     };
+
+    (Array.isArray(additionalRoots) ? additionalRoots : []).forEach((root) => {
+      if (!root || typeof root !== 'object') return;
+      const label = typeof root.label === 'string' && root.label.trim() ? root.label.trim() : 'Fuente local';
+      const sourceId = typeof root.sourceId === 'string' ? root.sourceId : '';
+      addRoot(root.path, label, 'source', sourceId);
+    });
 
     addRoot(app.getPath('home'), 'Inicio');
     [

@@ -1,16 +1,31 @@
 import { $ } from '../core/dom.js';
+import { state as applicationState } from '../core/state.js';
 import { showToast } from '../ui/notifications.js';
 import { openFileExplorerDeleteDialog, openFileExplorerNameDialog } from './file-explorer-dialogs.js';
 import { copyTextToClipboard, fileExplorerOperations } from './file-explorer-operations.js';
 import { selectedFileExplorerPaths, createFileExplorerState, applyFileExplorerDirectoryResult, applyFileExplorerSearchResult, clearFileExplorerSelection, normaliseFileExplorerViewMode, pushFileExplorerHistory, resetFileExplorerDirectory, saveFileExplorerPreferences, setFileExplorerHistoryIndex } from './file-explorer-state.js';
-import { visibleFileExplorerEntries } from './file-explorer-format.js';
+import { sourceRoots, visibleFileExplorerEntries } from './file-explorer-format.js';
 import { renderFileExplorerView } from './file-explorer-render.js';
 
 const explorerState = createFileExplorerState();
 let boundContainer = null;
+let loadedSourceRootsKey = '';
+let lastEntryClick = null;
+const DOUBLE_CLICK_WINDOW_MS = 650;
 
-function redraw() {
-  if (boundContainer) renderFileExplorerView(boundContainer, explorerState);
+function redraw({ preserveContentScroll = false } = {}) {
+  if (!boundContainer) return;
+  const currentContent = preserveContentScroll ? boundContainer.querySelector('.file-explorer-content') : null;
+  const scrollTop = currentContent?.scrollTop || 0;
+  const scrollLeft = currentContent?.scrollLeft || 0;
+  renderFileExplorerView(boundContainer, explorerState);
+  if (preserveContentScroll) {
+    const nextContent = boundContainer.querySelector('.file-explorer-content');
+    if (nextContent) {
+      nextContent.scrollTop = scrollTop;
+      nextContent.scrollLeft = scrollLeft;
+    }
+  }
 }
 
 function operationError(error, fallback) {
@@ -40,11 +55,14 @@ async function loadRoots({ force = false, recordHistory = false } = {}) {
   explorerState.errorMessage = '';
   explorerState.contextMenu = null;
   redraw();
+  const configuredSourceRoots = sourceRoots(applicationState.sources);
+  const configuredSourceRootsKey = JSON.stringify(configuredSourceRoots);
   try {
-    const result = await fileExplorerOperations.getRoots();
+    const result = await fileExplorerOperations.getRoots(configuredSourceRoots);
     if (activeRequestId !== explorerState.requestId) return;
     explorerState.roots = Array.isArray(result) ? result : [];
     explorerState.rootsLoaded = true;
+    loadedSourceRootsKey = configuredSourceRootsKey;
     explorerState.errorMessage = '';
   } catch (error) {
     if (activeRequestId === explorerState.requestId) explorerState.errorMessage = error.message || 'No se pudieron cargar las ubicaciones locales';
@@ -94,13 +112,18 @@ async function loadDirectory(directoryPath, { historyMode = 'push', historyIndex
 }
 
 async function searchCurrentDirectory(query = explorerState.query) {
-  if (!explorerState.currentPath || explorerState.loading) return;
+  if (explorerState.loading) return;
+  const basePath = explorerState.currentPath
+    || explorerState.roots.find((root) => root.kind !== 'drive')?.path
+    || explorerState.roots[0]?.path
+    || '';
+  if (!basePath) return;
   const value = String(query || '').trim();
   if (!value) {
-    await loadDirectory(explorerState.currentPath, { historyMode: 'none' });
+    await loadDirectory(basePath, { historyMode: 'none' });
     return;
   }
-  const basePath = explorerState.currentPath;
+  if (!explorerState.currentPath) pushFileExplorerHistory(explorerState, basePath);
   const activeRequestId = ++explorerState.requestId;
   explorerState.loading = true;
   explorerState.loadingKind = 'search';
@@ -211,14 +234,14 @@ function selectEntry(entryElement, event) {
     explorerState.selectionAnchor = filePath;
   }
   explorerState.contextMenu = null;
-  redraw();
+  redraw({ preserveContentScroll: true });
 }
 
 function selectAllEntries() {
   if (!explorerState.currentPath) return;
   explorerState.selectedPaths = new Set(visibleFileExplorerEntries(explorerState).map((entry) => entry.path));
   explorerState.selectionAnchor = [...explorerState.selectedPaths][0] || null;
-  redraw();
+  redraw({ preserveContentScroll: true });
 }
 
 function openEntry(entry) {
@@ -395,7 +418,7 @@ function handleEntryContextMenu(event, entryElement) {
     explorerState.selectionAnchor = filePath;
   }
   explorerState.contextMenu = { x: event.clientX, y: event.clientY, path: filePath };
-  redraw();
+  redraw({ preserveContentScroll: true });
 }
 
 function handleKeydown(event) {
@@ -455,25 +478,43 @@ function bindFileExplorerEvents(container) {
   container.addEventListener('click', (event) => {
     const contextAction = event.target.closest?.('[data-file-explorer-context-action]');
     if (contextAction) {
+      lastEntryClick = null;
       void handleContextAction(contextAction.dataset.fileExplorerContextAction);
       return;
     }
     if (explorerState.contextMenu && !event.target.closest('.file-explorer-context-menu')) explorerState.contextMenu = null;
     const actionTarget = event.target.closest?.('[data-file-explorer-action]');
     if (actionTarget && container.contains(actionTarget) && !actionTarget.disabled) {
+      lastEntryClick = null;
       const action = actionTarget.dataset.fileExplorerAction;
       if (action === 'toggle-hidden') return;
       void handleAction(action, actionTarget);
       return;
     }
     const entry = event.target.closest?.('[data-file-explorer-entry]');
-    if (entry && container.contains(entry) && !explorerState.loading) selectEntry(entry, event);
+    if (entry && container.contains(entry) && !explorerState.loading) {
+      const filePath = entry.dataset.fileExplorerEntry;
+      const additiveSelection = event.ctrlKey || event.metaKey || event.shiftKey;
+      const now = Date.now();
+      const isDoubleClick = !additiveSelection
+        && lastEntryClick?.path === filePath
+        && now - lastEntryClick.timestamp <= DOUBLE_CLICK_WINDOW_MS;
+      lastEntryClick = isDoubleClick ? null : { path: filePath, timestamp: now };
+      if (isDoubleClick) {
+        event.preventDefault();
+        openEntry(entryForPath(filePath));
+        return;
+      }
+      if (entry.dataset.fileExplorerKind === 'directory' && !additiveSelection) {
+        lastEntryClick = null;
+        openEntry(entryForPath(filePath));
+      } else {
+        selectEntry(entry, event);
+      }
+    } else {
+      lastEntryClick = null;
+    }
     if (explorerState.contextMenu) redraw();
-  });
-  container.addEventListener('dblclick', (event) => {
-    const entryElement = event.target.closest?.('[data-file-explorer-entry]');
-    if (!entryElement || explorerState.loading) return;
-    openEntry(entryForPath(entryElement.dataset.fileExplorerEntry));
   });
   container.addEventListener('contextmenu', (event) => {
     const entryElement = event.target.closest?.('[data-file-explorer-entry]');
@@ -488,12 +529,6 @@ function bindFileExplorerEvents(container) {
     }
   });
   container.addEventListener('submit', (event) => {
-    if (event.target.id === 'file-explorer-path-form') {
-      event.preventDefault();
-      const input = $('#file-explorer-path', event.target);
-      if (input?.value.trim()) void loadDirectory(input.value);
-      return;
-    }
     if (event.target.id === 'file-explorer-search-form') {
       event.preventDefault();
       const input = $('#file-explorer-search', event.target);
@@ -526,5 +561,6 @@ export function renderFileExplorer() {
   boundContainer = container;
   bindFileExplorerEvents(container);
   renderFileExplorerView(container, explorerState);
-  if (!explorerState.rootsLoaded && !explorerState.loading && !explorerState.currentPath && !explorerState.errorMessage) void loadRoots();
+  const sourceRootsChanged = loadedSourceRootsKey !== JSON.stringify(sourceRoots(applicationState.sources));
+  if (!explorerState.loading && (!explorerState.rootsLoaded || sourceRootsChanged)) void loadRoots({ force: sourceRootsChanged });
 }

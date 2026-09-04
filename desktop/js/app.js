@@ -117,7 +117,7 @@ function renderSidebarSearch() {
   toggle.setAttribute('aria-expanded', String(expanded));
   toggle.setAttribute('aria-label', expanded ? 'Ocultar búsqueda rápida' : 'Mostrar búsqueda rápida');
   toggle.title = expanded ? 'Ocultar búsqueda rápida' : 'Mostrar búsqueda rápida';
-  toggle.textContent = expanded ? '⌃' : '⌄';
+  toggle.classList.toggle('is-expanded', expanded);
 }
 
 function bindSidebarSearchToggle() {

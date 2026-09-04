@@ -1,6 +1,6 @@
 const FILE_EXPLORER_PREFERENCES_KEY = 'nexusdata.file-explorer.preferences.v1';
 const SORT_FIELDS = new Set(['name', 'type', 'size', 'modified']);
-const VIEW_MODES = new Set(['list', 'grid', 'details']);
+const VIEW_MODES = new Set(['list', 'grid']);
 
 function storedPreferences() {
   try {

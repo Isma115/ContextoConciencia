@@ -41,6 +41,26 @@ test('separa las operaciones de navegación, búsqueda y creación del explorado
   }
 });
 
+test('solo expone como accesos directos configurados las rutas que son carpetas', () => {
+  const root = createFixture();
+  try {
+    const service = createService(root);
+    const sourceDirectory = path.join(root, 'src');
+    const sourceFile = path.join(root, 'notes.txt');
+    const roots = service.getRoots([
+      { path: sourceDirectory, label: 'Documentación', kind: 'source', sourceId: 'source-1' },
+      { path: sourceFile, label: 'Notas', kind: 'source', sourceId: 'source-1' }
+    ]);
+
+    assert.deepEqual(
+      roots.filter((entry) => entry.sourceId === 'source-1'),
+      [{ path: sourceDirectory, label: 'Documentación', kind: 'source', sourceId: 'source-1' }]
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('copia, mueve y elimina sin permitir operaciones peligrosas sobre una carpeta padre', async () => {
   const root = createFixture();
   try {
