@@ -64,6 +64,24 @@ test('exporta una forma canónica que se puede volver a importar', async () => {
   assert.deepEqual(restored.edges[0], { id: 'edge-1', ...original.edges[0] });
 });
 
+test('conserva las descripciones visibles de las tarjetas al exportar e importar', async () => {
+  const { parseDiagramText, serializeDiagram } = await language;
+  const original = {
+    title: 'Flujo detallado',
+    nodes: [
+      { id: 'entrada', label: 'Entrada', type: 'start', x: 120, y: 80 },
+      { id: 'validar', label: 'Validar', type: 'step', x: 420, y: 80, description: 'Comprueba los datos recibidos antes de continuar.' }
+    ],
+    edges: []
+  };
+
+  const restored = parseDiagramText(serializeDiagram(original));
+
+  assert.equal(restored.nodes[0].description, undefined);
+  assert.equal(restored.nodes[1].description, original.nodes[1].description);
+  assert.match(serializeDiagram(original), /description validar "Comprueba los datos recibidos antes de continuar\."/);
+});
+
 test('señala errores con la línea donde aparece el problema', async () => {
   const { DiagramSyntaxError, parseDiagramText } = await language;
   assert.throws(

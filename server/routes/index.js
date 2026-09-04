@@ -309,7 +309,7 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
   app.get('/api/health', (req, res) => res.json({ ok: true, name: 'NexusData API', timestamp: now() }));
   installAuthRoutes(app, authDb, environment, { offlineOnly });
   app.use('/api', requireAuth(authDb, environment, { offlineOnly }));
-  installSddRoutes(app, db, { mediaRoot: path.join(path.dirname(db.path), 'sdd-media') });
+  installSddRoutes(app);
 
   app.post('/api/html-viewer/inspect', (req, res) => {
     try {

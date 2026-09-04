@@ -182,6 +182,10 @@ html[data-diagram-line-contrast="high"] {
 .diagram-node-start .diagram-node-surface { border-color: var(--success-border); border-radius: 999px; background: var(--success-surface); padding-right: 20px; padding-left: 20px; }
 .diagram-node-decision .diagram-node-surface { border: 0; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); background: var(--warning-surface); padding: 22px 38px; filter: drop-shadow(0 8px 9px rgba(0,0,0,.3)); }
 .diagram-node-end .diagram-node-surface { border: 3px double var(--danger-border); border-radius: 999px; background: var(--error-surface); padding-right: 20px; padding-left: 20px; }
+.diagram-node-has-description .diagram-node-surface { overflow: hidden; border-radius: 6px; }
+.diagram-node-start.diagram-node-has-description .diagram-node-surface { padding-right: 12px; padding-left: 12px; }
+.diagram-node-decision.diagram-node-has-description .diagram-node-surface { border: 1px solid var(--warning-border); border-radius: 6px; clip-path: none; background: var(--warning-surface); padding: 11px 12px; filter: drop-shadow(0 8px 9px rgba(0,0,0,.3)); }
+.diagram-node-end.diagram-node-has-description .diagram-node-surface { border-radius: 6px; padding-right: 12px; padding-left: 12px; }
 .diagram-node-decision.is-selected .diagram-node-surface { border: 0; box-shadow: none; filter: drop-shadow(0 0 2px var(--blue)) drop-shadow(0 8px 9px rgba(0,0,0,.3)); }
 .diagram-node-start .diagram-node-type { color: var(--green); }
 .diagram-node-decision .diagram-node-type { color: var(--amber); }
@@ -189,6 +193,8 @@ html[data-diagram-line-contrast="high"] {
 .diagram-node-decision .diagram-node-topline { justify-content: center; }
 .diagram-node-decision .diagram-node-delete { display: none; }
 .diagram-node-decision .diagram-node-label { text-align: center; }
+.diagram-node-decision.diagram-node-has-description .diagram-node-topline { justify-content: space-between; }
+.diagram-node-decision.diagram-node-has-description.is-selected .diagram-node-surface { border: 1px solid var(--warning-border); box-shadow: 0 0 0 2px var(--blue-soft), 0 8px 18px rgba(0,0,0,.3); }
 .diagram-node.is-connection-source .diagram-node-surface { border-color: var(--green); box-shadow: 0 0 0 2px var(--success-border), 0 8px 18px rgba(0,0,0,.3); }
 .diagram-node-decision.is-connection-source .diagram-node-surface { filter: drop-shadow(0 0 3px var(--green)) drop-shadow(0 8px 9px rgba(0,0,0,.3)); }
 .diagram-node-topline { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
@@ -197,6 +203,11 @@ html[data-diagram-line-contrast="high"] {
 .diagram-node-delete:hover { color: var(--strong); background: var(--hover-surface); box-shadow: inset 0 0 0 1px var(--hover-border); }
 .diagram-node-label { width: 100%; min-width: 0; border: 1px solid transparent; border-radius: 3px; outline: 0; padding: 4px 5px; color: var(--strong); background: transparent; font-size: 14px; font-weight: 650; letter-spacing: .05px; line-height: 1.25; text-shadow: 0 1px 0 var(--surface-deep); transition: background .12s, border-color .12s, box-shadow .12s; }
 .diagram-node-label:hover, .diagram-node-label:focus { border-color: var(--hover-border); background: var(--surface-code); }
+.diagram-node-description-wrap { min-width: 0; display: grid; gap: 4px; }
+.diagram-node-description-title { overflow: hidden; color: var(--accent-text-soft); font-family: var(--mono); font-size: 9px; font-weight: 700; letter-spacing: .55px; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+.diagram-node-description { width: 100%; min-width: 0; min-height: 58px; box-sizing: border-box; resize: none; overflow: auto; border: 1px solid var(--line-strong); border-radius: 3px; outline: 0; padding: 6px 7px; color: var(--text); background: var(--surface-code); font-family: inherit; font-size: 10px; line-height: 1.35; white-space: pre-wrap; }
+.diagram-node-description:hover, .diagram-node-description:focus { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue-soft); }
+.diagram-node-description::placeholder { color: var(--muted); opacity: 1; }
 .diagram-port { position: absolute; z-index: 4; width: 6px; height: 6px; border: 1px solid var(--surface-deep); border-radius: 50%; outline: 0; padding: 0; color: transparent; background: var(--accent-text-soft); box-shadow: 0 0 0 1px var(--accent-text-soft); cursor: crosshair; }
 .diagram-port:hover, .diagram-port:focus-visible { background: var(--blue); box-shadow: 0 0 0 1px var(--blue-soft); }
 .diagram-port.is-source { background: var(--cyan); box-shadow: 0 0 0 1px var(--cyan); }
@@ -497,7 +508,7 @@ body.is-code-map-resizing, body.is-code-map-resizing * { cursor: col-resize !imp
 
 /* ------------------------------------------------------------------ S.D.D */
 .sdd-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
-.sdd-toolbar-actions { display: flex; align-items: center; gap: 6px; }
+.sdd-toolbar-actions { display: flex; align-items: center; gap: 6px; margin-left: auto; }
 .sdd-toolbar-copy { min-width: 0; display: grid; gap: 4px; }
 .sdd-toolbar-copy h2 { font-size: 13px; }
 .sdd-count { color: var(--muted-2); font-family: var(--mono); font-size: 9px; }
@@ -509,6 +520,8 @@ body.is-code-map-resizing, body.is-code-map-resizing * { cursor: col-resize !imp
 .sdd-card-title { margin: 0; color: var(--strong); font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
 .sdd-card-desc { margin: 9px 0 0; color: var(--text); font-size: 11px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sdd-card-meta { margin-top: 9px; color: var(--muted-2); font-family: var(--mono); font-size: 9px; }
+.sdd-project-context { max-width: min(720px, 100%); display: grid; gap: 3px; margin-top: 8px; color: var(--muted-2); font-family: var(--mono); font-size: 9px; overflow-wrap: anywhere; }
+.sdd-project-context-path { color: var(--accent-text-soft); }
 .sdd-card-actions { display: flex; align-items: center; gap: 5px; flex: 0 0 auto; }
 .sdd-badges { display: flex; align-items: center; flex-wrap: wrap; gap: 5px; }
 .sdd-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 3px; color: var(--muted); background: var(--surface-raised); font-family: var(--mono); font-size: 9px; white-space: nowrap; }

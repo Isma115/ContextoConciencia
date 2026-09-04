@@ -25,14 +25,35 @@ class MemoryAuthStore {
   }
 }
 
-async function request(route, options = {}) {
-  const response = await fetch(`http://127.0.0.1:${api.port}/api${route}`, { headers: { 'Content-Type': 'application/json', ...(sessionCookie ? { Cookie: sessionCookie } : {}), ...(options.headers || {}) }, ...options });
+async function request(route, options = {}, projectPath = '') {
+  const { headers: optionHeaders = {}, ...fetchOptions } = options;
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(sessionCookie ? { Cookie: sessionCookie } : {}),
+    ...(projectPath ? { 'X-SDD-Project-Path': projectPath } : {}),
+    ...optionHeaders
+  };
+  const response = await fetch(`http://127.0.0.1:${api.port}/api${route}`, { ...fetchOptions, headers });
   const cookie = response.headers.getSetCookie?.()[0] || response.headers.get('set-cookie');
   if (cookie) sessionCookie = cookie.split(';', 1)[0];
   const text = await response.text();
   let body = {};
   try { body = text ? JSON.parse(text) : {}; } catch { body = { raw: text }; }
   return { status: response.status, ok: response.ok, body };
+}
+
+function createProject(name, markdown) {
+  const projectPath = path.join(fixtureDir, name);
+  fs.mkdirSync(path.join(projectPath, 'specs_resources'), { recursive: true });
+  fs.writeFileSync(path.join(projectPath, 'specs.md'), markdown, 'utf8');
+  return projectPath;
+}
+
+async function loadProject(projectPath) {
+  const loaded = await request('/sdd/project', { method: 'POST', body: JSON.stringify({ path: projectPath }) });
+  assert.equal(loaded.status, 200);
+  assert.equal(loaded.body.project.path, fs.realpathSync(projectPath));
+  return loaded;
 }
 
 test('parsea encabezados de specs.md con estado y categoría', () => {
@@ -109,59 +130,123 @@ before(async () => {
   await request('/auth/register', { method: 'POST', body: JSON.stringify({ username: 'sdd.tester', password: 'contraseña-muy-segura' }) });
 });
 
-test('sincroniza las specs de la base de datos desde el markdown', async () => {
-  const markdown = `# Specs
+test('no conserva proyecto S.D.D en el servidor y exige contexto por petición', async () => {
+  const unloaded = await request('/sdd/project');
+  assert.equal(unloaded.status, 200);
+  assert.equal(unloaded.body.loaded, false);
+  const missingContext = await request('/sdd/specs');
+  assert.equal(missingContext.status, 400);
+  assert.match(missingContext.body.error, /carpeta del proyecto S\.D\.D/);
+});
 
-## Buscar documentos
+test('carga specs.md y refleja cambios externos sin sincronizar una base local', async () => {
+  const projectPath = createProject('sdd-project-specs', `# Specs
+
+## Requisito inicial
 **Estado:** activa
-**Prioridad:** alta
-**Categoría:** Búsqueda
+`);
+  const loaded = await loadProject(projectPath);
+  assert.equal(loaded.body.total, 1);
+  assert.equal((await request('/sdd/specs', {}, projectPath)).body.specs[0].title, 'Requisito inicial');
 
-Permite buscar por contenido.
+  fs.writeFileSync(path.join(projectPath, 'specs.md'), '# Specs\n\n## Requisito actualizado\n**Estado:** implementada\n', 'utf8');
+  const listed = await request('/sdd/specs', {}, projectPath);
+  assert.deepEqual(listed.body.specs.map((spec) => spec.title), ['Requisito actualizado']);
+  assert.equal(listed.body.specs[0].status, 'implemented');
 
-## Exportar diagramas
-**Estado:** implementada
-**Prioridad:** media
-`;
-  const synced = await request('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown }) });
-  assert.equal(synced.status, 200);
-  assert.equal(synced.body.total, 2);
-  const titles = synced.body.specs.map((spec) => spec.title).sort();
-  assert.deepEqual(titles, ['Buscar documentos', 'Exportar diagramas']);
-
-  const listed = await request('/sdd/specs');
-  assert.equal(listed.body.specs.length, 2);
+  const sddTables = api.app.locals.db.raw.prepare("SELECT name FROM sqlite_master WHERE name LIKE 'sdd_%'").all();
+  assert.deepEqual(sddTables, []);
 });
 
-test('reemplaza las specs previas al volver a inyectar', async () => {
-  await request('/sdd/specs', { method: 'POST', body: JSON.stringify({ title: 'Spec manual previa' }) });
-  const before = await request('/sdd/specs');
-  assert.equal(before.body.specs.length, 3);
+test('sincroniza el editor y CRUD de Specs directamente en specs.md', async () => {
+  const projectPath = createProject('sdd-project-spec-crud', '# Specs\n\n## Primera spec\n**Estado:** activa\n');
+  await loadProject(projectPath);
+  const markdown = await request('/sdd/specs/markdown', {}, projectPath);
+  assert.match(markdown.body.markdown, /## Primera spec/);
 
-  const synced = await request('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: '## Solo esta spec\n**Estado:** activa\nNueva descripción.' }) });
+  const synced = await request('/sdd/specs/sync', {
+    method: 'POST',
+    body: JSON.stringify({ markdown: '# Specs\n\n## Desde editor\n**Estado:** aprobada\n\nDescripción editada.\n' })
+  }, projectPath);
   assert.equal(synced.body.total, 1);
-  assert.equal(synced.body.specs[0].title, 'Solo esta spec');
-  assert.equal(synced.body.specs[0].priority, undefined);
+  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Desde editor/);
 
-  const after = await request('/sdd/specs');
-  assert.equal(after.body.specs.length, 1);
+  const created = await request('/sdd/specs', { method: 'POST', body: JSON.stringify({ title: 'Añadida', status: 'draft', description: 'Texto' }) }, projectPath);
+  assert.equal(created.status, 201);
+  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Añadida/);
+  const updated = await request(`/sdd/specs/${created.body.id}`, { method: 'PUT', body: JSON.stringify({ title: 'Añadida actualizada', status: 'implemented' }) }, projectPath);
+  assert.equal(updated.status, 200);
+  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Añadida actualizada/);
+  const removed = await request(`/sdd/specs/${created.body.id}`, { method: 'DELETE' }, projectPath);
+  assert.equal(removed.status, 204);
+  assert.doesNotMatch(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Añadida actualizada/);
 });
 
-test('rechaza un markdown sin specs', async () => {
-  const response = await request('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: '# Solo título' }) });
-  assert.equal(response.status, 400);
-  assert.match(response.body.error, /No se encontraron specs/);
+test('guarda Base de datos en el bloque S.D.D de specs.md y lo vuelve a leer del disco', async () => {
+  const projectPath = createProject('sdd-project-db-file', '# Specs\n\n## Requisito de datos\n');
+  await loadProject(projectPath);
+  const created = await request('/sdd/db/tables', { method: 'POST', body: JSON.stringify({ name: 'usuarios', description: 'Personas' }) }, projectPath);
+  assert.equal(created.status, 201);
+  const column = await request(`/sdd/db/tables/${created.body.id}/columns`, {
+    method: 'POST',
+    body: JSON.stringify({ name: 'id', type: 'INTEGER', primaryKey: true, nullable: false })
+  }, projectPath);
+  assert.equal(column.status, 201);
+  const raw = fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8');
+  assert.match(raw, /nexusdata:sdd-database:start/);
+  assert.match(raw, /"name": "usuarios"/);
+  assert.match(raw, /"name": "id"/);
+
+  const listed = await request('/sdd/db', {}, projectPath);
+  assert.equal(listed.body.tables[0].name, 'usuarios');
+  assert.equal(listed.body.tables[0].columns[0].name, 'id');
+
+  fs.writeFileSync(path.join(projectPath, 'specs.md'), raw.replace('"usuarios"', '"usuarios_externos"'), 'utf8');
+  const externallyUpdated = await request('/sdd/db', {}, projectPath);
+  assert.equal(externallyUpdated.body.tables[0].name, 'usuarios_externos');
 });
 
-test('expone el markdown de las specs y vuelve a sincronizarse sin cambios', async () => {
-  const markdown = await request('/sdd/specs/markdown');
-  assert.match(markdown.body.markdown, /^# Specs/);
-  assert.match(markdown.body.markdown, /## Solo esta spec/);
-  const totalBefore = (await request('/sdd/specs')).body.specs.length;
-  const reSynced = await request('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: markdown.body.markdown }) });
-  assert.equal(reSynced.body.total, totalBefore);
-  const totalAfter = (await request('/sdd/specs')).body.specs.length;
-  assert.equal(totalAfter, totalBefore);
+test('guarda UI en specs.md y los ficheros multimedia en specs_resources', async () => {
+  const projectPath = createProject('sdd-project-ui-file', '# Specs\n\n## Requisito visual\n');
+  await loadProject(projectPath);
+  const text = await request('/sdd/media?kind=text&title=Nota%20UI&description=Contexto', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: Buffer.from('Contenido visual')
+  }, projectPath);
+  assert.equal(text.status, 201);
+  assert.equal((await request('/sdd/media', {}, projectPath)).body.media[0].content, 'Contenido visual');
+
+  const image = await request('/sdd/media?kind=image&title=Pantalla&fileName=screen.png', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: Buffer.from([137, 80, 78, 71])
+  }, projectPath);
+  assert.equal(image.status, 201);
+  assert.equal(fs.existsSync(path.join(projectPath, 'specs_resources', 'screen.png')), true);
+  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /nexusdata:sdd-ui:start/);
+  assert.equal((await request('/sdd/media', {}, projectPath)).body.media.some((item) => item.fileName === 'screen.png'), true);
+});
+
+test('mantiene aislados dos proyectos porque cada petición lee sus propios ficheros', async () => {
+  const firstProject = createProject('sdd-project-a', '# Specs\n\n## Proyecto A\n');
+  const secondProject = createProject('sdd-project-b', '# Specs\n\n## Proyecto B\n');
+  await loadProject(firstProject);
+  const table = await request('/sdd/db/tables', { method: 'POST', body: JSON.stringify({ name: 'tabla-a' }) }, firstProject);
+  await request('/sdd/media?kind=text&title=UI%20A', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: Buffer.from('UI del proyecto A')
+  }, firstProject);
+
+  await loadProject(secondProject);
+  assert.deepEqual((await request('/sdd/specs', {}, secondProject)).body.specs.map((spec) => spec.title), ['Proyecto B']);
+  assert.deepEqual((await request('/sdd/db', {}, secondProject)).body.tables, []);
+  assert.deepEqual((await request('/sdd/media', {}, secondProject)).body.media, []);
+
+  assert.equal((await request('/sdd/db', {}, firstProject)).body.tables[0].name, 'tabla-a');
+  assert.equal((await request('/sdd/media', {}, firstProject)).body.media[0].title, 'UI A');
+  assert.ok(table.body.id);
 });
 
 after(async () => {

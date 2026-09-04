@@ -4,16 +4,44 @@ import { sectionIconMarkup } from '../core/section-icons.js';
 import { showToast } from '../ui/notifications.js';
 import { closeModal, bindModalClose } from '../ui/modals.js';
 import { shortDate } from '../core/format.js';
+import { state } from '../core/state.js';
 
 const SPEC_STATUS = Object.freeze({ draft: 'Borrador', active: 'Activa', approved: 'Aprobada', implemented: 'Implementada' });
 const MEDIA_KIND = Object.freeze({ text: 'Texto', image: 'Imagen', video: 'Vídeo' });
-const SPECS_FOLDER_STORAGE_KEY = 'sdd.specsFolderPath';
 const SPECS_RESOURCES_FOLDER_NAME = 'specs_resources';
 let renderRequestId = 0;
 let selectedMedia = { dataUrl: null, name: '' };
-let loadedSpecsMarkdown = null;
-let loadedSpecsResources = null;
-let loadedSpecsResourcesFolder = '';
+
+export function setSddProject(project = null, { refresh = false } = {}) {
+  const previousPath = state.sddProject?.path || '';
+  const nextProject = project && typeof project.path === 'string' && project.path.trim()
+    ? { ...project, path: project.path.trim() }
+    : null;
+  state.sddProject = nextProject;
+  if (!refresh && previousPath === (nextProject?.path || '')) return;
+  renderRequestId += 1;
+}
+
+function currentSddProjectPath() {
+  return state.sddProject?.path || '';
+}
+
+function hasSddProject() {
+  return Boolean(currentSddProjectPath());
+}
+
+function sddApi(route, options = {}) {
+  const projectPath = currentSddProjectPath();
+  if (!projectPath) throw new Error('Carga un proyecto S.D.D antes de continuar');
+  return api(route, {
+    ...options,
+    cache: 'no-store',
+    headers: {
+      ...(options.headers || {}),
+      'X-SDD-Project-Path': projectPath
+    }
+  });
+}
 
 function isViewActive(viewId) {
   const node = document.getElementById(viewId);
@@ -21,11 +49,17 @@ function isViewActive(viewId) {
 }
 
 function sddHeader(icon, eyebrow, title, lead) {
-  return `<div class="section-top"><div class="section-heading-with-icon">${sectionIconMarkup(icon)}<div class="section-heading-copy"><span class="diagram-eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p class="lead">${escapeHtml(lead)}</p></div></div></div>`;
+  const project = state.sddProject?.path
+    ? `<div class="sdd-project-context" title="${escapeHtml(state.sddProject.path)}"><span>Proyecto: ${escapeHtml(state.sddProject.name || state.sddProject.path)}</span><span class="sdd-project-context-path">Ruta: ${escapeHtml(state.sddProject.path)}</span></div>`
+    : '';
+  return `<div class="section-top"><div class="section-heading-with-icon">${sectionIconMarkup(icon)}<div class="section-heading-copy"><span class="diagram-eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p class="lead">${escapeHtml(lead)}</p>${project}</div></div></div>`;
 }
 
 function sddToolbar(label, count, addId, addLabel, extraButton = '') {
-  return `<div class="sdd-toolbar"><div class="sdd-toolbar-copy"><h2>${escapeHtml(label)}</h2><span id="${addId}-count" class="sdd-count">${escapeHtml(count)}</span></div><div class="sdd-toolbar-actions">${extraButton}<button id="${addId}" class="btn btn-primary" type="button">${escapeHtml(addLabel)}</button></div></div>`;
+  const copy = label || count
+    ? `<div class="sdd-toolbar-copy"><h2>${escapeHtml(label)}</h2><span id="${addId}-count" class="sdd-count">${escapeHtml(count)}</span></div>`
+    : '';
+  return `<div class="sdd-toolbar">${copy}<div class="sdd-toolbar-actions">${extraButton}<button id="${addId}" class="btn btn-primary" type="button">${escapeHtml(addLabel)}</button></div></div>`;
 }
 
 function emptyState(title, description) {
@@ -47,39 +81,24 @@ async function confirmDelete(message) {
 
 /* ----------------------------------------------------------------- Inyectar */
 
-function specsFolderStored() {
-  try {
-    const folder = localStorage.getItem(SPECS_FOLDER_STORAGE_KEY);
-    if (folder) return folder;
-    const legacy = localStorage.getItem('sdd.specsPath');
-    if (legacy) {
-      const parent = legacy.replace(/[\\/]specs\.md$/i, '');
-      return parent && parent !== legacy ? parent : '';
-    }
-    return '';
-  } catch { return ''; }
+function renderSddProjectRequired(container, icon, eyebrow, title, lead) {
+  if (hasSddProject()) return false;
+  container.innerHTML = `${sddHeader(icon, eyebrow, title, lead)}${emptyState('Sin proyecto S.D.D', 'Usa “Cargar” para seleccionar un proyecto que contenga specs.md y specs_resources.')}`;
+  return true;
 }
 
-function storeSpecsFolder(specsFolderPath) {
-  try { localStorage.setItem(SPECS_FOLDER_STORAGE_KEY, specsFolderPath); } catch { /* Sin almacenamiento disponible. */ }
-}
-
-async function persistSpecsMarkdown() {
-  const specsFolderPath = specsFolderStored();
-  if (!specsFolderPath || typeof window.nexusData?.writeSddSpecsMarkdown !== 'function') return;
-  const { markdown } = await api('/sdd/specs/markdown');
-  await window.nexusData.writeSddSpecsMarkdown({ path: specsFolderPath, content: markdown });
-}
-
-async function persistSpecsMarkdownQuietly() {
-  try { await persistSpecsMarkdown(); } catch (error) { showToast(error.message, true); }
+function renderActiveSddViews() {
+  if (isViewActive('view-sdd-specs')) renderSddSpecs();
+  if (isViewActive('view-sdd-database')) renderSddDatabase();
+  if (isViewActive('view-sdd-ui')) renderSddUi();
+  if (isViewActive('view-sdd-resources')) renderSddResources();
 }
 
 export function bindSddInject() {
   const button = $('#sdd-inject');
   if (!button) return;
-  const storedPath = specsFolderStored();
-  if (storedPath) button.title = `Sincronizar carpeta de specs (${storedPath})`;
+  const storedPath = currentSddProjectPath();
+  if (storedPath) button.title = `Carpeta de specs (${storedPath})`;
   button.addEventListener('click', async () => {
     if (button.disabled) return;
     if (typeof window.nexusData?.selectSddSpecsPath !== 'function') {
@@ -89,15 +108,9 @@ export function bindSddInject() {
     button.disabled = true;
     button.textContent = '…';
     try {
-      const selection = await window.nexusData.selectSddSpecsPath(specsFolderStored());
+      const selection = await window.nexusData.selectSddSpecsPath(currentSddProjectPath());
       if (!selection) return;
-      const result = await api('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: selection.content }) });
-      storeSpecsFolder(selection.path);
-      button.title = `Sincronizar carpeta de specs (${selection.path})`;
-      await persistSpecsMarkdownQuietly();
-      showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} sincronizados desde la carpeta de specs${selection.created ? ' (specs.md creado)' : ''}`);
-      if (isViewActive('view-sdd-specs')) renderSddSpecs();
-      if (isViewActive('view-sdd-resources')) renderSddResources();
+      showToast(selection.created ? 'specs.md y specs_resources creados' : 'specs.md ya existía, no se ha modificado nada');
     } catch (error) {
       showToast(error.message, true);
     } finally {
@@ -109,51 +122,86 @@ export function bindSddInject() {
 
 /* -------------------------------------------------------------------- Cargar */
 
-function openSpecsMarkdownEditor() {
-  if (!loadedSpecsMarkdown) return;
-  const { path, content } = loadedSpecsMarkdown;
-  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal sdd-md-modal" role="dialog" aria-modal="true" aria-labelledby="sdd-md-modal-title"><div class="modal-head"><div><h2 id="sdd-md-modal-title">Editar specs en memoria</h2><p>${escapeHtml(path)}</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><textarea id="sdd-md-content" class="textarea sdd-md-textarea" spellcheck="false">${escapeHtml(content)}</textarea></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="sdd-md-apply" class="btn btn-primary" type="button">Aplicar a specs</button></div></div></div>`;
-  bindModalClose();
-  $('#sdd-md-apply').addEventListener('click', async () => {
-    const markdown = $('#sdd-md-content').value;
-    const button = $('#sdd-md-apply');
-    button.disabled = true;
-    try {
-      const result = await api('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown }) });
-      loadedSpecsMarkdown = { path, content: markdown };
-      closeModal();
-      showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} sincronizados desde el markdown editado`);
-      if (isViewActive('view-sdd-specs')) renderSddSpecs();
-    } catch (error) {
-      showToast(error.message, true);
-      button.disabled = false;
-    }
-  });
+async function openSpecsMarkdownEditor() {
+  if (!hasSddProject()) return;
+  try {
+    const { path, markdown } = await sddApi('/sdd/specs/markdown');
+    $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal sdd-md-modal" role="dialog" aria-modal="true" aria-labelledby="sdd-md-modal-title"><div class="modal-head"><div><h2 id="sdd-md-modal-title">Editar specs.md del proyecto</h2><p>${escapeHtml(path)}</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><textarea id="sdd-md-content" class="textarea sdd-md-textarea" spellcheck="false">${escapeHtml(markdown)}</textarea></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="sdd-md-apply" class="btn btn-primary" type="button">Aplicar al proyecto</button></div></div></div>`;
+    bindModalClose();
+    $('#sdd-md-apply').addEventListener('click', async () => {
+      const content = $('#sdd-md-content');
+      const button = $('#sdd-md-apply');
+      button.disabled = true;
+      try {
+        const result = await sddApi('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: content.value }) });
+        closeModal();
+        showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} sincronizados desde specs.md`);
+        if (isViewActive('view-sdd-specs')) renderSddSpecs();
+      } catch (error) {
+        showToast(error.message, true);
+        button.disabled = false;
+      }
+    });
+  } catch (error) {
+    showToast(error.message, true);
+  }
 }
 
 export function bindSddLoad() {
   const button = $('#sdd-load');
   if (!button) return;
   button.addEventListener('click', async () => {
-    if (typeof window.nexusData?.loadSddSpecsMarkdown !== 'function') {
+    const loadProject = window.nexusData?.loadSddProject || window.nexusData?.loadSddSpecsMarkdown;
+    if (typeof loadProject !== 'function') {
       showToast('El selector de carpetas no está disponible en esta ventana', true);
       return;
     }
     button.disabled = true;
     button.textContent = '…';
     try {
-      const selection = await window.nexusData.loadSddSpecsMarkdown();
+      const selection = await loadProject();
       if (!selection) return;
-      loadedSpecsMarkdown = selection;
-      loadedSpecsResources = Array.isArray(selection.resources) ? selection.resources : [];
-      loadedSpecsResourcesFolder = selection.path;
-      openSpecsMarkdownEditor();
-      if (isViewActive('view-sdd-resources')) renderSddResources();
+      const result = await api('/sdd/project', { method: 'POST', body: JSON.stringify({ path: selection.path }) });
+      setSddProject(result.project, { refresh: true });
+      showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} cargados desde el proyecto S.D.D`);
+      renderActiveSddViews();
     } catch (error) {
       showToast(error.message, true);
     } finally {
       button.disabled = false;
       button.textContent = 'Cargar';
+    }
+  });
+}
+
+export function bindSddReload() {
+  const button = $('#sdd-reload');
+  if (!button) return;
+  button.addEventListener('click', async () => {
+    const loadProject = window.nexusData?.loadSddProject || window.nexusData?.loadSddSpecsMarkdown;
+    if (typeof loadProject !== 'function') {
+      showToast('La recarga no está disponible en esta ventana', true);
+      return;
+    }
+    const folder = currentSddProjectPath();
+    if (!folder) {
+      showToast('No hay ningún proyecto S.D.D cargado para recargar', true);
+      return;
+    }
+    button.disabled = true;
+    button.textContent = '…';
+    try {
+      const selection = await loadProject(folder);
+      if (!selection) return;
+      const result = await api('/sdd/project', { method: 'POST', body: JSON.stringify({ path: selection.path }) });
+      setSddProject(result.project, { refresh: true });
+      showToast('Proyecto S.D.D recargado desde disco');
+      renderActiveSddViews();
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = '⟳';
     }
   });
 }
@@ -183,8 +231,6 @@ function specCard(spec) {
 }
 
 function renderSpecList(specs) {
-  const count = $('#sdd-spec-add-count');
-  if (count) count.textContent = `${specs.length} ${specs.length === 1 ? 'requisito' : 'requisitos'}`;
   const list = $('#sdd-spec-list');
   if (!list) return;
   list.innerHTML = specs.length
@@ -199,9 +245,8 @@ function renderSpecList(specs) {
     if (!spec) return;
     if (!await confirmDelete(`¿Eliminar la spec “${spec.title}”?`)) return;
     try {
-      await api(`/sdd/specs/${spec.id}`, { method: 'DELETE' });
+      await sddApi(`/sdd/specs/${spec.id}`, { method: 'DELETE' });
       showToast('Spec eliminada');
-      await persistSpecsMarkdownQuietly();
       renderSddSpecs();
     } catch (error) { showToast(error.message, true); }
   }));
@@ -209,7 +254,7 @@ function renderSpecList(specs) {
 
 function openSpecModal(existing = null) {
   const statusOptions = Object.entries(SPEC_STATUS).map(([value, label]) => `<option value="${value}"${existing?.status === value ? ' selected' : ''}>${label}</option>`).join('');
-  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-spec-modal-title"><div class="modal-head"><div><h2 id="sdd-spec-modal-title">${existing ? 'Editar spec' : 'Añadir spec'}</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><div class="form-grid"><label class="form-label">Título<input id="spec-title" class="field" type="text" value="${escapeHtml(existing?.title || '')}" placeholder="Ej. El usuario debe poder buscar documentos" maxlength="200" autocomplete="off" autofocus /></label><label class="form-label">Estado<select id="spec-status" class="select">${statusOptions}</select></label><label class="form-label">Categoría<input id="spec-category" class="field" type="text" value="${escapeHtml(existing?.category || '')}" placeholder="Ej. Búsqueda, Seguridad, API" maxlength="60" autocomplete="off" /></label><label class="form-label">Descripción<textarea id="spec-description" class="textarea" maxlength="10000" placeholder="Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones…">${escapeHtml(existing?.description || '')}</textarea></label></div></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="spec-save" class="btn btn-primary" type="button">${existing ? 'Guardar cambios' : 'Añadir spec'}</button></div></div></div>`;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-spec-modal-title"><div class="modal-head"><div><h2 id="sdd-spec-modal-title">${existing ? 'Editar spec' : 'Añadir spec'}</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><div class="form-grid"><label class="form-label">Título<input id="spec-title" class="field" type="text" value="${escapeHtml(existing?.title || '')}" maxlength="200" autocomplete="off" autofocus /></label><label class="form-label">Estado<select id="spec-status" class="select">${statusOptions}</select></label><label class="form-label">Categoría<input id="spec-category" class="field" type="text" value="${escapeHtml(existing?.category || '')}" maxlength="60" autocomplete="off" /></label><label class="form-label">Descripción<textarea id="spec-description" class="textarea" maxlength="10000">${escapeHtml(existing?.description || '')}</textarea></label></div></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="spec-save" class="btn btn-primary" type="button">${existing ? 'Guardar cambios' : 'Añadir spec'}</button></div></div></div>`;
   bindModalClose();
   $('#spec-save').addEventListener('click', async () => {
     try {
@@ -219,10 +264,9 @@ function openSpecModal(existing = null) {
         category: $('#spec-category').value.trim(),
         description: $('#spec-description').value
       };
-      await api(existing ? `/sdd/specs/${existing.id}` : '/sdd/specs', { method: existing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      await sddApi(existing ? `/sdd/specs/${existing.id}` : '/sdd/specs', { method: existing ? 'PUT' : 'POST', body: JSON.stringify(body) });
       closeModal();
       showToast(existing ? 'Spec actualizada' : 'Spec creada');
-      await persistSpecsMarkdownQuietly();
       renderSddSpecs();
     } catch (error) { showToast(error.message, true); }
   });
@@ -231,12 +275,13 @@ function openSpecModal(existing = null) {
 export function renderSddSpecs() {
   const container = $('#view-sdd-specs');
   if (!container) return;
+  if (renderSddProjectRequired(container, 'specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.')) return;
   const requestId = ++renderRequestId;
-  container.innerHTML = `${sddHeader('specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.')}${sddToolbar('Requisitos', '…', 'sdd-spec-add', '＋ Añadir spec', loadedSpecsMarkdown ? `<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Reabrir el markdown cargado en memoria (${escapeHtml(loadedSpecsMarkdown.path)})">Editar markdown</button>` : '')}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
+  container.innerHTML = `${sddHeader('specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.')}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', '<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Volver a leer y editar specs.md del proyecto">Editar markdown</button>')}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
   $('#sdd-spec-add').addEventListener('click', () => openSpecModal());
   const mdEdit = $('#sdd-md-edit');
   if (mdEdit) mdEdit.addEventListener('click', openSpecsMarkdownEditor);
-  api('/sdd/specs').then(({ specs }) => {
+  sddApi('/sdd/specs').then(({ specs }) => {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-specs')) return;
     renderSpecList(specs);
   }).catch((error) => {
@@ -306,7 +351,7 @@ function renderTableList(tables) {
     if (!table) return;
     if (!await confirmDelete(`¿Eliminar la tabla “${table.name}” y sus ${table.columns.length} columnas?`)) return;
     try {
-      await api(`/sdd/db/tables/${table.id}`, { method: 'DELETE' });
+      await sddApi(`/sdd/db/tables/${table.id}`, { method: 'DELETE' });
       showToast('Tabla eliminada');
       renderSddDatabase();
     } catch (error) { showToast(error.message, true); }
@@ -318,7 +363,7 @@ function renderTableList(tables) {
   });
   list.querySelectorAll('[data-delete-column]').forEach((button) => button.addEventListener('click', async () => {
     try {
-      await api(`/sdd/db/columns/${button.dataset.deleteColumn}`, { method: 'DELETE' });
+      await sddApi(`/sdd/db/columns/${button.dataset.deleteColumn}`, { method: 'DELETE' });
       showToast('Columna eliminada');
       renderSddDatabase();
     } catch (error) { showToast(error.message, true); }
@@ -326,12 +371,31 @@ function renderTableList(tables) {
 }
 
 function openTableModal(existing = null) {
-  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-table-modal-title"><div class="modal-head"><div><h2 id="sdd-table-modal-title">${existing ? 'Editar tabla' : 'Añadir tabla'}</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><div class="form-grid"><label class="form-label">Nombre<input id="table-name" class="field" type="text" value="${escapeHtml(existing?.name || '')}" placeholder="Ej. usuarios, pedidos, documentos" maxlength="120" autocomplete="off" autofocus /></label><label class="form-label">Descripción<textarea id="table-description" class="textarea" maxlength="2000" placeholder="Propósito de la tabla, qué representa en el dominio…">${escapeHtml(existing?.description || '')}</textarea></label></div></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="table-save" class="btn btn-primary" type="button">${existing ? 'Guardar cambios' : 'Añadir tabla'}</button></div></div></div>`;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-table-modal-title"><div class="modal-head"><div><h2 id="sdd-table-modal-title">${existing ? 'Editar tabla' : 'Añadir tabla'}</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><div class="form-grid"><label class="form-label">Nombre<input id="table-name" class="field" type="text" value="${escapeHtml(existing?.name || '')}" placeholder="Ej. usuarios, pedidos, documentos" maxlength="120" autocomplete="off" autofocus /></label><label class="form-label">Descripción<textarea id="table-description" class="textarea" maxlength="2000" placeholder="Propósito de la tabla, qué representa en el dominio…">${escapeHtml(existing?.description || '')}</textarea></label></div></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="table-add-column" class="btn btn-secondary" type="button">＋ Añadir columna</button><button id="table-save" class="btn btn-primary" type="button">${existing ? 'Guardar cambios' : 'Añadir tabla'}</button></div></div></div>`;
   bindModalClose();
+
+  const saveTable = () => {
+    const body = { name: $('#table-name').value.trim(), description: $('#table-description').value };
+    return sddApi(existing ? `/sdd/db/tables/${existing.id}` : '/sdd/db/tables', { method: existing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+  };
+
+  $('#table-add-column').addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      const table = await saveTable();
+      closeModal();
+      showToast(existing ? 'Tabla actualizada' : 'Tabla creada');
+      openColumnModal(table);
+    } catch (error) {
+      showToast(error.message, true);
+      button.disabled = false;
+    }
+  });
+
   $('#table-save').addEventListener('click', async () => {
     try {
-      const body = { name: $('#table-name').value.trim(), description: $('#table-description').value };
-      await api(existing ? `/sdd/db/tables/${existing.id}` : '/sdd/db/tables', { method: existing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      await saveTable();
       closeModal();
       showToast(existing ? 'Tabla actualizada' : 'Tabla creada');
       renderSddDatabase();
@@ -355,7 +419,7 @@ function openColumnModal(table, existing = null) {
       const url = existing
         ? `/sdd/db/columns/${existing.id}`
         : `/sdd/db/tables/${table.id}/columns`;
-      await api(url, { method: existing ? 'PUT' : 'POST', body: JSON.stringify(body) });
+      await sddApi(url, { method: existing ? 'PUT' : 'POST', body: JSON.stringify(body) });
       closeModal();
       showToast(existing ? 'Columna actualizada' : 'Columna añadida');
       renderSddDatabase();
@@ -366,10 +430,11 @@ function openColumnModal(table, existing = null) {
 export function renderSddDatabase() {
   const container = $('#view-sdd-database');
   if (!container) return;
+  if (renderSddProjectRequired(container, 'database', 'S.D.D · BASE DE DATOS', 'Base de datos', 'Tablas, columnas y restricciones.')) return;
   const requestId = ++renderRequestId;
   container.innerHTML = `${sddHeader('database', 'S.D.D · BASE DE DATOS', 'Base de datos', 'Tablas, columnas y restricciones.')}${sddToolbar('Tablas', '…', 'sdd-db-add', '＋ Añadir tabla')}<div class="sdd-list" id="sdd-db-list"><div class="empty">Cargando esquema…</div></div>`;
   $('#sdd-db-add').addEventListener('click', () => openTableModal());
-  api('/sdd/db').then(({ tables }) => {
+  sddApi('/sdd/db').then(({ tables }) => {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-database')) return;
     renderTableList(tables);
   }).catch((error) => {
@@ -386,6 +451,7 @@ function mediaBadge(kind) {
 
 function mediaFrame(item) {
   if (item.kind === 'text') return `<div class="sdd-media-text">${escapeHtml(item.content)}</div>`;
+  if (item.fileMissing || !item.fileUrl) return '<div class="sdd-media-text">No se encuentra el fichero en specs_resources.</div>';
   if (item.kind === 'image') return `<img src="${escapeHtml(item.fileUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" />`;
   if (item.kind === 'video') return `<video src="${escapeHtml(item.fileUrl)}" controls preload="metadata"></video>`;
   return '<div class="sdd-media-text"></div>';
@@ -423,7 +489,7 @@ function renderMediaList(items) {
     if (!item) return;
     if (!await confirmDelete(`¿Eliminar el contenido “${item.title}”?`)) return;
     try {
-      await api(`/sdd/media/${item.id}`, { method: 'DELETE' });
+      await sddApi(`/sdd/media/${item.id}`, { method: 'DELETE' });
       showToast('Contenido eliminado');
       renderSddUi();
     } catch (error) { showToast(error.message, true); }
@@ -476,15 +542,15 @@ function openMediaModal(existing = null) {
       if (existing) {
         const body = { title, description };
         if (existing.kind === 'text') body.content = $('#media-content')?.value || '';
-        await api(`/sdd/media/${existing.id}`, { method: 'PUT', body: JSON.stringify(body) });
+        await sddApi(`/sdd/media/${existing.id}`, { method: 'PUT', body: JSON.stringify(body) });
       } else if (saveKind === 'text') {
         const params = new URLSearchParams({ title, description, kind: 'text' });
         const bytes = new TextEncoder().encode($('#media-content').value);
-        await api(`/sdd/media?${params}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes });
+        await sddApi(`/sdd/media?${params}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes });
       } else {
         if (!selectedMedia.dataUrl) throw new Error('Selecciona un archivo para el contenido');
         const params = new URLSearchParams({ title, description, kind: saveKind, fileName: selectedMedia.name || 'archivo' });
-        await api(`/sdd/media?${params}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: dataUrlToBytes(selectedMedia.dataUrl) });
+        await sddApi(`/sdd/media?${params}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: dataUrlToBytes(selectedMedia.dataUrl) });
       }
       closeModal();
       showToast(existing ? 'Contenido actualizado' : 'Contenido añadido');
@@ -496,10 +562,11 @@ function openMediaModal(existing = null) {
 export function renderSddUi() {
   const container = $('#view-sdd-ui');
   if (!container) return;
+  if (renderSddProjectRequired(container, 'ui', 'S.D.D · UI', 'UI', 'Referencias visuales del diseño.')) return;
   const requestId = ++renderRequestId;
   container.innerHTML = `${sddHeader('ui', 'S.D.D · UI', 'UI', 'Referencias visuales del diseño.')}${sddToolbar('Referencias de diseño', '…', 'sdd-ui-add', '＋ Añadir contenido')}<div class="sdd-media-grid" id="sdd-ui-list"><div class="empty">Cargando contenido…</div></div>`;
   $('#sdd-ui-add').addEventListener('click', () => openMediaModal());
-  api('/sdd/media').then(({ media }) => {
+  sddApi('/sdd/media').then(({ media }) => {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-ui')) return;
     renderMediaList(media);
   }).catch((error) => {
@@ -555,24 +622,23 @@ function renderResourceList(resources) {
 }
 
 function specsResourcesFolder() {
-  return loadedSpecsResources !== null ? loadedSpecsResourcesFolder : specsFolderStored();
+  return currentSddProjectPath();
 }
 
-async function readSpecsResources(force) {
+async function readSpecsResources() {
   const folder = specsResourcesFolder();
   if (!folder) return null;
-  if (loadedSpecsResources !== null && !force) return { folder, resources: loadedSpecsResources };
   if (typeof window.nexusData?.readSddSpecsResources !== 'function') {
     throw new Error('El acceso a la carpeta de recursos no está disponible en esta ventana');
   }
   const result = await window.nexusData.readSddSpecsResources(folder);
-  if (loadedSpecsResources !== null) loadedSpecsResources = result.resources;
   return { folder: result.path, resources: result.resources };
 }
 
 export function renderSddResources() {
   const container = $('#view-sdd-resources');
   if (!container) return;
+  if (renderSddProjectRequired(container, 'resources', 'S.D.D · RECURSOS', 'Recursos', `Imágenes y vídeos de la carpeta “${SPECS_RESOURCES_FOLDER_NAME}”.`)) return;
   container.innerHTML = `${sddHeader('resources', 'S.D.D · RECURSOS', 'Recursos', `Imágenes y vídeos de la carpeta “${SPECS_RESOURCES_FOLDER_NAME}”.`)}<div class="sdd-toolbar"><div class="sdd-toolbar-copy"><h2>Recursos multimedia</h2><span id="sdd-resource-count" class="sdd-count">…</span></div><div class="sdd-toolbar-actions"><button id="sdd-resource-refresh" class="btn btn-secondary" type="button" title="Volver a leer la carpeta de recursos">Actualizar</button></div></div><div class="sdd-card-meta sdd-resource-folder" id="sdd-resource-folder"></div><div class="sdd-media-grid" id="sdd-resource-list"><div class="empty">Cargando recursos…</div></div>`;
   const showResources = (data, id) => {
     if (id !== renderRequestId || !isViewActive('view-sdd-resources')) return;
@@ -586,16 +652,16 @@ export function renderSddResources() {
     }
     renderResourceList(data.resources);
   };
-  const load = (force) => {
+  const load = () => {
     const id = ++renderRequestId;
     $('#sdd-resource-list').innerHTML = '<div class="empty">Cargando recursos…</div>';
-    readSpecsResources(force).then((data) => showResources(data, id)).catch((error) => {
+    readSpecsResources().then((data) => showResources(data, id)).catch((error) => {
       if (id !== renderRequestId || !isViewActive('view-sdd-resources')) return;
       const count = $('#sdd-resource-count');
       if (count) count.textContent = '…';
       $('#sdd-resource-list').innerHTML = emptyState('No se pudieron cargar', error.message);
     });
   };
-  $('#sdd-resource-refresh').addEventListener('click', () => load(true));
-  load(false);
+  $('#sdd-resource-refresh').addEventListener('click', load);
+  load();
 }

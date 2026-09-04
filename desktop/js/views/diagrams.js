@@ -13,6 +13,8 @@ const NODE_MIN_WIDTH = 120;
 const NODE_MIN_HEIGHT = 64;
 const NODE_MAX_WIDTH = 420;
 const NODE_MAX_HEIGHT = 280;
+const NODE_DESCRIPTION_MIN_HEIGHT = 176;
+const NODE_DESCRIPTION_MAX_LENGTH = 2000;
 const NODE_MARGIN = 20;
 const AUTO_LAYOUT_COLUMNS = 4;
 const AUTO_LAYOUT_COLUMN_GAP = 140;
@@ -57,6 +59,7 @@ let resizeState = null;
 let panState = null;
 let lastDraggedNode = { id: '', timestamp: 0 };
 let focusNodeId = null;
+let focusNodeDescriptionId = null;
 let contextMenuEdgeId = '';
 let contextMenuNodeId = '';
 let contextMenuCanvasPoint = null;
@@ -89,6 +92,10 @@ function nodeWidth(node) {
 function nodeHeight(node) {
   const value = Number(node?.height);
   return clamp(Number.isFinite(value) ? value : NODE_HEIGHT, NODE_MIN_HEIGHT, NODE_MAX_HEIGHT);
+}
+
+function hasNodeDescription(node) {
+  return Boolean(node && Object.prototype.hasOwnProperty.call(node, 'description'));
 }
 
 function validNodeType(type) {
@@ -140,9 +147,12 @@ function normaliseNode(raw, index, usedIds) {
   const id = usedIds.has(requestedId) ? makeId('node') : requestedId;
   const fallbackPosition = defaultNodePosition(index);
   const width = nodeWidth(raw);
-  const height = nodeHeight(raw);
+  const hasDescription = hasNodeDescription(raw);
+  const height = hasDescription
+    ? Math.max(nodeHeight(raw), NODE_DESCRIPTION_MIN_HEIGHT)
+    : nodeHeight(raw);
   usedIds.add(id);
-  return {
+  const node = {
     id,
     label: typeof raw?.label === 'string' && raw.label.trim() ? raw.label.slice(0, 160) : `Paso ${index + 1}`,
     type: validNodeType(raw?.type),
@@ -151,6 +161,8 @@ function normaliseNode(raw, index, usedIds) {
     width,
     height
   };
+  if (hasDescription) node.description = String(raw.description ?? '').slice(0, NODE_DESCRIPTION_MAX_LENGTH);
+  return node;
 }
 
 function normaliseEdge(raw, index, nodeIds, usedIds) {
@@ -301,7 +313,7 @@ function setDiagramCodeError(node, message = '') {
 
 function openDiagramCodeModal(initialText = serializeDiagram(activeDiagram()), sourcePath = '') {
   const sourceName = sourcePath ? fileNameFromPath(sourcePath) : 'Diagrama activo';
-  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal diagram-code-modal" role="dialog" aria-modal="true" aria-labelledby="diagram-code-title"><div class="modal-head"><div><h2 id="diagram-code-title">Código del diagrama</h2><p>Escribe o revisa el lenguaje textual y genera el diagrama seleccionado.</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body diagram-code-body"><div class="diagram-code-source">Origen: <strong id="diagram-code-source">${escapeHtml(sourceName)}</strong></div><textarea id="diagram-code-editor" class="diagram-code-editor" aria-label="Código textual del diagrama" spellcheck="false">${escapeHtml(initialText)}</textarea><div id="diagram-code-error" class="diagram-code-error" role="alert" hidden></div><p class="diagram-code-hint">Usa <code>diagram</code>, <code>node</code> y <code>edge</code>. La guía completa está en <code>docs/diagramas-por-texto.md</code>.</p></div><div class="modal-actions"><button id="diagram-code-import" class="btn btn-secondary" type="button">Importar archivo</button><button id="diagram-code-copy" class="btn btn-secondary" type="button">Copiar</button><button id="diagram-code-export" class="btn btn-secondary" type="button">Exportar archivo</button><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="diagram-code-apply" class="btn btn-primary" type="button">Generar diagrama</button></div></div></div>`;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal diagram-code-modal" role="dialog" aria-modal="true" aria-labelledby="diagram-code-title"><div class="modal-head"><div><h2 id="diagram-code-title">Código del diagrama</h2><p>Escribe o revisa el lenguaje textual y genera el diagrama seleccionado.</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body diagram-code-body"><div class="diagram-code-source">Origen: <strong id="diagram-code-source">${escapeHtml(sourceName)}</strong></div><textarea id="diagram-code-editor" class="diagram-code-editor" aria-label="Código textual del diagrama" spellcheck="false">${escapeHtml(initialText)}</textarea><div id="diagram-code-error" class="diagram-code-error" role="alert" hidden></div><p class="diagram-code-hint">Usa <code>diagram</code>, <code>node</code>, <code>description</code> y <code>edge</code>. La guía completa está en <code>docs/diagramas-por-texto.md</code>.</p></div><div class="modal-actions"><button id="diagram-code-import" class="btn btn-secondary" type="button">Importar archivo</button><button id="diagram-code-copy" class="btn btn-secondary" type="button">Copiar</button><button id="diagram-code-export" class="btn btn-secondary" type="button">Exportar archivo</button><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="diagram-code-apply" class="btn btn-primary" type="button">Generar diagrama</button></div></div></div>`;
   bindModalClose();
   const editor = $('#diagram-code-editor');
   const errorNode = $('#diagram-code-error');
@@ -661,6 +673,40 @@ function changeNodeType(type) {
   showToast(`Tipo de tarjeta: ${NODE_TYPES[nextType]}`);
 }
 
+function focusNodeDescription(nodeId) {
+  const textarea = [...document.querySelectorAll('[data-node-description]')]
+    .find((element) => element.dataset.nodeDescription === nodeId);
+  if (!textarea) return;
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+}
+
+function addNodeDescription() {
+  const nodeId = contextMenuNodeId || (selection.type === 'node' ? selection.id : '');
+  const node = nodeById(activeDiagram(), nodeId);
+  if (!node) {
+    hideEdgeContextMenu();
+    return;
+  }
+
+  hideEdgeContextMenu();
+  setSelection('node', node.id);
+  if (hasNodeDescription(node)) {
+    requestAnimationFrame(() => focusNodeDescription(node.id));
+    return;
+  }
+
+  const before = historySnapshot();
+  node.description = '';
+  node.height = Math.max(nodeHeight(node), NODE_DESCRIPTION_MIN_HEIGHT);
+  node.y = clamp(node.y, NODE_MARGIN, BOARD_HEIGHT - node.height - NODE_MARGIN);
+  focusNodeDescriptionId = node.id;
+  recordHistory(before);
+  persistDiagrams();
+  renderDiagrams();
+  showToast('Descripción añadida a la tarjeta');
+}
+
 function focusNodeLabel(nodeId) {
   const input = [...document.querySelectorAll('[data-node-label]')]
     .find((element) => element.dataset.nodeLabel === nodeId);
@@ -683,6 +729,10 @@ function handleNodeContextMenuAction(event) {
     hideEdgeContextMenu();
     setSelection('node', nodeId);
     requestAnimationFrame(() => focusNodeLabel(nodeId));
+    return;
+  }
+  if (option.dataset.nodeAction === 'add-description') {
+    addNodeDescription();
     return;
   }
   if (option.dataset.nodeAction === 'delete') {
@@ -932,7 +982,11 @@ function nodeMarkup(node) {
   const ports = Object.entries(PORTS).map(([port, value]) => `<button class="diagram-port diagram-port-${port}" type="button" data-diagram-port data-node-id="${escapeHtml(node.id)}" data-port="${port}" aria-label="Conectar por el punto de ${value.label}"></button>`).join('');
   const selectedClass = selection.type === 'node' && selection.id === node.id ? ' is-selected' : '';
   const connectionSourceClass = connectionAnchorNodeId === node.id ? ' is-connection-source' : '';
-  return `<article class="diagram-node diagram-node-${node.type}${selectedClass}${connectionSourceClass}" data-node-id="${escapeHtml(node.id)}" style="width: ${nodeWidth(node)}px; height: ${nodeHeight(node)}px; transform: translate(${node.x}px, ${node.y}px);"><div class="diagram-node-surface"><div class="diagram-node-topline"><span class="diagram-node-type">${escapeHtml(typeLabel)}</span><button class="diagram-node-delete" type="button" data-delete-node="${escapeHtml(node.id)}" aria-label="Eliminar nodo">×</button></div><input class="diagram-node-label" data-node-label="${escapeHtml(node.id)}" value="${escapeHtml(node.label)}" aria-label="Etiqueta del nodo" maxlength="160" /></div><button class="diagram-node-resize" type="button" data-resize-node="${escapeHtml(node.id)}" aria-label="Redimensionar tarjeta" title="Redimensionar tarjeta"></button>${ports}</article>`;
+  const descriptionClass = hasNodeDescription(node) ? ' diagram-node-has-description' : '';
+  const descriptionMarkup = hasNodeDescription(node)
+    ? `<label class="diagram-node-description-wrap"><span class="diagram-node-description-title">Descripción</span><textarea class="diagram-node-description" data-node-description="${escapeHtml(node.id)}" rows="3" maxlength="${NODE_DESCRIPTION_MAX_LENGTH}" aria-label="Descripción de la tarjeta" placeholder="Añade detalles sobre este paso…">${escapeHtml(node.description)}</textarea></label>`
+    : '';
+  return `<article class="diagram-node diagram-node-${node.type}${descriptionClass}${selectedClass}${connectionSourceClass}" data-node-id="${escapeHtml(node.id)}" style="width: ${nodeWidth(node)}px; height: ${nodeHeight(node)}px; transform: translate(${node.x}px, ${node.y}px);"><div class="diagram-node-surface"><div class="diagram-node-topline"><span class="diagram-node-type">${escapeHtml(typeLabel)}</span><button class="diagram-node-delete" type="button" data-delete-node="${escapeHtml(node.id)}" aria-label="Eliminar nodo">×</button></div><input class="diagram-node-label" data-node-label="${escapeHtml(node.id)}" value="${escapeHtml(node.label)}" aria-label="Etiqueta del nodo" maxlength="160" />${descriptionMarkup}</div><button class="diagram-node-resize" type="button" data-resize-node="${escapeHtml(node.id)}" aria-label="Redimensionar tarjeta" title="Redimensionar tarjeta"></button>${ports}</article>`;
 }
 
 function renderNodes(diagram) {
@@ -990,7 +1044,7 @@ function updateStatus() {
   } else if (connectMode) {
     status.textContent = 'Modo conexión activo. Selecciona un punto de origen.';
   } else if (selection.type === 'node') {
-    status.textContent = 'Nodo seleccionado. Puedes editar su etiqueta o tipo.';
+    status.textContent = 'Nodo seleccionado. Puedes editar su etiqueta, descripción o tipo.';
   } else if (selection.type === 'edge') {
     status.textContent = 'Conexión seleccionada. Puedes editar su texto o cambiar la Dirección.';
   } else {
@@ -1059,7 +1113,7 @@ export function renderDiagrams() {
     previewArrowMarker.setAttribute('refY', '7');
     previewArrowMarker.querySelector('path')?.setAttribute('d', 'M 0 0 L 12 7 L 0 14 z');
   }
-  root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones de la conexión" aria-hidden="true" hidden><button type="button" role="menuitem" data-edge-action="edit-label">Editar texto</button><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div><div id="diagram-node-context-menu" class="diagram-context-menu" role="menu" aria-label="Modificar tarjeta" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Tarjeta</div><button type="button" role="menuitem" data-node-action="focus-label">Editar etiqueta</button><div class="diagram-context-menu-heading">Tipo</div><button type="button" role="menuitemradio" data-node-type="start" aria-checked="false">Inicio</button><button type="button" role="menuitemradio" data-node-type="step" aria-checked="false">Paso</button><button type="button" role="menuitemradio" data-node-type="decision" aria-checked="false">Decisión</button><button type="button" role="menuitemradio" data-node-type="end" aria-checked="false">Fin</button><button type="button" role="menuitem" data-node-action="delete">Eliminar tarjeta</button></div>');
+  root.insertAdjacentHTML('beforeend', '<div id="diagram-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones de la conexión" aria-hidden="true" hidden><button type="button" role="menuitem" data-edge-action="edit-label">Editar texto</button><div class="diagram-context-menu-heading">Dirección</div><button type="button" role="menuitemradio" data-edge-direction="none" aria-checked="false">Línea simple</button><button type="button" role="menuitemradio" data-edge-direction="forward" aria-checked="false">→ Hacia el destino</button><button type="button" role="menuitemradio" data-edge-direction="backward" aria-checked="false">← Hacia el origen</button></div><div id="diagram-node-context-menu" class="diagram-context-menu" role="menu" aria-label="Modificar tarjeta" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Tarjeta</div><button type="button" role="menuitem" data-node-action="focus-label">Editar etiqueta</button><button type="button" role="menuitem" data-node-action="add-description">Añadir descripción</button><div class="diagram-context-menu-heading">Tipo</div><button type="button" role="menuitemradio" data-node-type="start" aria-checked="false">Inicio</button><button type="button" role="menuitemradio" data-node-type="step" aria-checked="false">Paso</button><button type="button" role="menuitemradio" data-node-type="decision" aria-checked="false">Decisión</button><button type="button" role="menuitemradio" data-node-type="end" aria-checked="false">Fin</button><button type="button" role="menuitem" data-node-action="delete">Eliminar tarjeta</button></div>');
   root.insertAdjacentHTML('beforeend', '<div id="diagram-canvas-context-menu" class="diagram-context-menu" role="menu" aria-label="Acciones del canvas" aria-hidden="true" hidden><div class="diagram-context-menu-heading">Canvas</div><button type="button" role="menuitem" data-canvas-action="add-node">＋ Agregar nodo</button></div>');
   bindDiagramEvents(root);
   renderDiagramCanvas();
@@ -1068,6 +1122,11 @@ export function renderDiagrams() {
     const nodeId = focusNodeId;
     focusNodeId = null;
     requestAnimationFrame(() => document.querySelector(`[data-node-label="${nodeId}"]`)?.focus());
+  }
+  if (focusNodeDescriptionId) {
+    const nodeId = focusNodeDescriptionId;
+    focusNodeDescriptionId = null;
+    requestAnimationFrame(() => focusNodeDescription(nodeId));
   }
 }
 
@@ -1281,7 +1340,7 @@ function connectionPortsBetween(sourceNode, targetNode) {
 
 function handleNodeDoubleClick(event) {
   const element = event.target.closest?.('.diagram-node');
-  if (!element || event.target.closest('button')) return;
+  if (!element || event.target.closest('button, input, textarea')) return;
   const node = nodeById(activeDiagram(), element.dataset.nodeId);
   if (!node) return;
 
@@ -1405,7 +1464,7 @@ function handleNodePointerDown(event) {
   const element = event.target.closest('.diagram-node');
   if (!element || event.button !== 0) return;
   setSelection('node', element.dataset.nodeId);
-  if (event.target.closest('input, button')) return;
+  if (event.target.closest('input, textarea, button')) return;
   const rect = element.getBoundingClientRect();
   const board = $('#diagram-board');
   const boardRect = board?.getBoundingClientRect();
@@ -1460,12 +1519,14 @@ function handleNodeClick(event) {
 }
 
 function handleNodeInput(event) {
-  const input = event.target.closest('[data-node-label]');
+  const input = event.target.closest('[data-node-label], [data-node-description]');
   if (!input) return;
-  const node = nodeById(activeDiagram(), input.dataset.nodeLabel);
+  const nodeId = input.dataset.nodeLabel || input.dataset.nodeDescription;
+  const node = nodeById(activeDiagram(), nodeId);
   if (!node) return;
   beginTextHistory(input);
-  node.label = input.value.slice(0, 160);
+  if (input.dataset.nodeLabel) node.label = input.value.slice(0, 160);
+  if (input.dataset.nodeDescription) node.description = input.value.slice(0, NODE_DESCRIPTION_MAX_LENGTH);
   persistDiagrams();
   if (selection.type === 'node' && selection.id === node.id) {
     updateStatus();
@@ -1606,17 +1667,18 @@ function diagramNodeSvg(node, colors) {
   const height = nodeHeight(node);
   const centerX = x + width / 2;
   const centerY = y + height / 2;
-  const rounded = type === 'start' || type === 'end';
-  const shape = type === 'decision'
+  const hasDescription = hasNodeDescription(node);
+  const rounded = !hasDescription && (type === 'start' || type === 'end');
+  const shape = type === 'decision' && !hasDescription
     ? `<polygon points="${centerX},${y} ${x + width},${centerY} ${centerX},${y + height} ${x},${centerY}" fill="${escapeSvg(colors.warningSurface)}" stroke="${escapeSvg(colors.warningBorder)}" stroke-width="1.5" filter="url(#diagram-image-shadow)"></polygon>`
-    : `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${rounded ? Math.min(width, height) / 2 : 6}" fill="${escapeSvg(type === 'start' ? colors.successSurface : type === 'end' ? colors.errorSurface : colors.surface)}" stroke="${escapeSvg(type === 'start' ? colors.successBorder : type === 'end' ? colors.dangerBorder : colors.accentBorder)}" stroke-width="${type === 'end' ? 3 : 1.5}" filter="url(#diagram-image-shadow)"></rect>`;
+    : `<rect x="${x}" y="${y}" width="${width}" height="${height}" rx="${rounded ? Math.min(width, height) / 2 : 6}" fill="${escapeSvg(type === 'start' ? colors.successSurface : type === 'end' ? colors.errorSurface : type === 'decision' ? colors.warningSurface : colors.surface)}" stroke="${escapeSvg(type === 'start' ? colors.successBorder : type === 'end' ? colors.dangerBorder : type === 'decision' ? colors.warningBorder : colors.accentBorder)}" stroke-width="${type === 'end' ? 3 : 1.5}" filter="url(#diagram-image-shadow)"></rect>`;
   const accent = type === 'step'
     ? `<line x1="${x + 1}" y1="${y + 7}" x2="${x + 1}" y2="${y + height - 7}" stroke="${escapeSvg(colors.accentTextSoft)}" stroke-width="3" stroke-linecap="round"></line>`
     : '';
-  const innerEnd = type === 'end'
+  const innerEnd = type === 'end' && !hasDescription
     ? `<rect x="${x + 5}" y="${y + 5}" width="${width - 10}" height="${height - 10}" rx="${Math.max(0, Math.min(width, height) / 2 - 5)}" fill="none" stroke="${escapeSvg(colors.dangerBorder)}" stroke-width="1"></rect>`
     : '';
-  const centered = type === 'decision';
+  const centered = type === 'decision' && !hasDescription;
   const textX = centered ? centerX : x + (rounded ? 20 : 14);
   const textAnchor = centered ? 'middle' : 'start';
   const typeColor = type === 'start' ? colors.green : type === 'decision' ? colors.amber : type === 'end' ? colors.red : colors.accentText;
@@ -1625,10 +1687,10 @@ function diagramNodeSvg(node, colors) {
     : rounded
       ? Math.max(15, Math.floor((width - 40) / 7.3))
       : Math.max(18, Math.floor((width - 14) / 7.3));
-  const labelLines = wrapSvgText(node.label, labelMaxCharacters, 3);
+  const labelLines = wrapSvgText(node.label, labelMaxCharacters, hasDescription ? 2 : 3);
   const typeMarkup = svgTextLines([NODE_TYPES[type] || NODE_TYPES.step], {
     x: textX,
-    y: y + (centered ? 27 : 22),
+    y: y + (hasDescription ? 22 : centered ? 27 : 22),
     anchor: textAnchor,
     fill: typeColor,
     fontSize: 10,
@@ -1637,14 +1699,26 @@ function diagramNodeSvg(node, colors) {
   });
   const labelMarkup = svgTextLines(labelLines, {
     x: textX,
-    y: y + (centered ? 48 : 46),
+    y: y + (hasDescription ? 46 : centered ? 48 : 46),
     anchor: textAnchor,
     fill: colors.strong,
     fontSize: 13,
     weight: 650,
     lineHeight: 16
   });
-  return `<g aria-label="${escapeSvg(node.label)}">${shape}${innerEnd}${accent}${typeMarkup}${labelMarkup}</g>`;
+  const descriptionMarkup = hasDescription
+    ? (() => {
+      const descriptionX = textX;
+      const descriptionTitleY = y + 46 + labelLines.length * 16 + 18;
+      const description = String(node.description || '').trim() || 'Añade detalles…';
+      const descriptionLines = wrapSvgText(description, Math.max(18, Math.floor((width - 28) / 6.2)), 4);
+      return `${svgTextLines(['DESCRIPCIÓN'], { x: descriptionX, y: descriptionTitleY, anchor: textAnchor, fill: colors.accentTextSoft, fontSize: 9, weight: 700, lineHeight: 11 })}${svgTextLines(descriptionLines, { x: descriptionX, y: descriptionTitleY + 14, anchor: textAnchor, fill: colors.muted, fontSize: 10, weight: 400, lineHeight: 13 })}`;
+    })()
+    : '';
+  const accessibleLabel = hasDescription && node.description
+    ? `${node.label}. ${node.description}`
+    : node.label;
+  return `<g aria-label="${escapeSvg(accessibleLabel)}">${shape}${innerEnd}${accent}${typeMarkup}${labelMarkup}${descriptionMarkup}</g>`;
 }
 
 function diagramEdgeSvg(edge, diagram, colors, index = 0) {

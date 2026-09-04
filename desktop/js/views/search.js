@@ -84,7 +84,7 @@ export function bindSidebarSearch() {
     if (event.key !== 'Enter') return;
     cancelGlobalSearchDebounce();
     if (state.view !== 'global-search') navigateToSearch('global-search');
-    performGlobalSearch();
+    performGlobalSearch({ syncCommonPathsBeforeSearch: true });
   });
 }
 
@@ -134,15 +134,24 @@ function snippetMarkup(doc) {
   return `${escapeHtml(text.slice(0, start))}<mark class="search-hit">${escapeHtml(text.slice(start, safeEnd))}</mark>${escapeHtml(text.slice(safeEnd))}`;
 }
 
+function resultSourceLabel(doc) {
+  const source = String(doc?.source || '').trim();
+  const filePath = String(doc?.path || '').trim();
+  return source === 'Rutas comunes' && filePath ? filePath : source || filePath || 'Fuente desconocida';
+}
+
 function resultMarkup(results, prefix = '') {
   const resultItems = results || [];
   if (!resultItems.length) return '<div class="empty">Sin resultados</div>';
-  return resultItems.map((doc) => `
+  return resultItems.map((doc) => {
+    const sourceLabel = resultSourceLabel(doc);
+    return `
     <article class="result-card document-hit document-type-${documentTypeClass(doc.type)}" data-view-document="${escapeHtml(doc.id)}" tabindex="0" role="button" aria-label="Abrir ${escapeHtml(doc.title)}">
-      <div class="result-head"><div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div><div class="result-title-wrap"><h3 class="result-title">${escapeHtml(doc.title)}</h3><div class="result-source">${escapeHtml(doc.source)}</div></div><span class="score">${Math.round((doc.score || 0) * 100)}%</span></div>
+      <div class="result-head"><div class="doc-icon">${escapeHtml(typeLabel(doc.type))}</div><div class="result-title-wrap"><h3 class="result-title">${escapeHtml(doc.title)}</h3><div class="result-source" title="${escapeHtml(sourceLabel)}">${escapeHtml(sourceLabel)}</div></div><span class="score">${Math.round((doc.score || 0) * 100)}%</span></div>
       <div class="snippet">${snippetMarkup(doc)}</div>
       <div class="result-foot">${(doc.tags || []).map((tag) => `<span class="tag">#${escapeHtml(tag)}</span>`).join('')}<div class="result-actions">${favoriteButtonMarkup(doc)}${copyPathButtonMarkup(doc.path)}${revealButtonMarkup(doc)}<button class="btn btn-secondary btn-small" data-${prefix ? 'global-' : ''}tag-document="${escapeHtml(doc.id)}">＋ Etiqueta</button><select class="select mini-select" data-${prefix ? 'global-' : ''}add-collection="${escapeHtml(doc.id)}"><option value="">＋ Colección</option>${collectionOptions().replace('<option value="">Todas las colecciones</option>', '')}</select></div></div>
-    </article>`).join('');
+    </article>`;
+  }).join('');
 }
 
 function bindSearchControls({ prefix = '', perform, cancel, clear }) {
@@ -150,7 +159,7 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
   const submit = $(`#${prefix ? 'global-search-submit' : 'search-submit'}`);
   const filterToggle = $(`#${prefix ? 'global-filter-toggle' : 'filter-toggle'}`);
   const commonPaths = $(`#${prefix ? 'global-common-paths' : 'common-paths'}`);
-  submit.addEventListener('click', () => { cancel(); perform(); });
+  submit.addEventListener('click', () => { cancel(); perform({ syncCommonPathsBeforeSearch: true }); });
   input.addEventListener('input', () => {
     syncSearchQuery(input.value);
     if (prefix) globalSearchRequestId += 1;
@@ -158,32 +167,17 @@ function bindSearchControls({ prefix = '', perform, cancel, clear }) {
     persistSearchPreferences();
     schedule(prefix);
   });
-  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { cancel(); perform(); } });
+  input.addEventListener('keydown', (event) => { if (event.key === 'Enter') { cancel(); perform({ syncCommonPathsBeforeSearch: true }); } });
   ['source', 'type', 'date'].forEach((name) => $(`#${prefix ? 'global-filter-' : 'filter-'}${name}`).addEventListener('change', () => { cancel(); perform(); }));
   filterToggle?.addEventListener('click', () => setSearchFiltersExpanded(state.searchFiltersExpanded === false));
   $(`#${prefix ? 'global-view-sources' : 'view-sources'}`)?.addEventListener('click', openSourcesModal);
-  commonPaths?.addEventListener('change', async () => {
+  commonPaths?.addEventListener('change', () => {
     state.includeCommonPaths = commonPaths.checked;
-    persistSearchPreferences();
+    if (prefix) globalSearchRequestId += 1;
+    else searchRequestId += 1;
     cancel();
-    if (!state.includeCommonPaths) {
-      commonPathsReady = false;
-      await perform();
-      return;
-    }
-    commonPaths.disabled = true;
-    try {
-      const result = await ensureCommonPathsReady();
-      showToast(result?.directories?.length ? 'Rutas comunes activadas' : 'No se encontraron rutas comunes');
-      await perform();
-    } catch (error) {
-      state.includeCommonPaths = false;
-      commonPaths.checked = false;
-      persistSearchPreferences();
-      showToast(error.message, true);
-    } finally {
-      commonPaths.disabled = false;
-    }
+    if (!state.includeCommonPaths) commonPathsReady = false;
+    persistSearchPreferences();
   });
   $(`#${prefix ? 'global-clear-filters' : 'clear-filters'}`).addEventListener('click', () => { cancel(); clear(); });
 }
@@ -265,7 +259,7 @@ function ensureCommonPathsReady() {
   return syncCommonPaths();
 }
 
-async function performSearchRequest({ prefix = '', view, renderResults }) {
+async function performSearchRequest({ prefix = '', view, renderResults, syncCommonPathsBeforeSearch = false }) {
   const input = $(`#${prefix ? 'global-search-input' : 'search-input'}`);
   if (!input) return;
   const restoreFocus = document.activeElement === input;
@@ -285,19 +279,25 @@ async function performSearchRequest({ prefix = '', view, renderResults }) {
   syncSearchFilters(filters);
   persistSearchPreferences();
   try {
-    await ensureCommonPathsReady();
-    if (state.includeCommonPaths) params.set('includeCommonPaths', 'true');
+    const syncResult = syncCommonPathsBeforeSearch ? await ensureCommonPathsReady() : null;
+    if (syncResult) showToast(syncResult.directories?.length ? 'Rutas comunes activadas' : 'No se encontraron rutas comunes');
+    if (state.includeCommonPaths && commonPathsReady) params.set('includeCommonPaths', 'true');
     const response = await api(`/search?${params}`);
     const latestRequestId = prefix ? globalSearchRequestId : searchRequestId;
     if (requestId === latestRequestId && state.view === view) renderResults(response.results, { restoreFocus, selectionStart, selectionEnd });
   } catch (error) {
+    if (syncCommonPathsBeforeSearch && state.includeCommonPaths && !commonPathsReady) {
+      state.includeCommonPaths = false;
+      document.querySelectorAll('#common-paths, #global-common-paths').forEach((checkbox) => { checkbox.checked = false; });
+      persistSearchPreferences();
+    }
     const latestRequestId = prefix ? globalSearchRequestId : searchRequestId;
     if (requestId === latestRequestId && state.view === view) showToast(error.message, true);
   }
 }
 
-export function performSearch() {
-  return performSearchRequest({ view: 'search', renderResults: renderSearch });
+export function performSearch(options = {}) {
+  return performSearchRequest({ view: 'search', renderResults: renderSearch, ...options });
 }
 
 function globalSourceMarkup(sources) {
@@ -353,8 +353,8 @@ function renderGlobalSearchSurface(results = null) {
   bindDocumentOpeners(surface);
 }
 
-export function performGlobalSearch() {
-  return performSearchRequest({ prefix: 'global', view: 'global-search', renderResults: renderGlobalSearchSurface });
+export function performGlobalSearch(options = {}) {
+  return performSearchRequest({ prefix: 'global', view: 'global-search', renderResults: renderGlobalSearchSurface, ...options });
 }
 
 function bindGlobalSourceActions() {

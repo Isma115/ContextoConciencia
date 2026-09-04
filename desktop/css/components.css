@@ -47,7 +47,7 @@
 .result-head .doc-icon { flex: 0 0 29px; }
 .result-title-wrap { min-width: 0; flex: 1; }
 .result-title { overflow: hidden; margin: 0; color: var(--strong); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.result-source { margin-top: 4px; color: var(--muted); font-family: var(--mono); font-size: 9px; }
+.result-source { overflow: hidden; margin-top: 4px; color: var(--muted); font-family: var(--mono); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .score { color: var(--green); font-family: var(--mono); font-size: 9px; }
 .snippet { margin: 10px 0 9px 39px; color: var(--text); font-family: var(--mono); font-size: 10px; line-height: 1.55; }
 .snippet .search-hit { padding: 1px 2px; border-radius: 2px; color: var(--strong); background: color-mix(in srgb, var(--amber) 38%, transparent); }

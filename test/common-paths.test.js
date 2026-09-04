@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { test } = require('node:test');
 const { openDatabase, now } = require('../server/database/db');
-const { collectFiles } = require('../server/importers/local');
+const { collectFiles, importLocalSource, MAX_FILES } = require('../server/importers/local');
 const { upsertDocument } = require('../server/services/documents');
 const { searchDocuments } = require('../server/routes');
 const {
@@ -61,6 +61,39 @@ test('omite carpetas técnicas al recoger documentos de las rutas comunes', () =
 
     assert.deepEqual(files, ['README.md', path.join('src', 'notas.txt')]);
   } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('reparte el límite de archivos entre las rutas comunes', () => {
+  const home = temporaryHome();
+  const documents = path.join(home, 'Documents');
+  const downloads = path.join(home, 'Downloads');
+  const database = openDatabase(path.join(home, 'test.db'));
+  try {
+    fs.mkdirSync(documents);
+    fs.mkdirSync(downloads);
+    for (let index = 0; index <= MAX_FILES; index += 1) {
+      fs.writeFileSync(path.join(documents, `document-${String(index).padStart(4, '0')}.md`), `Documento ${index}`);
+    }
+    const downloadPath = path.join(downloads, 'descarga.md');
+    fs.writeFileSync(downloadPath, 'Documento de Descargas');
+
+    const source = { id: 'source_common', config_json: JSON.stringify({
+      role: COMMON_PATHS_ROLE,
+      paths: [documents, downloads],
+      excludeDirectories: [],
+      ignoreErrors: true,
+      followSymlinks: false
+    }) };
+    dbInsertSource(database, source.id, 'Rutas comunes', source.config_json);
+    const result = importLocalSource(database, source, { prune: true, includeUnsupported: false });
+
+    assert.equal(result.total, MAX_FILES);
+    assert.equal(database.get('SELECT COUNT(*) AS count FROM documents WHERE source_id = ?', source.id).count, MAX_FILES);
+    assert.ok(database.get('SELECT id FROM documents WHERE source_id = ? AND external_id = ?', source.id, downloadPath));
+  } finally {
+    database.close();
     fs.rmSync(home, { recursive: true, force: true });
   }
 });

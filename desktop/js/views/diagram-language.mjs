@@ -2,6 +2,7 @@ const BOARD_WIDTH = 1400;
 const BOARD_HEIGHT = 900;
 const NODE_WIDTH = 190;
 const NODE_HEIGHT = 88;
+const NODE_DESCRIPTION_MAX_LENGTH = 2000;
 const NODE_MARGIN = 20;
 const AUTO_LAYOUT_COLUMNS = 4;
 const AUTO_LAYOUT_COLUMN_GAP = 140;
@@ -171,6 +172,20 @@ function parseNode(tokens, lineNumber, index) {
   };
 }
 
+function parseDescription(tokens, lineNumber) {
+  if (tokens.length !== 3) fail('Una descripción necesita un identificador de nodo y un texto entre comillas', lineNumber);
+  const idToken = tokens[1];
+  const descriptionToken = tokens[2];
+  if (idToken.quoted || !NODE_ID_PATTERN.test(idToken.value)) {
+    fail(`Identificador de nodo no válido: “${idToken.value}”`, lineNumber, idToken.column);
+  }
+  if (!descriptionToken.quoted) fail('La descripción debe ir entre comillas', lineNumber, descriptionToken.column);
+  return {
+    nodeId: idToken.value,
+    description: String(descriptionToken.value).slice(0, NODE_DESCRIPTION_MAX_LENGTH)
+  };
+}
+
 function parseEdge(tokens, lineNumber, index) {
   if (tokens.length < 4) fail('Una conexión necesita origen, “->” y destino', lineNumber);
   const sourceToken = tokens[1];
@@ -216,6 +231,7 @@ export function parseDiagramText(source) {
   const text = String(source ?? '').replace(/\r\n?/g, '\n');
   const nodes = [];
   const edges = [];
+  const descriptions = [];
   const nodeIds = new Set();
   let title = 'Diagrama generado';
   let hasTitle = false;
@@ -240,11 +256,24 @@ export function parseDiagramText(source) {
       nodes.push(node);
       return;
     }
+    if (command === 'description' || command === 'descripcion') {
+      descriptions.push({ ...parseDescription(tokens, lineNumber), lineNumber });
+      return;
+    }
     if (command === 'edge' || command === 'connect') {
       edges.push({ ...parseEdge(tokens, lineNumber, edges.length), lineNumber });
       return;
     }
     fail(`Instrucción desconocida: “${tokens[0]?.value || ''}”`, lineNumber, tokens[0]?.column || 1);
+  });
+
+  const describedNodeIds = new Set();
+  descriptions.forEach(({ nodeId, description, lineNumber }) => {
+    if (!nodeIds.has(nodeId)) fail(`El nodo “${nodeId}” no existe`, lineNumber);
+    if (describedNodeIds.has(nodeId)) fail(`El nodo “${nodeId}” ya tiene una descripción`, lineNumber);
+    describedNodeIds.add(nodeId);
+    const node = nodes.find((candidate) => candidate.id === nodeId);
+    node.description = description;
   });
 
   const resolvedEdges = edges.map(({ lineNumber, ...edge }) => {
@@ -278,6 +307,11 @@ export function serializeDiagram(diagram) {
   nodes.forEach((node) => {
     const type = TYPE_ALIASES[normaliseKey(node?.type)] || 'step';
     lines.push(`node ${node.id} ${quote(node.label || 'Paso')} ${type} at ${numberText(node.x, 100)}, ${numberText(node.y, 100)}`);
+  });
+  const describedNodes = nodes.filter((node) => Object.prototype.hasOwnProperty.call(node || {}, 'description'));
+  if (describedNodes.length) lines.push('');
+  describedNodes.forEach((node) => {
+    lines.push(`description ${node.id} ${quote(node.description)}`);
   });
   if (edges.length) lines.push('');
   edges.forEach((edge) => {

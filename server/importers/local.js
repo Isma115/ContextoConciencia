@@ -106,6 +106,38 @@ function collectFiles(inputPath, files = [], options = {}) {
   return files;
 }
 
+function collectFilesFromInputs(inputs, options, errors) {
+  const filesByInput = [];
+  for (const input of inputs) {
+    const inputFiles = [];
+    try {
+      collectFiles(input, inputFiles, options);
+    } catch (error) {
+      errors.push({ path: input, message: error.message });
+    }
+    filesByInput.push(inputFiles);
+  }
+
+  // Reparte el límite entre las rutas: una carpeta grande no debe impedir
+  // que las siguientes rutas comunes aporten documentos al índice.
+  const uniqueFiles = [];
+  const seen = new Set();
+  for (let index = 0; uniqueFiles.length < MAX_FILES; index += 1) {
+    let hasFiles = false;
+    for (const inputFiles of filesByInput) {
+      const filePath = inputFiles[index];
+      if (!filePath) continue;
+      hasFiles = true;
+      if (seen.has(filePath)) continue;
+      seen.add(filePath);
+      uniqueFiles.push(filePath);
+      if (uniqueFiles.length >= MAX_FILES) break;
+    }
+    if (!hasFiles) break;
+  }
+  return uniqueFiles;
+}
+
 function parseCsvSummary(content) {
   const lines = content.split(/\r?\n/).filter(Boolean);
   if (!lines.length) return { columns: [], rows: 0 };
@@ -187,7 +219,6 @@ function readFileDocument(filePath, { allowLargeMetadata = false, deferContent =
 function importLocalSource(db, source, { prune = false, includeUnsupported = true } = {}) {
   const config = parseJson(source.config_json);
   const inputs = Array.isArray(config.paths) ? config.paths : [];
-  const files = [];
   const errors = [];
   const scanOptions = {
     skipDirectories: config.excludeDirectories,
@@ -195,14 +226,7 @@ function importLocalSource(db, source, { prune = false, includeUnsupported = tru
     followSymlinks: config.followSymlinks,
     includeUnsupported
   };
-  for (const input of inputs) {
-    try {
-      collectFiles(input, files, scanOptions);
-    } catch (error) {
-      errors.push({ path: input, message: error.message });
-    }
-  }
-  const uniqueFiles = [...new Set(files)].slice(0, MAX_FILES);
+  const uniqueFiles = collectFilesFromInputs(inputs, scanOptions, errors);
   let created = 0;
   let updated = 0;
   db.transaction(() => {
