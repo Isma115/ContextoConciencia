@@ -32,6 +32,21 @@
 .form-error { margin: 12px 0 0; color: var(--red); font-size: 10px; line-height: 1.4; }
 .diagram-delete-confirmation-modal { width: min(430px, 100%); }
 .diagram-delete-confirmation-modal .modal-body p { margin: 0; color: var(--text); font-size: 11px; line-height: 1.5; }
+.diagram-font-size-modal { width: min(540px, 100%); }
+.diagram-font-size-description { margin: 0 0 14px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.diagram-font-size-options { display: grid; gap: 7px; margin: 0; padding: 0; border: 0; }
+.diagram-font-size-options legend { margin-bottom: 7px; color: var(--muted); font-family: var(--mono); font-size: 9px; letter-spacing: .55px; text-transform: uppercase; }
+.diagram-font-size-option { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 9px; min-height: 48px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 4px; color: var(--text); background: var(--surface-raised); cursor: pointer; transition: background .12s, border-color .12s, box-shadow .12s, color .12s; }
+.diagram-font-size-option:hover { border-color: var(--hover-border); background: var(--hover-surface); box-shadow: 0 0 0 1px var(--blue-soft); }
+.diagram-font-size-option:has(input:checked) { border-color: var(--accent-border-strong); color: var(--strong); background: var(--accent-surface); }
+.diagram-font-size-option input { width: 13px; height: 13px; margin: 0; accent-color: var(--blue); }
+.diagram-font-size-option-copy { min-width: 0; display: grid; gap: 3px; }
+.diagram-font-size-option-copy strong { color: var(--strong); font-size: 11px; font-weight: 600; }
+.diagram-font-size-option-copy small { color: var(--muted); font-size: 9px; }
+.diagram-font-size-sample { color: var(--accent-text); font-family: var(--mono); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.diagram-font-size-option[data-diagram-font-size-option="small"] .diagram-font-size-sample { font-size: 13px; }
+.diagram-font-size-option[data-diagram-font-size-option="large"] .diagram-font-size-sample { font-size: 16px; }
+.diagram-font-size-option[data-diagram-font-size-option="very-large"] .diagram-font-size-sample { font-size: 18px; }
 .diagram-prompt-modal { width: min(590px, 100%); transition: width .16s ease; }
 .diagram-prompt-modal.is-expanded { width: min(920px, 100%); max-height: calc(100dvh - 48px); display: flex; flex-direction: column; overflow: hidden; }
 .diagram-prompt-modal.is-expanded form { min-height: 0; display: flex; flex-direction: column; }

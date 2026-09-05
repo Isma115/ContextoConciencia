@@ -12,10 +12,10 @@ import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/di
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
 import { renderFileExplorer } from './views/file-explorer.js';
-import { renderSddSpecs, renderSddDatabase, renderSddUi, renderSddResources, bindSddInject, bindSddLoad, bindSddReload } from './views/sdd.js';
+import { renderSddSpecs, renderSddDatabase, renderSddUi, renderSddResources, restoreSddProject, bindSddInject, bindSddLoad, bindSddReload } from './views/sdd.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
-import { loadDiagramLineContrast } from './core/diagram-settings.js';
+import { loadDiagramFontSize, loadDiagramLineContrast } from './core/diagram-settings.js';
 import { bindWorkspaceControls, configureWorkspace } from './core/workspace.js';
 
 let nativeMenuView = null;
@@ -183,11 +183,13 @@ bindSddLoad();
 bindSddReload();
 loadPalettePreference();
 loadDiagramLineContrast();
+loadDiagramFontSize();
 
 async function startApplication() {
   await loadSearchPreferences();
   renderSidebarSearch();
   await recoverOfflineSession();
+  await restoreSddProject();
 }
 
 startApplication();

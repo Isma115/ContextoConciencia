@@ -1,5 +1,7 @@
 import { $, escapeHtml } from '../core/dom.js';
 import { sectionIconMarkup } from '../core/section-icons.js';
+import { currentDiagramFontScale } from '../core/diagram-settings.js';
+import { state } from '../core/state.js';
 import { showToast } from '../ui/notifications.js';
 import { bindModalClose, closeModal } from '../ui/modals.js';
 import { parseDiagramText, serializeDiagram } from './diagram-language.mjs';
@@ -121,8 +123,44 @@ function nextEdgeColor(diagram) {
   return EDGE_COLOR_KEYS.find((color) => !usedColors.has(color)) || edgeColorForIndex(diagram.edges.length);
 }
 
-function createDiagram(title = 'Nuevo diagrama') {
-  return { id: makeId('diagram'), title, nodes: [], edges: [] };
+function sourceIdValue(value) {
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function loadedSourceIds() {
+  return new Set(
+    (Array.isArray(state.sources) ? state.sources : [])
+      .filter((source) => source && typeof source === 'object' && source.config?.role !== 'common-paths')
+      .map((source) => sourceIdValue(source.id))
+      .filter(Boolean)
+  );
+}
+
+function hasLoadedSources() {
+  return loadedSourceIds().size > 0;
+}
+
+function diagramBelongsToLoadedSource(diagram, sourceIds = loadedSourceIds()) {
+  // Los diagramas antiguos sin sourceId no se pueden atribuir con seguridad a una Fuente.
+  const sourceId = sourceIdValue(diagram?.sourceId);
+  return Boolean(sourceId && sourceIds.has(sourceId));
+}
+
+function visibleDiagrams() {
+  const sourceIds = loadedSourceIds();
+  return diagrams.filter((diagram) => diagramBelongsToLoadedSource(diagram, sourceIds));
+}
+
+function preferredSourceId() {
+  const sourceIds = loadedSourceIds();
+  const selected = diagrams.find((diagram) => diagram.id === activeDiagramId);
+  const selectedSourceId = sourceIdValue(selected?.sourceId);
+  if (selectedSourceId && sourceIds.has(selectedSourceId)) return selectedSourceId;
+  return sourceIds.values().next().value || null;
+}
+
+function createDiagram(title = 'Nuevo diagrama', sourceId = null) {
+  return { id: makeId('diagram'), title, sourceId: sourceIdValue(sourceId), nodes: [], edges: [] };
 }
 
 function duplicateDiagramTitle(title) {
@@ -193,6 +231,7 @@ function normaliseDiagram(raw, index) {
   return {
     id: typeof raw?.id === 'string' && raw.id ? raw.id : makeId('diagram'),
     title: typeof raw?.title === 'string' && raw.title.trim() ? raw.title.slice(0, 120) : `Diagrama ${index + 1}`,
+    sourceId: sourceIdValue(raw?.sourceId),
     nodes,
     edges
   };
@@ -218,6 +257,28 @@ function persistDiagrams() {
   }
 }
 
+function resetDiagramViewState() {
+  diagramResizeObserver?.disconnect();
+  diagramResizeObserver = null;
+  resetDiagramInteraction();
+  focusNodeId = null;
+  focusNodeDescriptionId = null;
+  diagramViewport = {
+    zoom: 1,
+    offsetX: 0,
+    offsetY: 0,
+    initialized: false,
+    userZoomed: false
+  };
+}
+
+function renderSourcesRequired(root) {
+  if (hasLoadedSources()) return false;
+  resetDiagramViewState();
+  root.innerHTML = '<div class="diagram-source-required" role="status"><strong>Sin fuentes cargadas</strong><span>Carga una fuente desde la sección Fuentes para abrir y editar diagramas.</span></div>';
+  return true;
+}
+
 export function getDiagramWorkspaceState() {
   return {
     diagrams: cloneValue(diagrams),
@@ -229,11 +290,11 @@ export function restoreDiagramWorkspaceState(workspaceState) {
   const rawDiagrams = Array.isArray(workspaceState) ? workspaceState : workspaceState?.diagrams;
   if (!Array.isArray(rawDiagrams)) return false;
   const restored = rawDiagrams.map(normaliseDiagram).filter(Boolean);
-  diagrams = restored.length ? restored : [createDiagram('Flujo principal')];
+  diagrams = restored;
   const requestedActiveId = workspaceState?.activeDiagramId;
   activeDiagramId = diagrams.some((diagram) => diagram.id === requestedActiveId)
     ? requestedActiveId
-    : diagrams[0].id;
+    : visibleDiagrams()[0]?.id || null;
   undoStack = [];
   redoStack = [];
   resetDiagramInteraction();
@@ -283,13 +344,19 @@ async function exportDiagramText(text, button = null) {
   }
 }
 
-function applyDiagramText(text, { successMessage = 'Diagrama generado desde texto' } = {}) {
+function applyDiagramText(text, { successMessage = 'Diagrama generado desde texto', sourceId = null } = {}) {
   const parsed = parseDiagramText(text);
   const current = activeDiagram();
   const before = historySnapshot();
   const index = Math.max(0, diagrams.findIndex((diagram) => diagram.id === current.id));
-  const next = normaliseDiagram({ ...parsed, id: current.id }, index);
-  diagrams = diagrams.map((diagram) => diagram.id === current.id ? next : diagram);
+  const next = normaliseDiagram({
+    ...parsed,
+    id: current.id,
+    sourceId: sourceIdValue(sourceId) || sourceIdValue(current.sourceId) || preferredSourceId()
+  }, index);
+  diagrams = diagrams.some((diagram) => diagram.id === current.id)
+    ? diagrams.map((diagram) => diagram.id === current.id ? next : diagram)
+    : [...diagrams, next];
   activeDiagramId = next.id;
   resetDiagramInteraction();
   recordHistory(before);
@@ -302,7 +369,10 @@ export function openDiagramDocument(diagramDocument) {
   if (!diagramDocument || typeof diagramDocument.content !== 'string') {
     throw new Error('El contenido del diagrama no es válido');
   }
-  applyDiagramText(diagramDocument.content, { successMessage: 'Diagrama abierto visualmente' });
+  applyDiagramText(diagramDocument.content, {
+    successMessage: 'Diagrama abierto visualmente',
+    sourceId: diagramDocument.sourceId
+  });
   closeModal();
 }
 
@@ -377,6 +447,7 @@ async function importDiagramFile() {
 export function bindDiagramMenu() {
   window.nexusData?.onDiagramMenuAction?.((action) => {
     if (!$('#view-diagrams')?.classList.contains('active')) return;
+    if (!hasLoadedSources()) return;
     if (action === 'new') createNewDiagram();
     if (action === 'duplicate') duplicateActiveDiagram();
     if (action === 'code') openDiagramCodeModal();
@@ -474,10 +545,17 @@ function finishTextHistory(element) {
 }
 
 function activeDiagram() {
-  let diagram = diagrams.find((candidate) => candidate.id === activeDiagramId);
+  const sourceIds = loadedSourceIds();
+  let diagram = diagrams.find((candidate) => (
+    candidate.id === activeDiagramId && diagramBelongsToLoadedSource(candidate, sourceIds)
+  ));
+  if (!diagram) diagram = visibleDiagrams()[0] || null;
   if (!diagram) {
-    diagram = diagrams[0] || createDiagram('Flujo principal');
-    if (!diagrams.length) diagrams = [diagram];
+    const sourceId = sourceIds.values().next().value || null;
+    diagram = sourceId
+      ? createDiagram('Flujo principal', sourceId)
+      : diagrams.find((candidate) => candidate.id === activeDiagramId) || createDiagram('Flujo principal');
+    if (sourceId) diagrams = [...diagrams, diagram];
     activeDiagramId = diagram.id;
   }
   return diagram;
@@ -836,10 +914,7 @@ function handleNodeContextMenuAction(event) {
   if (option.dataset.nodeAction === 'delete') {
     const node = nodeById(activeDiagram(), nodeId);
     hideEdgeContextMenu();
-    if (node) {
-      removeNode(node.id);
-      showToast('Tarjeta eliminada');
-    }
+    if (node) openDeleteNodeConfirmation(node.id);
   }
 }
 
@@ -1184,9 +1259,11 @@ function renderDiagramCanvas() {
 export function renderDiagrams() {
   const root = $('#view-diagrams');
   if (!root) return;
+  if (renderSourcesRequired(root)) return;
   hideEdgeContextMenu();
   const diagram = activeDiagram();
-  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap">${sectionIconMarkup('diagrams')}<div class="diagram-title-copy"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${diagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
+  const selectableDiagrams = visibleDiagrams();
+  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap">${sectionIconMarkup('diagrams')}<div class="diagram-title-copy"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${selectableDiagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
   ensureDiagramViewport();
   observeDiagramCanvas();
   const arrowMarker = root.querySelector('#diagram-arrow');
@@ -1340,7 +1417,8 @@ function duplicateActiveDiagram() {
 
 function createNewDiagram() {
   const before = historySnapshot();
-  const next = createDiagram(`Diagrama ${diagrams.length + 1}`);
+  const current = activeDiagram();
+  const next = createDiagram(`Diagrama ${visibleDiagrams().length + 1}`, current.sourceId || preferredSourceId());
   diagrams = [...diagrams, next];
   activeDiagramId = next.id;
   resetDiagramInteraction();
@@ -1382,7 +1460,7 @@ function removeNode(nodeId) {
 
 function removeSelection() {
   if (selection.type === 'node' && selection.id) {
-    removeNode(selection.id);
+    openDeleteNodeConfirmation(selection.id);
     return;
   }
   if (selection.type === 'edge' && selection.id) {
@@ -1393,10 +1471,9 @@ function removeSelection() {
 function deleteActiveDiagram() {
   const current = activeDiagram();
   const before = historySnapshot();
-  const deletedIndex = diagrams.findIndex((diagram) => diagram.id === current.id);
   diagrams = diagrams.filter((diagram) => diagram.id !== current.id);
-  const nextDiagram = diagrams[deletedIndex] || diagrams[deletedIndex - 1] || createDiagram('Flujo principal');
-  if (!diagrams.length) diagrams = [nextDiagram];
+  const nextDiagram = visibleDiagrams()[0] || createDiagram('Flujo principal', preferredSourceId());
+  if (!diagrams.some((diagram) => diagram.id === nextDiagram.id)) diagrams = [...diagrams, nextDiagram];
   activeDiagramId = nextDiagram.id;
   resetDiagramInteraction();
   recordHistory(before);
@@ -1420,6 +1497,30 @@ function openDeleteDiagramConfirmation() {
   confirmButton?.addEventListener('click', () => {
     closeModal();
     deleteActiveDiagram();
+  });
+  cancelButton?.focus();
+}
+
+function openDeleteNodeConfirmation(nodeId) {
+  hideEdgeContextMenu();
+  const node = nodeById(activeDiagram(), nodeId);
+  if (!node) return;
+  const nodeLabel = node.label?.trim() || 'esta tarjeta';
+  $('#modal-root').innerHTML = `<div id="diagram-node-delete-confirmation" class="modal-backdrop"><div class="modal diagram-delete-confirmation-modal" role="dialog" aria-modal="true" aria-labelledby="diagram-node-delete-confirmation-title" aria-describedby="diagram-node-delete-confirmation-description"><div class="modal-head"><div><h2 id="diagram-node-delete-confirmation-title">Eliminar nodo</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><p id="diagram-node-delete-confirmation-description">¿Quieres eliminar la tarjeta “${escapeHtml(nodeLabel)}”? También se eliminarán sus conexiones.</p></div><div class="modal-actions"><button id="diagram-node-delete-cancel" class="btn btn-secondary" data-close-modal type="button">No</button><button id="diagram-node-delete-confirm" class="btn btn-danger" type="button">Sí, eliminar</button></div></div></div>`;
+  bindModalClose();
+  const modal = $('#diagram-node-delete-confirmation');
+  const cancelButton = $('#diagram-node-delete-cancel');
+  const confirmButton = $('#diagram-node-delete-confirm');
+  modal?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    closeModal();
+  });
+  confirmButton?.addEventListener('click', () => {
+    closeModal();
+    if (!nodeById(activeDiagram(), node.id)) return;
+    removeNode(node.id);
+    showToast('Tarjeta eliminada');
   });
   cancelButton?.focus();
 }
@@ -1625,7 +1726,7 @@ function handleNodeClick(event) {
   const deleteButton = event.target.closest('[data-delete-node]');
   if (deleteButton) {
     event.stopPropagation();
-    removeNode(deleteButton.dataset.deleteNode);
+    openDeleteNodeConfirmation(deleteButton.dataset.deleteNode);
     return;
   }
   const element = event.target.closest('.diagram-node');
@@ -1795,6 +1896,15 @@ function diagramNodeSvg(node, colors) {
   const centerX = x + width / 2;
   const centerY = y + height / 2;
   const hasDescription = hasNodeDescription(node);
+  const fontScale = currentDiagramFontScale();
+  const typeFontSize = 10 * fontScale;
+  const typeLineHeight = 12 * fontScale;
+  const labelFontSize = 13 * fontScale;
+  const labelLineHeight = 16 * fontScale;
+  const descriptionTitleFontSize = 10 * fontScale;
+  const descriptionTitleLineHeight = 12 * fontScale;
+  const descriptionFontSize = 11 * fontScale;
+  const descriptionLineHeight = 14 * fontScale;
   const rounded = !hasDescription && (type === 'start' || type === 'end');
   const shape = type === 'decision' && !hasDescription
     ? `<polygon points="${centerX},${y} ${x + width},${centerY} ${centerX},${y + height} ${x},${centerY}" fill="${escapeSvg(colors.warningSurface)}" stroke="${escapeSvg(colors.warningBorder)}" stroke-width="1.5" filter="url(#diagram-image-shadow)"></polygon>`
@@ -1810,36 +1920,36 @@ function diagramNodeSvg(node, colors) {
   const textAnchor = centered ? 'middle' : 'start';
   const typeColor = type === 'start' ? colors.green : type === 'decision' ? colors.amber : type === 'end' ? colors.red : colors.accentText;
   const labelMaxCharacters = centered
-    ? Math.max(12, Math.floor(width / 10))
+    ? Math.max(12, Math.floor(width / (10 * fontScale)))
     : rounded
-      ? Math.max(15, Math.floor((width - 40) / 7.3))
-      : Math.max(18, Math.floor((width - 14) / 7.3));
+      ? Math.max(15, Math.floor((width - 40) / (7.3 * fontScale)))
+      : Math.max(18, Math.floor((width - 14) / (7.3 * fontScale)));
   const labelLines = wrapSvgText(node.label, labelMaxCharacters, hasDescription ? 2 : 3);
   const typeMarkup = svgTextLines([NODE_TYPES[type] || NODE_TYPES.step], {
     x: textX,
     y: y + (hasDescription ? 22 : centered ? 27 : 22),
     anchor: textAnchor,
     fill: typeColor,
-    fontSize: 10,
+    fontSize: typeFontSize,
     weight: 700,
-    lineHeight: 12
+    lineHeight: typeLineHeight
   });
   const labelMarkup = svgTextLines(labelLines, {
     x: textX,
     y: y + (hasDescription ? 46 : centered ? 48 : 46),
     anchor: textAnchor,
     fill: colors.strong,
-    fontSize: 13,
+    fontSize: labelFontSize,
     weight: 650,
-    lineHeight: 16
+    lineHeight: labelLineHeight
   });
   const descriptionMarkup = hasDescription
     ? (() => {
       const descriptionX = textX;
-      const descriptionTitleY = y + 46 + labelLines.length * 16 + 18;
+      const descriptionTitleY = y + 46 + labelLines.length * labelLineHeight + 18 * fontScale;
       const description = String(node.description || '').trim() || 'Añade detalles…';
-      const descriptionLines = wrapSvgText(description, Math.max(18, Math.floor((width - 28) / 6.2)), 4);
-      return `${svgTextLines(['DESCRIPCIÓN'], { x: descriptionX, y: descriptionTitleY, anchor: textAnchor, fill: colors.accentTextSoft, fontSize: 9, weight: 700, lineHeight: 11 })}${svgTextLines(descriptionLines, { x: descriptionX, y: descriptionTitleY + 14, anchor: textAnchor, fill: colors.muted, fontSize: 10, weight: 400, lineHeight: 13 })}`;
+      const descriptionLines = wrapSvgText(description, Math.max(18, Math.floor((width - 28) / (6.2 * fontScale))), 4);
+      return `${svgTextLines(['DESCRIPCIÓN'], { x: descriptionX, y: descriptionTitleY, anchor: textAnchor, fill: colors.accentTextSoft, fontSize: descriptionTitleFontSize, weight: 700, lineHeight: descriptionTitleLineHeight })}${svgTextLines(descriptionLines, { x: descriptionX, y: descriptionTitleY + 15 * fontScale, anchor: textAnchor, fill: colors.muted, fontSize: descriptionFontSize, weight: 400, lineHeight: descriptionLineHeight })}`;
     })()
     : '';
   const accessibleLabel = hasDescription && node.description
@@ -1851,6 +1961,7 @@ function diagramNodeSvg(node, colors) {
 function diagramEdgeSvg(edge, diagram, colors, index = 0) {
   const geometry = edgeGeometry(edge, diagram, false);
   if (!geometry) return '';
+  const fontScale = currentDiagramFontScale();
   const direction = validEdgeDirection(edge.direction);
   const edgeColorKey = validEdgeColor(edge.color) || edgeColorForIndex(index);
   const edgeColor = colors.edgeColors?.[edgeColorKey] || colors.accentTextSoft;
@@ -1874,7 +1985,7 @@ function diagramEdgeSvg(edge, diagram, colors, index = 0) {
       ? `<circle cx="${geometry.end.x}" cy="${geometry.end.y}" r="5" fill="${escapeSvg(colors.amber)}" stroke="${escapeSvg(colors.canvas)}" stroke-width="2.5"></circle>`
       : `<circle cx="${geometry.start.x}" cy="${geometry.start.y}" r="5" fill="${escapeSvg(colors.canvas)}" stroke="${escapeSvg(colors.accentTextSoft)}" stroke-width="2.5"></circle><circle cx="${geometry.end.x}" cy="${geometry.end.y}" r="5" fill="${escapeSvg(colors.canvas)}" stroke="${escapeSvg(colors.accentTextSoft)}" stroke-width="2.5"></circle>`;
   const label = edge.label
-    ? `<text x="${geometry.midpoint.x}" y="${geometry.midpoint.y}" text-anchor="middle" dominant-baseline="middle" fill="${escapeSvg(colors.accentTextSoft)}" paint-order="stroke" stroke="${escapeSvg(colors.surfaceDeep)}" stroke-width="5" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="10">${escapeSvg(edge.label)}</text>`
+    ? `<text x="${geometry.midpoint.x}" y="${geometry.midpoint.y}" text-anchor="middle" dominant-baseline="middle" fill="${escapeSvg(colors.accentTextSoft)}" paint-order="stroke" stroke="${escapeSvg(colors.surfaceDeep)}" stroke-width="5" font-family="ui-monospace, SFMono-Regular, Consolas, monospace" font-size="${10 * fontScale}">${escapeSvg(edge.label)}</text>`
     : '';
   return `<g>${markerDefinition}<path d="${geometry.path}" fill="none" stroke="${escapeSvg(colors.canvas)}" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"></path><path d="${geometry.path}" fill="none" stroke="${escapeSvg(edgeColor)}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"${dash}${marker}></path>${endpointMarkup}${label}</g>`;
 }

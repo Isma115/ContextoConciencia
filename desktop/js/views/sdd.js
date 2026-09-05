@@ -9,8 +9,29 @@ import { state } from '../core/state.js';
 const SPEC_STATUS = Object.freeze({ draft: 'Borrador', active: 'Activa', approved: 'Aprobada', implemented: 'Implementada' });
 const MEDIA_KIND = Object.freeze({ text: 'Texto', image: 'Imagen', video: 'Vídeo' });
 const SPECS_RESOURCES_FOLDER_NAME = 'specs_resources';
+const SDD_PROJECT_PATH_STORAGE_KEY = 'nexusdata.sdd-project-path.v1';
 let renderRequestId = 0;
 let selectedMedia = { dataUrl: null, name: '' };
+
+function storedSddProjectPath() {
+  try {
+    return typeof window !== 'undefined' && window.localStorage
+      ? window.localStorage.getItem(SDD_PROJECT_PATH_STORAGE_KEY) || ''
+      : '';
+  } catch {
+    return '';
+  }
+}
+
+function persistSddProjectPath(projectPath) {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return;
+    if (projectPath) window.localStorage.setItem(SDD_PROJECT_PATH_STORAGE_KEY, projectPath);
+    else window.localStorage.removeItem(SDD_PROJECT_PATH_STORAGE_KEY);
+  } catch {
+    // El proyecto sigue disponible durante la sesión aunque no se pueda guardar la ruta.
+  }
+}
 
 export function setSddProject(project = null, { refresh = false } = {}) {
   const previousPath = state.sddProject?.path || '';
@@ -18,8 +39,31 @@ export function setSddProject(project = null, { refresh = false } = {}) {
     ? { ...project, path: project.path.trim() }
     : null;
   state.sddProject = nextProject;
+  persistSddProjectPath(nextProject?.path || '');
   if (!refresh && previousPath === (nextProject?.path || '')) return;
   renderRequestId += 1;
+}
+
+export async function restoreSddProject() {
+  const folder = storedSddProjectPath();
+  if (!folder) return false;
+  const loadProject = window.nexusData?.loadSddProject || window.nexusData?.loadSddSpecsMarkdown;
+  if (typeof loadProject !== 'function') return false;
+  try {
+    const selection = await loadProject(folder, { prompt: false });
+    if (!selection) {
+      persistSddProjectPath('');
+      showToast('El proyecto S.D.D guardado ya no está disponible', true);
+      return false;
+    }
+    const result = await api('/sdd/project', { method: 'POST', body: JSON.stringify({ path: selection.path }) });
+    setSddProject(result.project, { refresh: true });
+    renderActiveSddViews();
+    return true;
+  } catch (error) {
+    showToast(`No se pudo recargar el proyecto S.D.D: ${error.message}`, true);
+    return false;
+  }
 }
 
 function currentSddProjectPath() {
@@ -48,11 +92,12 @@ function isViewActive(viewId) {
   return Boolean(node && node.classList.contains('active'));
 }
 
-function sddHeader(icon, eyebrow, title, lead) {
+function sddHeader(icon, eyebrow, title, lead, { showEyebrow = true, showProjectName = true } = {}) {
+  const eyebrowMarkup = showEyebrow ? `<span class="diagram-eyebrow">${escapeHtml(eyebrow)}</span>` : '';
   const project = state.sddProject?.path
-    ? `<div class="sdd-project-context" title="${escapeHtml(state.sddProject.path)}"><span>Proyecto: ${escapeHtml(state.sddProject.name || state.sddProject.path)}</span><span class="sdd-project-context-path">Ruta: ${escapeHtml(state.sddProject.path)}</span></div>`
+    ? `<div class="sdd-project-context" title="${escapeHtml(state.sddProject.path)}">${showProjectName ? `<span>Proyecto: ${escapeHtml(state.sddProject.name || state.sddProject.path)}</span>` : ''}<span class="sdd-project-context-path">Ruta: ${escapeHtml(state.sddProject.path)}</span></div>`
     : '';
-  return `<div class="section-top"><div class="section-heading-with-icon">${sectionIconMarkup(icon)}<div class="section-heading-copy"><span class="diagram-eyebrow">${escapeHtml(eyebrow)}</span><h1>${escapeHtml(title)}</h1><p class="lead">${escapeHtml(lead)}</p>${project}</div></div></div>`;
+  return `<div class="section-top"><div class="section-heading-with-icon">${sectionIconMarkup(icon)}<div class="section-heading-copy">${eyebrowMarkup}<h1>${escapeHtml(title)}</h1><p class="lead">${escapeHtml(lead)}</p>${project}</div></div></div>`;
 }
 
 function sddToolbar(label, count, addId, addLabel, extraButton = '') {
@@ -81,9 +126,9 @@ async function confirmDelete(message) {
 
 /* ----------------------------------------------------------------- Inyectar */
 
-function renderSddProjectRequired(container, icon, eyebrow, title, lead) {
+function renderSddProjectRequired(container, icon, eyebrow, title, lead, headerOptions = {}) {
   if (hasSddProject()) return false;
-  container.innerHTML = `${sddHeader(icon, eyebrow, title, lead)}${emptyState('Sin proyecto S.D.D', 'Usa “Cargar” para seleccionar un proyecto que contenga specs.md y specs_resources.')}`;
+  container.innerHTML = `${sddHeader(icon, eyebrow, title, lead, headerOptions)}${emptyState('Sin proyecto S.D.D', 'Usa “Cargar” para seleccionar un proyecto que contenga specs.md y specs_resources.')}`;
   return true;
 }
 
@@ -275,9 +320,10 @@ function openSpecModal(existing = null) {
 export function renderSddSpecs() {
   const container = $('#view-sdd-specs');
   if (!container) return;
-  if (renderSddProjectRequired(container, 'specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.')) return;
+  const headerOptions = { showEyebrow: false, showProjectName: false };
+  if (renderSddProjectRequired(container, 'specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.', headerOptions)) return;
   const requestId = ++renderRequestId;
-  container.innerHTML = `${sddHeader('specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.')}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', '<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Volver a leer y editar specs.md del proyecto">Editar markdown</button>')}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
+  container.innerHTML = `${sddHeader('specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.', headerOptions)}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', '<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Volver a leer y editar specs.md del proyecto">Editar markdown</button>')}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
   $('#sdd-spec-add').addEventListener('click', () => openSpecModal());
   const mdEdit = $('#sdd-md-edit');
   if (mdEdit) mdEdit.addEventListener('click', openSpecsMarkdownEditor);

@@ -5,7 +5,7 @@
 .panel-header p { margin: 4px 0 0; color: var(--muted); font-size: 10px; }
 .text-link { padding: 4px; border: 0; color: var(--blue); background: none; font-size: 10px; }
 .text-link:hover { color: var(--accent-text); }
-.empty { padding: 26px 16px; border: 1px dashed var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; text-align: center; }
+.empty { display: grid; justify-items: center; gap: 6px; padding: 26px 16px; border: 1px dashed var(--line); border-radius: 4px; color: var(--muted); font-size: 11px; text-align: center; }
 .doc-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line-soft); transition: background .12s, box-shadow .12s; }
 .doc-row:first-of-type { border-top: 0; }
 .doc-icon { width: 29px; height: 30px; flex: 0 0 29px; display: grid; place-items: center; border: 1px solid var(--document-type-border); border-radius: 3px; color: var(--document-type-color); background: var(--document-type-surface); font-family: var(--mono); font-size: 9px; font-weight: 600; text-transform: uppercase; }

@@ -189,6 +189,10 @@ function setApplicationMenuForView(window, view) {
             click: () => window.webContents.send('preferences-menu-action', 'diagram-line-contrast', 'very-high')
           }
         ]
+      },
+      {
+        label: 'Estilo de letra',
+        click: () => window.webContents.send('preferences-menu-action', 'diagram-font-size')
       }
     ]
   });
@@ -455,10 +459,11 @@ Describe el requisito: contexto, criterios de aceptación, condiciones y excepci
     return { path: directoryPath, created: false };
   });
 
-  const loadSddProject = async (folderPath = '') => {
+  const loadSddProject = async (folderPath = '', options = {}) => {
     const requestedPath = String(folderPath || '').trim();
     let directoryPath = requestedPath ? path.normalize(requestedPath) : '';
     if (!directoryPath || !fs.existsSync(directoryPath) || !fs.statSync(directoryPath).isDirectory()) {
+      if (options?.prompt === false) return null;
       const result = await dialog.showOpenDialog({
         title: 'Seleccionar proyecto S.D.D',
         buttonLabel: 'Cargar',
@@ -485,9 +490,9 @@ Describe el requisito: contexto, criterios de aceptación, condiciones y excepci
     };
   };
 
-  ipcMain.handle('load-sdd-project', (_event, folderPath = '') => loadSddProject(folderPath));
+  ipcMain.handle('load-sdd-project', (_event, folderPath = '', options = {}) => loadSddProject(folderPath, options));
   // Compatibilidad con versiones del renderer que todavía usan el nombre anterior.
-  ipcMain.handle('load-sdd-specs-markdown', (_event, folderPath = '') => loadSddProject(folderPath));
+  ipcMain.handle('load-sdd-specs-markdown', (_event, folderPath = '', options = {}) => loadSddProject(folderPath, options));
 
   ipcMain.handle('read-sdd-specs-resources', (_event, folderPath = '') => {
     const directoryPath = path.normalize(String(folderPath || ''));
