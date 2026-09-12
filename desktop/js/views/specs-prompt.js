@@ -105,7 +105,7 @@ Para una referencia de texto, escribe el contenido debajo de sus metadatos. Para
 
 # Recursos
 
-- `specs_resources/ruta/real.ext` — Tipo
+- \`specs_resources/ruta/real.ext\` — Tipo
 
 Reglas adicionales:
 
