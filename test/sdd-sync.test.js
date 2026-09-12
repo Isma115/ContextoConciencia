@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { test, before, after } = require('node:test');
 const { startServer } = require('../server/app');
-const { parseSddDocument, parseSddSpecsMarkdown, sddSpecsToMarkdown } = require('../server/routes/sdd');
+const { parseSddDocument, parseSddSpecsMarkdown, sddSpecsToMarkdown, pendingSddSpecs } = require('../server/routes/sdd');
 
 let api;
 let fixtureDir;
@@ -42,11 +42,36 @@ async function request(route, options = {}, projectPath = '') {
   return { status: response.status, ok: response.ok, body };
 }
 
+const SDD_FOLDER_NAME = 'SDD_specs';
+
 function createProject(name, markdown) {
   const projectPath = path.join(fixtureDir, name);
-  fs.mkdirSync(path.join(projectPath, 'specs_resources'), { recursive: true });
-  fs.writeFileSync(path.join(projectPath, 'specs.md'), markdown, 'utf8');
+  const sddDir = sddDirFor(projectPath);
+  fs.mkdirSync(path.join(sddDir, 'specs_resources'), { recursive: true });
+  fs.writeFileSync(path.join(sddDir, 'specs_full.md'), markdown, 'utf8');
+  const pendingMarkdown = sddSpecsToMarkdown(pendingSddSpecs(parseSddSpecsMarkdown(markdown))) || '# Specs\n';
+  fs.writeFileSync(path.join(sddDir, 'specs.md'), pendingMarkdown, 'utf8');
   return projectPath;
+}
+
+function sddDirFor(projectPath) {
+  return path.join(projectPath, SDD_FOLDER_NAME);
+}
+
+function specsFile(projectPath) {
+  return path.join(sddDirFor(projectPath), 'specs.md');
+}
+
+function fullFile(projectPath) {
+  return path.join(sddDirFor(projectPath), 'specs_full.md');
+}
+
+function resourcesDirFor(projectPath) {
+  return path.join(sddDirFor(projectPath), 'specs_resources');
+}
+
+function createSddProject(name, markdown) {
+  return createProject(name, markdown);
 }
 
 async function loadProject(projectPath) {
@@ -204,7 +229,18 @@ test('no conserva proyecto S.D.D en el servidor y exige contexto por petición',
   assert.match(missingContext.body.error, /carpeta del proyecto S\.D\.D/);
 });
 
-test('carga specs.md y refleja cambios externos sin sincronizar una base local', async () => {
+test('rechaza el diseño anterior con specs.md en la raíz del proyecto', async () => {
+  const projectPath = path.join(fixtureDir, 'sdd-project-legacy-layout');
+  fs.mkdirSync(path.join(projectPath, 'specs_resources'), { recursive: true });
+  fs.writeFileSync(path.join(projectPath, 'specs.md'), '# Specs\n\n## Formato antiguo\n', 'utf8');
+
+  const loaded = await request('/sdd/project', { method: 'POST', body: JSON.stringify({ path: projectPath }) });
+  assert.equal(loaded.status, 400);
+  assert.match(loaded.body.error, /SDD_specs\/specs\.md/);
+  assert.equal(fs.existsSync(path.join(projectPath, 'specs_full.md')), false);
+});
+
+test('carga SDD_specs y refleja cambios externos sin sincronizar una base local', async () => {
   const projectPath = createProject('sdd-project-specs', `# Specs
 
 ## Requisito inicial
@@ -214,7 +250,7 @@ test('carga specs.md y refleja cambios externos sin sincronizar una base local',
   assert.equal(loaded.body.total, 1);
   assert.equal((await request('/sdd/specs', {}, projectPath)).body.specs[0].title, 'Requisito inicial');
 
-  fs.writeFileSync(path.join(projectPath, 'specs.md'), '# Specs\n\n## Requisito actualizado\n**Estado:** implementada\n', 'utf8');
+  fs.writeFileSync(fullFile(projectPath), '# Specs\n\n## Requisito actualizado\n**Estado:** implementada\n', 'utf8');
   const listed = await request('/sdd/specs', {}, projectPath);
   assert.deepEqual(listed.body.specs.map((spec) => spec.title), ['Requisito actualizado']);
   assert.equal(listed.body.specs[0].status, 'implemented');
@@ -223,7 +259,7 @@ test('carga specs.md y refleja cambios externos sin sincronizar una base local',
   assert.deepEqual(sddTables, []);
 });
 
-test('sincroniza el editor y CRUD de Specs directamente en specs.md', async () => {
+test('sincroniza el editor y CRUD de Specs dentro de SDD_specs', async () => {
   const projectPath = createProject('sdd-project-spec-crud', '# Specs\n\n## Primera spec\n**Estado:** activa\n');
   await loadProject(projectPath);
   const markdown = await request('/sdd/specs/markdown', {}, projectPath);
@@ -234,17 +270,22 @@ test('sincroniza el editor y CRUD de Specs directamente en specs.md', async () =
     body: JSON.stringify({ markdown: '# Specs\n\n## Desde editor\n**Estado:** aprobada\n\nDescripción editada.\n' })
   }, projectPath);
   assert.equal(synced.body.total, 1);
-  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Desde editor/);
+  assert.match(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Desde editor/);
+  assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Desde editor/);
 
   const created = await request('/sdd/specs', { method: 'POST', body: JSON.stringify({ title: 'Añadida', status: 'draft', description: 'Texto' }) }, projectPath);
   assert.equal(created.status, 201);
-  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Añadida/);
+  assert.match(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Añadida/);
+  assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Añadida/);
   const updated = await request(`/sdd/specs/${created.body.id}`, { method: 'PUT', body: JSON.stringify({ title: 'Añadida actualizada', status: 'implemented' }) }, projectPath);
   assert.equal(updated.status, 200);
-  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Añadida actualizada/);
+  // Implementada: sale de specs.md pero se conserva en specs_full.md.
+  assert.doesNotMatch(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Añadida actualizada/);
+  assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Añadida actualizada/);
   const removed = await request(`/sdd/specs/${created.body.id}`, { method: 'DELETE' }, projectPath);
   assert.equal(removed.status, 204);
-  assert.doesNotMatch(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Añadida actualizada/);
+  assert.doesNotMatch(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Añadida actualizada/);
+  assert.doesNotMatch(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Añadida actualizada/);
 });
 
 test('guarda Base de datos como una tabla Markdown y la vuelve a leer del disco', async () => {
@@ -257,17 +298,18 @@ test('guarda Base de datos como una tabla Markdown y la vuelve a leer del disco'
     body: JSON.stringify({ name: 'id', type: 'INTEGER', primaryKey: true, nullable: false })
   }, projectPath);
   assert.equal(column.status, 201);
-  const raw = fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8');
+  const raw = fs.readFileSync(fullFile(projectPath), 'utf8');
   assert.match(raw, /^# BBDD$/m);
   assert.match(raw, /^## usuarios$/m);
   assert.match(raw, /\| `id` \| `INTEGER` \| No \| PK \| — \| — \|/);
   assert.doesNotMatch(raw, /nexusdata:sdd-|"tables"/);
+  assert.match(fs.readFileSync(specsFile(projectPath), 'utf8'), /^# BBDD$/m);
 
   const listed = await request('/sdd/db', {}, projectPath);
   assert.equal(listed.body.tables[0].name, 'usuarios');
   assert.equal(listed.body.tables[0].columns[0].name, 'id');
 
-  fs.writeFileSync(path.join(projectPath, 'specs.md'), raw.replace('## usuarios', '## usuarios_externos'), 'utf8');
+  fs.writeFileSync(fullFile(projectPath), raw.replace('## usuarios', '## usuarios_externos'), 'utf8');
   const externallyUpdated = await request('/sdd/db', {}, projectPath);
   assert.equal(externallyUpdated.body.tables[0].name, 'usuarios_externos');
 });
@@ -291,15 +333,15 @@ test('guarda UI en specs.md y los ficheros multimedia en specs_resources', async
   assert.equal(image.status, 201);
   assert.doesNotMatch(image.body.fileUrl, /^data:/);
   assert.match(image.body.fileUrl, /\/api\/sdd\/media\//);
-  assert.equal(fs.existsSync(path.join(projectPath, 'specs_resources', 'screen.png')), true);
+  assert.equal(fs.existsSync(path.join(resourcesDirFor(projectPath), 'screen.png')), true);
   const audio = await request('/sdd/media?kind=audio&title=Sonido&fileName=click.mp3', {
     method: 'POST',
     headers: { 'Content-Type': 'audio/mpeg' },
     body: Buffer.from([0x49, 0x44, 0x33])
   }, projectPath);
   assert.equal(audio.status, 201);
-  assert.equal(fs.existsSync(path.join(projectPath, 'specs_resources', 'click.mp3')), true);
-  const raw = fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8');
+  assert.equal(fs.existsSync(path.join(resourcesDirFor(projectPath), 'click.mp3')), true);
+  const raw = fs.readFileSync(fullFile(projectPath), 'utf8');
   assert.match(raw, /^# UI$/m);
   assert.match(raw, /^## Pantalla$/m);
   assert.match(raw, /- Archivo: `specs_resources\/screen.png`/);
@@ -397,7 +439,7 @@ Descripción del requisito.
 
 - specs_resources/icon.png — Imagen
 `);
-  fs.writeFileSync(path.join(projectPath, 'specs_resources', 'icon.png'), Buffer.from('not-a-real-png'));
+  fs.writeFileSync(path.join(resourcesDirFor(projectPath), 'icon.png'), Buffer.from('not-a-real-png'));
   await loadProject(projectPath);
 
   const initial = await request('/sdd/resources', {}, projectPath);
@@ -437,7 +479,7 @@ Descripción del requisito.
   }, projectPath);
   assert.equal(renamed.status, 200);
   assert.equal(renamed.body.updatedReferences, true);
-  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /specs_resources\/icon-home\.png/);
+  assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /specs_resources\/icon-home\.png/);
 
   const blocked = await request('/sdd/resources', {
     method: 'DELETE',
@@ -453,7 +495,63 @@ Descripción del requisito.
   }, projectPath);
   assert.equal(deleted.status, 200);
   assert.equal(deleted.body.referencesPreserved, true);
-  assert.equal(fs.existsSync(path.join(projectPath, 'specs_resources', 'icon-home.png')), false);
+  assert.equal(fs.existsSync(path.join(resourcesDirFor(projectPath), 'icon-home.png')), false);
+});
+
+test('el diseño SDD_specs se carga desde la raíz y separa pendientes de completados', async () => {
+  const projectPath = createSddProject('sdd-project-new-layout', `# Specs
+
+## Pendiente uno
+**Estado:** activa
+
+Detalle pendiente.
+
+## Terminada
+**Estado:** implementada
+
+Ya hecho.
+`);
+  const loaded = await loadProject(projectPath);
+  assert.equal(loaded.body.total, 2);
+  assert.equal(loaded.body.pendingTotal, 1);
+  assert.match(loaded.body.project.sddDir, /SDD_specs$/);
+  assert.equal(loaded.body.project.specsPath, path.join(loaded.body.project.sddDir, 'specs.md'));
+  assert.equal(loaded.body.project.fullPath, path.join(loaded.body.project.sddDir, 'specs_full.md'));
+
+  const listed = await request('/sdd/specs', {}, projectPath);
+  assert.deepEqual(listed.body.specs.map((spec) => spec.title).sort(), ['Pendiente uno', 'Terminada']);
+  assert.equal(listed.body.pendingTotal, 1);
+
+  const pendingRaw = fs.readFileSync(specsFile(projectPath), 'utf8');
+  assert.match(pendingRaw, /## Pendiente uno/);
+  assert.doesNotMatch(pendingRaw, /## Terminada/);
+  const fullRaw = fs.readFileSync(fullFile(projectPath), 'utf8');
+  assert.match(fullRaw, /## Pendiente uno/);
+  assert.match(fullRaw, /## Terminada/);
+
+  const loadedFromSddDirectory = await request('/sdd/project', {
+    method: 'POST',
+    body: JSON.stringify({ path: loaded.body.project.sddDir })
+  });
+  assert.equal(loadedFromSddDirectory.status, 200);
+  assert.equal(loadedFromSddDirectory.body.project.path, fs.realpathSync(projectPath));
+});
+
+test('marcar una spec como implementada la saca de specs.md pero la conserva en specs_full.md', async () => {
+  const projectPath = createSddProject('sdd-project-pending-filter', '# Specs\n\n## Algo por hacer\n**Estado:** borrador\n');
+  await loadProject(projectPath);
+  const created = await request('/sdd/specs', { method: 'POST', body: JSON.stringify({ title: 'Otra tarea', status: 'active', description: 'Detalle' }) }, projectPath);
+  assert.equal(created.status, 201);
+  assert.match(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Otra tarea/);
+
+  const updated = await request(`/sdd/specs/${created.body.id}`, { method: 'PUT', body: JSON.stringify({ title: 'Otra tarea', status: 'implemented' }) }, projectPath);
+  assert.equal(updated.status, 200);
+  assert.doesNotMatch(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Otra tarea/);
+  assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Otra tarea/);
+
+  const listed = await request('/sdd/specs', {}, projectPath);
+  assert.equal(listed.body.total, 2);
+  assert.equal(listed.body.pendingTotal, 1);
 });
 
 test('mantiene aislados dos proyectos porque cada petición lee sus propios ficheros', async () => {

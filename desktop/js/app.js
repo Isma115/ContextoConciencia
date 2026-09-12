@@ -12,7 +12,7 @@ import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/di
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
 import { renderFileExplorer } from './views/file-explorer.js';
-import { renderSddSpecs, renderSddDatabase, renderSddUi, renderSddResources, restoreSddProject, bindSddInject, bindSddLoad, bindSddReload } from './views/sdd.js';
+import { bindSddSectionToggle, collapseSddSection, configureSdd, expandSddSection, renderSddHome, renderSddSpecs, renderSddDatabase, renderSddUi, renderSddResources, bindSddMenu, bindSddReload, bindSddPromptOption, bindProjectMenu, restoreLastSddProject } from './views/sdd.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 import { loadDiagramFontSize, loadDiagramLineContrast } from './core/diagram-settings.js';
@@ -67,6 +67,11 @@ function renderView() {
   }
   document.querySelectorAll('.view').forEach((view) => view.classList.toggle('active', view.id === `view-${state.view}`));
   document.querySelectorAll('.nav-item').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view));
+  document.querySelectorAll('.sdd-label-button').forEach((item) => item.classList.toggle('active', item.dataset.view === state.view));
+  // La sección S.D.D. solo se colapsa al mostrar una vista ajena a S.D.D.
+  if (String(state.view || '').startsWith('sdd')) expandSddSection();
+  else collapseSddSection();
+  if (state.view === 'sdd-home') renderSddHome();
   if (state.view === 'search') renderSearch();
   if (state.view === 'global-search') renderGlobalSearch();
   if (state.view === 'recent-documents') renderRecentDocuments();
@@ -103,12 +108,16 @@ function recoverOfflineSession() {
 }
 
 function bindNavigation() {
-  document.querySelectorAll('.nav-item').forEach((button) => button.addEventListener('click', () => {
-    state.view = button.dataset.view;
-    renderView();
-    if (state.view === 'search') performSearch();
-    if (state.view === 'global-search') performGlobalSearch();
-  }));
+  document.querySelectorAll('[data-view]').forEach((button) => {
+    if (button.id === 'sdd-home-tab') return;
+    button.addEventListener('click', () => {
+      state.view = button.dataset.view;
+      if (String(state.view || '').startsWith('sdd')) expandSddSection();
+      renderView();
+      if (state.view === 'search') performSearch();
+      if (state.view === 'global-search') performGlobalSearch();
+    });
+  });
 }
 
 function renderSidebarSearch() {
@@ -169,6 +178,7 @@ configureSearch({ onRefresh: refreshData, onNavigate: (view) => { state.view = v
 configureSources({ onRefresh: refreshData });
 configureSourceModal({ onRefresh: refreshData, onSync: syncSource });
 configureCodeMap({ onNavigate: (view) => { state.view = view; renderView(); } });
+configureSdd({ onNavigate: (view) => { state.view = view; renderView(); } });
 configureWorkspace({ onRefresh: refreshData });
 bindHtmlViewerMenu();
 bindDiagramMenu();
@@ -178,9 +188,11 @@ bindNavigation();
 bindSidebarSearchToggle();
 bindSidebarSearch();
 bindCloseConfirmation();
-bindSddInject();
-bindSddLoad();
+bindSddMenu();
 bindSddReload();
+bindSddPromptOption();
+bindSddSectionToggle();
+bindProjectMenu();
 loadPalettePreference();
 loadDiagramLineContrast();
 loadDiagramFontSize();
@@ -189,7 +201,11 @@ async function startApplication() {
   await loadSearchPreferences();
   renderSidebarSearch();
   await recoverOfflineSession();
-  await restoreSddProject();
+  try {
+    await restoreLastSddProject();
+  } catch {
+    // Arrancar sin el último proyecto no debe impedir el uso de la aplicación.
+  }
 }
 
 startApplication();

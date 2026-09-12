@@ -8,10 +8,13 @@ const { detectFileType } = require('../server/services/media-detection');
 let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
 const DIAGRAM_MENU_NAME = 'Diagramas';
+const PROJECT_MENU_NAME = 'Proyecto';
+const SPECS_MENU_NAME = 'Specs';
 const PREFERENCES_MENU_NAME = 'Preferencias';
 const EXPORT_MENU_NAME = 'Espacio';
 const PROMPTS_MENU_NAME = 'Prompts';
 const SEARCH_PREFERENCES_FILENAME = 'search-preferences.json';
+const SDD_LAST_PROJECT_FILENAME = 'sdd-last-project.json';
 const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DIAGRAM_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -80,14 +83,33 @@ const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
 // un proceso de composición acelerado disponible.
 app.disableHardwareAcceleration();
 const SDD_SPECS_RESOURCES_DIR = 'specs_resources';
+// La estructura S.D.D. se guarda siempre bajo <proyecto>/SDD_specs.
+// El diseño anterior, con specs.md en la raíz, ya no se carga ni se crea.
+const SDD_SPECS_DIR = 'SDD_specs';
+const SDD_FULL_FILENAME = 'specs_full.md';
 const SDD_SPECS_RESOURCES_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 const SDD_SPECS_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const SDD_SPECS_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
 const SDD_SPECS_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const SDD_SPECS_SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'out', 'coverage']);
 
+function sddDirectoryFor(directoryPath) {
+  const selectedPath = path.normalize(String(directoryPath || ''));
+  return path.basename(selectedPath) === SDD_SPECS_DIR
+    ? selectedPath
+    : path.join(selectedPath, SDD_SPECS_DIR);
+}
+
+function sddProjectDirectoryFor(directoryPath) {
+  const selectedPath = path.normalize(String(directoryPath || ''));
+  return path.basename(selectedPath) === SDD_SPECS_DIR
+    ? path.dirname(selectedPath)
+    : selectedPath;
+}
+
 function collectSpecsResourceFiles(directoryPath) {
-  const resourcesDirectory = path.join(directoryPath, SDD_SPECS_RESOURCES_DIR);
+  const sddDirectory = sddDirectoryFor(directoryPath);
+  const resourcesDirectory = path.join(sddDirectory, SDD_SPECS_RESOURCES_DIR);
   if (!fs.existsSync(resourcesDirectory) || !fs.statSync(resourcesDirectory).isDirectory()) return [];
   const found = [];
   const stack = [resourcesDirectory];
@@ -113,10 +135,11 @@ function collectSpecsResourceFiles(directoryPath) {
 }
 
 function readSpecsFolderResources(directoryPath) {
+  const resourcesDirectory = path.join(sddDirectoryFor(directoryPath), SDD_SPECS_RESOURCES_DIR);
   let totalBytes = 0;
   return collectSpecsResourceFiles(directoryPath).map((filePath) => {
     const stats = fs.statSync(filePath);
-    const relativePath = path.relative(path.join(directoryPath, SDD_SPECS_RESOURCES_DIR), filePath).split(path.sep).join('/');
+    const relativePath = path.relative(resourcesDirectory, filePath).split(path.sep).join('/');
     const detected = detectFileType(filePath, { fileName: relativePath });
     const type = detected.mime || 'application/octet-stream';
     const kind = detected.kind;
@@ -140,10 +163,44 @@ function readSpecsFolderResources(directoryPath) {
   });
 }
 
-function ensureSpecsResourcesDirectory(directoryPath) {
-  const resourcesDirectory = path.join(directoryPath, SDD_SPECS_RESOURCES_DIR);
+function ensureSddStructure(directoryPath) {
+  const sddDirectory = sddDirectoryFor(directoryPath);
+  fs.mkdirSync(sddDirectory, { recursive: true });
+  const resourcesDirectory = path.join(sddDirectory, SDD_SPECS_RESOURCES_DIR);
   if (!fs.existsSync(resourcesDirectory)) fs.mkdirSync(resourcesDirectory, { recursive: true });
-  return resourcesDirectory;
+  const specsPath = path.join(sddDirectory, 'specs.md');
+  const fullPath = path.join(sddDirectory, SDD_FULL_FILENAME);
+  if (fs.existsSync(specsPath) && !fs.statSync(specsPath).isFile()) throw new Error('specs.md no es un archivo en la carpeta configurada');
+  if (fs.existsSync(fullPath) && !fs.statSync(fullPath).isFile()) throw new Error(`${SDD_FULL_FILENAME} no es un archivo en la carpeta configurada`);
+  const example = `# Specs
+
+## Requisito de ejemplo
+- Estado: Borrador
+
+Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
+
+# BBDD
+
+No hay tablas definidas.
+
+# UI
+
+No hay referencias de interfaz definidas.
+
+# Recursos
+
+La carpeta specs_resources no contiene archivos.
+`;
+  let created = false;
+  if (!fs.existsSync(specsPath)) {
+    fs.writeFileSync(specsPath, example, { encoding: 'utf8', mode: 0o600 });
+    created = true;
+  }
+  if (!fs.existsSync(fullPath)) {
+    fs.copyFileSync(specsPath, fullPath);
+    created = true;
+  }
+  return { sddDirectory, specsPath, fullPath, resourcesDirectory, created };
 }
 
 function searchPreferencesPath() {
@@ -168,6 +225,49 @@ function writeSearchPreferences(preferences) {
   return true;
 }
 
+function sddLastProjectPath() {
+  return path.join(app.getPath('userData'), SDD_LAST_PROJECT_FILENAME);
+}
+
+function readSddLastProject() {
+  try {
+    const value = JSON.parse(fs.readFileSync(sddLastProjectPath(), 'utf8'));
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const projectPath = typeof value.path === 'string' ? value.path.trim() : '';
+    if (!projectPath) return null;
+    return {
+      path: projectPath,
+      name: typeof value.name === 'string' ? value.name.slice(0, 120) : '',
+      savedAt: typeof value.savedAt === 'string' ? value.savedAt : null
+    };
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('No se pudo cargar el último proyecto S.D.D:', error.message);
+    return null;
+  }
+}
+
+function writeSddLastProject(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    throw new Error('El último proyecto S.D.D no es válido');
+  }
+  const projectPath = typeof payload.path === 'string' ? payload.path.trim() : '';
+  if (!projectPath) {
+    try {
+      fs.rmSync(sddLastProjectPath(), { force: true });
+    } catch {
+      // No poder borrar el recuerdo no debe impedir el uso de la aplicación.
+    }
+    return true;
+  }
+  const value = {
+    path: projectPath,
+    name: typeof payload.name === 'string' ? payload.name.slice(0, 120) : '',
+    savedAt: new Date().toISOString()
+  };
+  fs.writeFileSync(sddLastProjectPath(), `${JSON.stringify(value)}\n`, { encoding: 'utf8', mode: 0o600 });
+  return true;
+}
+
 function setApplicationMenuForView(window, view) {
   const template = [
     {
@@ -187,6 +287,32 @@ function setApplicationMenuForView(window, view) {
       ]
     }
   ];
+
+  template.push({
+    label: PROJECT_MENU_NAME,
+    submenu: [
+      {
+        label: 'Nuevo Proyecto',
+        click: () => window.webContents.send('project-menu-action', 'new-project')
+      },
+      {
+        label: 'Cargar Proyecto',
+        click: () => window.webContents.send('project-menu-action', 'load-project')
+      }
+    ]
+  });
+
+  if (String(view || '').startsWith('sdd')) {
+    template.push({
+      label: SPECS_MENU_NAME,
+      submenu: [
+        {
+          label: 'Crear SDD_specs',
+          click: () => window.webContents.send('sdd-menu-action', 'create')
+        }
+      ]
+    });
+  }
 
   template.push({
     label: PREFERENCES_MENU_NAME,
@@ -414,6 +540,8 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('load-search-preferences', () => readSearchPreferences());
   ipcMain.handle('save-search-preferences', (_event, preferences) => writeSearchPreferences(preferences));
+  ipcMain.handle('load-sdd-last-project', () => readSddLastProject());
+  ipcMain.handle('save-sdd-last-project', (_event, payload) => writeSddLastProject(payload));
 
   ipcMain.handle('select-workspace-file', async () => {
     const result = await dialog.showOpenDialog({
@@ -480,46 +608,24 @@ app.whenReady().then(async () => {
     if (!type || detected.kind !== selectedKind) throw new Error('El contenido no coincide con el tipo seleccionado o el formato no es compatible');
     const maxBytes = selectedKind === 'image' ? SDD_SPECS_IMAGE_MAX_BYTES : selectedKind === 'video' ? SDD_SPECS_VIDEO_MAX_BYTES : SDD_SPECS_AUDIO_MAX_BYTES;
     if (stats.size > maxBytes) throw new Error(`El ${labelsByKind[selectedKind]} supera el límite de ${selectedKind === 'image' ? '20 MB' : '100 MB'}`);
-    return { name: path.basename(filePath), type, path: filePath, size: stats.size };
+    // El data URL solo se usa durante la selección para enviar el fichero al
+    // servidor; la aplicación lo guarda y sirve después como archivo real.
+    const buffer = fs.readFileSync(filePath);
+    return { name: path.basename(filePath), type, path: filePath, size: stats.size, dataUrl: `data:${type};base64,${buffer.toString('base64')}` };
   });
 
   ipcMain.handle('select-sdd-specs-path', async (_event, lastPath = '') => {
     const result = await dialog.showOpenDialog({
-      title: 'Seleccionar carpeta de specs',
-      buttonLabel: 'Inyectar',
+      title: 'Seleccionar carpeta contenedora',
+      buttonLabel: 'Crear SDD_specs',
       defaultPath: path.normalize(String(lastPath || '')),
       properties: ['openDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const directoryPath = path.normalize(result.filePaths[0]);
     if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
-    ensureSpecsResourcesDirectory(directoryPath);
-    const specsPath = path.join(directoryPath, 'specs.md');
-    if (fs.existsSync(specsPath) && !fs.statSync(specsPath).isFile()) throw new Error('specs.md no es un archivo en la carpeta configurada');
-    if (!fs.existsSync(specsPath)) {
-      const example = `# Specs
-
-## Requisito de ejemplo
-- Estado: Borrador
-
-Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
-
-# BBDD
-
-No hay tablas definidas.
-
-# UI
-
-No hay referencias de interfaz definidas.
-
-# Recursos
-
-La carpeta specs_resources no contiene archivos.
-`;
-      fs.writeFileSync(specsPath, example, { encoding: 'utf8', mode: 0o600 });
-      return { path: directoryPath, created: true };
-    }
-    return { path: directoryPath, created: false };
+    const structure = ensureSddStructure(directoryPath);
+    return { path: sddProjectDirectoryFor(directoryPath), sddPath: structure.sddDirectory, created: structure.created };
   });
 
   const loadSddProject = async (folderPath = '', options = {}) => {
@@ -537,16 +643,22 @@ La carpeta specs_resources no contiene archivos.
       directoryPath = path.normalize(result.filePaths[0]);
     }
     if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
-    const specsPath = path.join(directoryPath, 'specs.md');
-    if (!fs.existsSync(specsPath) || !fs.statSync(specsPath).isFile()) throw new Error('El proyecto no contiene un archivo specs.md');
-    const resourcesDir = path.join(directoryPath, SDD_SPECS_RESOURCES_DIR);
-    if (!fs.existsSync(resourcesDir) || !fs.statSync(resourcesDir).isDirectory()) throw new Error('El proyecto no contiene la carpeta specs_resources');
-    const content = fs.readFileSync(specsPath, 'utf8');
-    if (!content.trim()) throw new Error('specs.md está vacío');
+    const projectPath = sddProjectDirectoryFor(directoryPath);
+    const sddDirectory = sddDirectoryFor(directoryPath);
+    const specsPath = path.join(sddDirectory, 'specs.md');
+    if (!fs.existsSync(specsPath) || !fs.statSync(specsPath).isFile()) throw new Error(`El proyecto no contiene un archivo ${SDD_SPECS_DIR}/specs.md`);
+    const resourcesDir = path.join(sddDirectory, SDD_SPECS_RESOURCES_DIR);
+    if (!fs.existsSync(resourcesDir) || !fs.statSync(resourcesDir).isDirectory()) throw new Error(`El proyecto no contiene la carpeta ${SDD_SPECS_DIR}/${SDD_SPECS_RESOURCES_DIR}`);
+    const fullPath = path.join(sddDirectory, SDD_FULL_FILENAME);
+    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) throw new Error(`El proyecto no contiene un archivo ${SDD_SPECS_DIR}/${SDD_FULL_FILENAME}`);
+    const content = fs.readFileSync(fullPath, 'utf8');
+    if (!content.trim()) throw new Error(`${SDD_FULL_FILENAME} está vacío`);
     return {
-      name: path.basename(directoryPath) || directoryPath,
-      path: directoryPath,
+      name: path.basename(projectPath) || projectPath,
+      path: projectPath,
+      sddPath: sddDirectory,
       specsPath,
+      fullPath,
       resourcesPath: resourcesDir,
       content,
       resources: readSpecsFolderResources(directoryPath)
@@ -562,7 +674,7 @@ La carpeta specs_resources no contiene archivos.
     if (!directoryPath || !fs.existsSync(directoryPath) || !fs.statSync(directoryPath).isDirectory()) {
       throw new Error('La carpeta de specs no es válida o ya no existe');
     }
-    return { path: directoryPath, resources: readSpecsFolderResources(directoryPath) };
+    return { path: sddProjectDirectoryFor(directoryPath), sddPath: sddDirectoryFor(directoryPath), resources: readSpecsFolderResources(directoryPath) };
   });
 
   ipcMain.handle('list-file-system-directory', (_event, directoryPath) => fileExplorerService.listDirectory(directoryPath));
@@ -638,6 +750,34 @@ La carpeta specs_resources no contiene archivos.
     }
     fs.mkdirSync(projectPath, { recursive: true });
     return projectPath;
+  });
+
+  ipcMain.handle('create-sdd-project', async () => {
+    const result = await dialog.showSaveDialog({
+      title: 'Nuevo Proyecto',
+      buttonLabel: 'Crear proyecto',
+      defaultPath: path.join(app.getPath('documents'), 'ContextoConciencia')
+    });
+    if (result.canceled || !result.filePath) return null;
+    const directoryPath = path.normalize(result.filePath);
+    if (fs.existsSync(directoryPath) && !fs.statSync(directoryPath).isDirectory()) {
+      throw new Error('La ubicación elegida no es una carpeta');
+    }
+    fs.mkdirSync(directoryPath, { recursive: true });
+    const structure = ensureSddStructure(directoryPath);
+    const content = fs.readFileSync(structure.fullPath, 'utf8');
+    if (!content.trim()) throw new Error(`${SDD_FULL_FILENAME} está vacío`);
+    return {
+      name: path.basename(directoryPath) || directoryPath,
+      path: directoryPath,
+      sddPath: structure.sddDirectory,
+      specsPath: structure.specsPath,
+      fullPath: structure.fullPath,
+      resourcesPath: structure.resourcesDirectory,
+      content,
+      resources: readSpecsFolderResources(directoryPath),
+      created: true
+    };
   });
 
   ipcMain.handle('reveal-file', (_event, filePath) => fileExplorerService.revealEntry(filePath));

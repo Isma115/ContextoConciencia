@@ -73,6 +73,11 @@ const VIDEO_MAX_BYTES = 100 * 1024 * 1024;
 const AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const RESOURCE_MAX_BYTES = 200 * 1024 * 1024;
 const TEXT_MAX_LENGTH = 20000;
+// La estructura S.D.D. es siempre <proyecto>/SDD_specs.  No se acepta el
+// diseño anterior, que dejaba specs.md directamente en la raíz del proyecto.
+const SDD_FOLDER_NAME = 'SDD_specs';
+const SDD_SPECS_FILENAME = 'specs.md';
+const SDD_FULL_FILENAME = 'specs_full.md';
 const SDD_RESOURCES_DIRECTORY = 'specs_resources';
 const resourceProbeCache = new Map();
 const RESOURCE_PROBE_CACHE_LIMIT = 512;
@@ -615,6 +620,14 @@ function markdownTableCell(value) {
   return text || '—';
 }
 
+function isCompletedSpecStatus(status) {
+  return String(status || '').toLowerCase() === 'implemented';
+}
+
+function pendingSddSpecs(specs) {
+  return (Array.isArray(specs) ? specs : []).filter((spec) => !isCompletedSpecStatus(spec?.status));
+}
+
 function sddSpecsToMarkdown(specs) {
   if (!specs.length) return '# Specs\n';
   const blocks = specs.map((spec) => {
@@ -665,7 +678,7 @@ function listSddResourceFiles(projectPath) {
 }
 
 function listSddResourceEntries(projectPath) {
-  const root = path.join(projectPath, SDD_RESOURCES_DIRECTORY);
+  const root = resolveSddPaths(projectPath).resourcesPath;
   const files = [];
   const directories = [];
   function visit(directory, relativePath = '') {
@@ -840,7 +853,7 @@ async function listSddResources(projectPath, document, filters = {}) {
     .filter((entry) => matches(entry.relativePath, 'folder'))
     .map((entry) => resourceFolderResponse(projectPath, entry));
   return {
-    folder: path.join(projectPath, SDD_RESOURCES_DIRECTORY),
+    folder: resolveSddPaths(projectPath).resourcesPath,
     total: files.length,
     referenced: resources.filter((resource) => resource.referenced).length,
     resources,
@@ -923,7 +936,7 @@ function sddResourcesToMarkdown(projectPath) {
   const resources = listSddResourceFiles(projectPath);
   if (!resources.length) return '# Recursos\n\nLa carpeta `specs_resources` no contiene archivos.\n';
   const lines = resources.map((fileName) => {
-    const detected = detectFileType(path.join(projectPath, SDD_RESOURCES_DIRECTORY, fileName), { fileName });
+    const detected = detectFileType(path.join(resolveSddPaths(projectPath).resourcesPath, fileName), { fileName });
     const kind = detected.kind === 'image' ? 'Imagen' : detected.kind === 'video' ? 'Vídeo' : detected.kind === 'audio' ? 'Audio' : 'Archivo';
     return `- \`specs_resources/${fileName}\` — ${kind}`;
   });
@@ -973,6 +986,22 @@ function mimeForFileName(fileName) {
   return MEDIA_MIME_BY_EXTENSION[extension] || '';
 }
 
+function resolveSddPaths(projectPath) {
+  const selectedPath = String(projectPath || '');
+  // Permite seleccionar el proyecto o directamente su carpeta SDD_specs,
+  // pero devuelve siempre la raíz del proyecto como identidad canónica.
+  const selectedIsSddDirectory = path.basename(selectedPath) === SDD_FOLDER_NAME;
+  const resolved = selectedIsSddDirectory ? path.dirname(selectedPath) : selectedPath;
+  const sddDir = selectedIsSddDirectory ? selectedPath : path.join(resolved, SDD_FOLDER_NAME);
+  return {
+    projectPath: resolved,
+    sddDir,
+    specsPath: path.join(sddDir, SDD_SPECS_FILENAME),
+    fullPath: path.join(sddDir, SDD_FULL_FILENAME),
+    resourcesPath: path.join(sddDir, SDD_RESOURCES_DIRECTORY)
+  };
+}
+
 function validateSddProjectPath(value) {
   const rawPath = asText(value);
   if (!rawPath) throw new Error('Indica la carpeta del proyecto S.D.D');
@@ -984,52 +1013,73 @@ function validateSddProjectPath(value) {
   }
   if (!fs.statSync(projectPath).isDirectory()) throw new Error('El proyecto S.D.D debe ser una carpeta');
 
-  const specsPath = path.join(projectPath, 'specs.md');
-  if (!fs.existsSync(specsPath) || !fs.statSync(specsPath).isFile()) {
-    throw new Error('El proyecto no contiene un archivo specs.md');
+  const paths = resolveSddPaths(projectPath);
+  if (!fs.existsSync(paths.specsPath) || !fs.statSync(paths.specsPath).isFile()) {
+    throw new Error(`El proyecto no contiene un archivo ${SDD_FOLDER_NAME}/${SDD_SPECS_FILENAME}`);
   }
-  const resourcesPath = path.join(projectPath, SDD_RESOURCES_DIRECTORY);
-  if (!fs.existsSync(resourcesPath) || !fs.statSync(resourcesPath).isDirectory()) {
-    throw new Error('El proyecto no contiene la carpeta specs_resources');
+  if (!fs.existsSync(paths.resourcesPath) || !fs.statSync(paths.resourcesPath).isDirectory()) {
+    throw new Error(`El proyecto no contiene la carpeta ${SDD_FOLDER_NAME}/${SDD_RESOURCES_DIRECTORY}`);
   }
-  return projectPath;
+  if (!fs.existsSync(paths.fullPath) || !fs.statSync(paths.fullPath).isFile()) {
+    throw new Error(`El proyecto no contiene un archivo ${SDD_FOLDER_NAME}/${SDD_FULL_FILENAME}`);
+  }
+  return paths.projectPath;
 }
 
 function projectResponse(projectPath, name = '') {
+  const paths = resolveSddPaths(projectPath);
   return {
     loaded: true,
     project: {
       name: name || path.basename(projectPath) || projectPath,
       path: projectPath,
-      specsPath: path.join(projectPath, 'specs.md'),
-      resourcesPath: path.join(projectPath, SDD_RESOURCES_DIRECTORY)
+      sddDir: paths.sddDir,
+      specsPath: paths.specsPath,
+      fullPath: paths.fullPath,
+      resourcesPath: paths.resourcesPath
     }
   };
 }
 
 function readSddProjectDocument(projectPath) {
-  const specsPath = path.join(projectPath, 'specs.md');
-  const rawMarkdown = fs.readFileSync(specsPath, 'utf8');
-  if (!rawMarkdown.trim()) throw new Error('specs.md está vacío');
+  const paths = resolveSddPaths(projectPath);
+  // specs_full.md es la fuente de verdad; specs.md solo conserva los pendientes.
+  const sourcePath = paths.fullPath;
+  const rawMarkdown = fs.readFileSync(sourcePath, 'utf8');
+  if (!rawMarkdown.trim()) throw new Error(`${path.basename(sourcePath)} está vacío`);
   const parsed = parseSddDocument(rawMarkdown);
-  if (!parsed.specs.length) throw new Error('No se encontraron specs en specs.md');
-  const timestamp = fs.statSync(specsPath).mtime.toISOString();
+  if (!parsed.specs.length) throw new Error(`No se encontraron specs en ${path.basename(sourcePath)}`);
+  const timestamp = fs.statSync(sourcePath).mtime.toISOString();
+  const specs = specsWithIdentity(parsed.specs, timestamp);
   return {
     rawMarkdown,
-    markdown: sddDocumentToMarkdown(projectPath, parsed.specs, parsed.database, parsed.media),
-    specs: specsWithIdentity(parsed.specs, timestamp),
+    markdown: sddDocumentToMarkdown(paths.projectPath, specs, parsed.database, parsed.media),
+    specs,
+    pendingTotal: pendingSddSpecs(specs).length,
     database: parsed.database,
     media: parsed.media,
-    timestamp
+    timestamp,
+    paths
   };
 }
 
 function writeSddProjectDocument(projectPath, markdown, database, media) {
-  const specs = parseSddSpecsMarkdown(markdown);
+  const paths = resolveSddPaths(projectPath);
+  const parsed = parseSddDocument(markdown);
+  const specs = parsed.specs;
   if (!specs.length) throw new Error('No se encontraron specs en el markdown');
-  const output = sddDocumentToMarkdown(projectPath, specs, database, media);
-  fs.writeFileSync(path.join(projectPath, 'specs.md'), output, { encoding: 'utf8', mode: 0o600 });
-  return output;
+  const normalizedDatabase = database === undefined || database === null
+    ? parsed.database
+    : normalizeDatabase(database);
+  const normalizedMedia = media === undefined || media === null
+    ? parsed.media
+    : normalizeMedia(media);
+  // El editor escribe el documento completo y reconstruye el índice de pendientes.
+  const fullOutput = sddDocumentToMarkdown(paths.projectPath, specs, normalizedDatabase, normalizedMedia);
+  const pendingOutput = sddDocumentToMarkdown(paths.projectPath, pendingSddSpecs(specs), normalizedDatabase, normalizedMedia);
+  fs.writeFileSync(paths.fullPath, fullOutput, { encoding: 'utf8', mode: 0o600 });
+  fs.writeFileSync(paths.specsPath, pendingOutput, { encoding: 'utf8', mode: 0o600 });
+  return fullOutput;
 }
 
 function requestSddProjectPath(req, { required = true } = {}) {
@@ -1040,16 +1090,17 @@ function requestSddProjectPath(req, { required = true } = {}) {
 
 function safeResourcePath(projectPath, fileName) {
   const rawName = normaliseResourceName(fileName, { allowEmpty: true });
-  const resourceRoot = fs.realpathSync(path.join(projectPath, SDD_RESOURCES_DIRECTORY));
+  const { sddDir } = resolveSddPaths(projectPath);
+  const resourceRoot = fs.realpathSync(path.join(sddDir, SDD_RESOURCES_DIRECTORY));
   const candidate = path.resolve(resourceRoot, rawName);
   if (candidate !== resourceRoot && !candidate.startsWith(`${resourceRoot}${path.sep}`)) {
-    throw new Error('El recurso está fuera de specs_resources');
+    throw new Error(`El recurso está fuera de ${SDD_FOLDER_NAME}/${SDD_RESOURCES_DIRECTORY}`);
   }
   let existingCandidate = candidate;
   while (!fs.existsSync(existingCandidate) && existingCandidate !== path.dirname(existingCandidate)) existingCandidate = path.dirname(existingCandidate);
   const realCandidate = fs.realpathSync(existingCandidate);
   if (realCandidate !== resourceRoot && !realCandidate.startsWith(`${resourceRoot}${path.sep}`)) {
-    throw new Error('El recurso está fuera de specs_resources');
+    throw new Error(`El recurso está fuera de ${SDD_FOLDER_NAME}/${SDD_RESOURCES_DIRECTORY}`);
   }
   return candidate;
 }
@@ -1071,12 +1122,13 @@ function uniqueResourceFileName(projectPath, originalName) {
 function resourceDestinationPath(projectPath, fileName) {
   const normalised = normaliseResourceFileName(fileName);
   const destination = safeResourcePath(projectPath, normalised);
-  const root = fs.realpathSync(path.join(projectPath, SDD_RESOURCES_DIRECTORY));
+  const { resourcesPath } = resolveSddPaths(projectPath);
+  const root = fs.realpathSync(resourcesPath);
   let existingParent = path.dirname(destination);
   while (!fs.existsSync(existingParent) && existingParent !== path.dirname(existingParent)) existingParent = path.dirname(existingParent);
   const realParent = fs.realpathSync(existingParent);
   if (realParent !== root && !realParent.startsWith(`${root}${path.sep}`)) {
-    throw new Error('El destino está fuera de specs_resources');
+    throw new Error(`El destino está fuera de ${SDD_FOLDER_NAME}/${SDD_RESOURCES_DIRECTORY}`);
   }
   return { fileName: normalised, destination };
 }
@@ -1196,7 +1248,7 @@ function installSddRoutes(app) {
       const projectPath = requestSddProjectPath(req, { required: false });
       if (!projectPath) return res.json({ loaded: false, project: null });
       const document = readSddProjectDocument(projectPath);
-      return res.json({ ...projectResponse(projectPath), markdown: document.markdown, total: document.specs.length, specs: document.specs });
+      return res.json({ ...projectResponse(projectPath), markdown: document.markdown, total: document.specs.length, pendingTotal: document.pendingTotal, specs: document.specs });
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -1207,7 +1259,7 @@ function installSddRoutes(app) {
       const projectPath = validateSddProjectPath(req.body?.path || req.body?.projectPath);
       const document = readSddProjectDocument(projectPath);
       const name = (asText(req.body?.name) || path.basename(projectPath) || 'Proyecto S.D.D').slice(0, 120);
-      return res.json({ ...projectResponse(projectPath, name), markdown: document.markdown, total: document.specs.length, specs: document.specs });
+      return res.json({ ...projectResponse(projectPath, name), markdown: document.markdown, total: document.specs.length, pendingTotal: document.pendingTotal, specs: document.specs });
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -1219,7 +1271,7 @@ function installSddRoutes(app) {
   app.get('/api/sdd/specs', (req, res) => {
     try {
       const document = readSddProjectDocument(requestSddProjectPath(req));
-      return res.json({ specs: document.specs });
+      return res.json({ specs: document.specs, total: document.specs.length, pendingTotal: document.pendingTotal });
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -1339,7 +1391,7 @@ function installSddRoutes(app) {
         parsed.sections.ui ? parsed.media : document.media
       );
       const updated = readSddProjectDocument(projectPath);
-      return res.json({ total: updated.specs.length, specs: updated.specs });
+      return res.json({ total: updated.specs.length, pendingTotal: updated.pendingTotal, specs: updated.specs });
     } catch (error) {
       return res.status(400).json({ error: error.message });
     }
@@ -1572,16 +1624,22 @@ function installSddRoutes(app) {
       if (destination === oldPath || fs.existsSync(destination)) return res.status(409).json({ error: 'Ya existe un recurso o carpeta con ese nombre' });
       fs.mkdirSync(path.dirname(destination), { recursive: true });
       fs.renameSync(oldPath, destination);
-      const specsPath = path.join(projectPath, 'specs.md');
-      const markdown = fs.readFileSync(specsPath, 'utf8');
-      const updatedMarkdown = replaceResourceReferences(markdown, oldName, newName, { directory: stats.isDirectory() });
-      if (updatedMarkdown !== markdown) fs.writeFileSync(specsPath, updatedMarkdown, { encoding: 'utf8', mode: 0o600 });
+      const paths = resolveSddPaths(projectPath);
+      let updatedReferences = false;
+      for (const markdownPath of [paths.fullPath, paths.specsPath]) {
+        if (!fs.existsSync(markdownPath)) continue;
+        const markdown = fs.readFileSync(markdownPath, 'utf8');
+        const updatedMarkdown = replaceResourceReferences(markdown, oldName, newName, { directory: stats.isDirectory() });
+        if (updatedMarkdown === markdown) continue;
+        fs.writeFileSync(markdownPath, updatedMarkdown, { encoding: 'utf8', mode: 0o600 });
+        updatedReferences = true;
+      }
       const document = readSddProjectDocument(projectPath);
       return res.json({
         renamed: true,
         oldName,
         newName,
-        updatedReferences: updatedMarkdown !== markdown,
+        updatedReferences,
         ...(await listSddResources(projectPath, document))
       });
     } catch (error) {
@@ -1744,4 +1802,16 @@ function installSddRoutes(app) {
   });
 }
 
-module.exports = { installSddRoutes, parseSddDocument, parseSddSpecsMarkdown, sddDocumentToMarkdown, sddSpecsToMarkdown };
+module.exports = {
+  installSddRoutes,
+  parseSddDocument,
+  parseSddSpecsMarkdown,
+  sddDocumentToMarkdown,
+  sddSpecsToMarkdown,
+  pendingSddSpecs,
+  isCompletedSpecStatus,
+  resolveSddPaths,
+  SDD_FOLDER_NAME,
+  SDD_SPECS_FILENAME,
+  SDD_FULL_FILENAME
+};

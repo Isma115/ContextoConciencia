@@ -18,12 +18,12 @@
     <div class="app-shell app-hidden" aria-hidden="true">
       <aside id="sidebar" class="sidebar" aria-label="Panel lateral">
         <div class="sidebar-pane">
-          <div class="sidebar-label">EXPLORER</div>
+          <div class="sidebar-section-heading"><span>NAVEGACIÓN</span></div>
           <nav class="main-nav" aria-label="Navegación principal">
             <div class="sidebar-search-group">
               <div class="sidebar-search-row">
                 <button id="sidebar-search-toggle" class="sidebar-search-toggle" type="button" aria-controls="sidebar-search-field" aria-expanded="false" aria-label="Mostrar búsqueda rápida" title="Mostrar búsqueda rápida"><svg class="sidebar-search-toggle-icon" viewBox="0 0 16 16" focusable="false" aria-hidden="true"><path d="m3.5 6 4.5 4.5L12.5 6"></path></svg></button>
-                <button class="nav-item active" data-view="global-search"><span class="nav-icon">⌕</span>Buscar</button>
+                <button class="nav-item active" data-view="global-search"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><circle cx="13.5" cy="13.5" r="6.8"></circle><path d="m18.6 18.6 5.1 5.1"></path></svg></span><span>Buscar</span></button>
               </div>
               <div id="sidebar-search-field" class="sidebar-search-field" hidden>
                 <div class="sidebar-search-input-wrap">
@@ -32,28 +32,30 @@
                 </div>
               </div>
             </div>
-            <button class="nav-item" data-view="recent-documents"><span class="nav-icon">◷</span>Documentos recientes</button>
-            <button class="nav-item" data-view="favorites"><span class="nav-icon">★</span>Favoritos</button>
-            <button class="nav-item" data-view="html-viewer"><span class="nav-icon">▣</span>Visor HTML</button>
-            <button class="nav-item nav-item-sub" data-view="diagrams"><span class="nav-icon">◇</span>Diagramas</button>
-            <button class="nav-item" data-view="code-map" hidden><span class="nav-icon">⌘</span>Mapa de código</button>
-            <button class="nav-item" data-view="sources"><span class="nav-icon">◈</span>Fuentes</button>
-            <button class="nav-item" data-view="file-explorer"><span class="nav-icon">▤</span>Explorador de ficheros</button>
+            <button class="nav-item" data-view="recent-documents"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><circle cx="16" cy="16" r="9"></circle><path d="M16 11v5l3.7 2.2"></path><path d="M8.5 5.7H5v3.5"></path><path d="M5 9.2A11.7 11.7 0 0 1 25.8 13"></path></svg></span><span>Documentos recientes</span></button>
+            <button class="nav-item" data-view="favorites"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="m16 4.5 3.5 7.1 7.8 1.1-5.6 5.5 1.3 7.8-7-3.7-7 3.7 1.3-7.8-5.6-5.5 7.8-1.1z"></path></svg></span><span>Favoritos</span></button>
+            <button class="nav-item" data-view="html-viewer"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><rect x="4.5" y="6" width="23" height="20" rx="2"></rect><path d="M4.5 11h23"></path><path d="m12 16-3 3 3 3M20 16l3 3-3 3M18 15l-4 8"></path></svg></span><span>Visor HTML</span></button>
+            <button class="nav-item nav-item-sub" data-view="diagrams"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><circle cx="8" cy="9" r="3"></circle><circle cx="24" cy="9" r="3"></circle><circle cx="16" cy="24" r="3"></circle><path d="m10.7 10.3 3.7 10.8M21.3 10.3l-3.7 10.8M11 9h10"></path></svg></span><span>Diagramas</span></button>
+            <button class="nav-item" data-view="code-map" hidden><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="m12 7-7 9 7 9M20 7l7 9-7 9M17 5l-2 22"></path></svg></span><span>Mapa de código</span></button>
+            <button class="nav-item" data-view="sources"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M4.5 9.5h8l2.2-3h12.8v19H4.5z"></path><path d="M4.5 10.5h23"></path><path d="M16 14.5v6M13 17.5h6"></path></svg></span><span>Fuentes</span></button>
+            <button class="nav-item" data-view="file-explorer"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M5 7.5h8l2.5 3H27v14H5z"></path><path d="M5 11h22"></path><path d="M10 16h.01M15 16h.01M20 16h.01"></path></svg></span><span>Explorador de ficheros</span></button>
           </nav>
-          <div class="sidebar-section" aria-label="Sección S.D.D">
-            <div class="sidebar-label-row">
-              <div class="sidebar-label">S.D.D</div>
-              <div class="sidebar-inject-group">
-                <button id="sdd-load" class="sidebar-inject-button" type="button" title="Cargar un proyecto S.D.D con specs.md y specs_resources">Cargar</button>
-                <button id="sdd-reload" class="sidebar-inject-button" type="button" title="Recargar specs.md y specs_resources desde disco (sin diálogo)" aria-label="Recargar">⟳</button>
-                <button id="sdd-inject" class="sidebar-inject-button" type="button" title="Crear specs.md y specs_resources en una carpeta">Inyectar</button>
-              </div>
+          <div class="sidebar-section sidebar-section-sdd is-collapsed" aria-label="Sección S.D.D">
+            <div class="sidebar-section-heading sidebar-project-heading"><span>PROYECTO</span></div>
+            <div class="sidebar-label-row sdd-label-row">
+              <button id="sdd-home-tab" class="sidebar-label sdd-label-button" data-view="sdd-home" type="button" title="Abrir vista S.D.D" aria-expanded="false"><span>S.D.D</span></button>
+              <button id="sdd-reload" class="sidebar-inject-button sidebar-reload-button" type="button" title="Recargar SDD_specs (specs.md, specs_full.md y specs_resources) desde disco (sin diálogo)" aria-label="Recargar">⟳</button>
             </div>
+            <label class="sidebar-prompt-option" title="Si está marcado, el prompt de Generar specs.md usará specs.md y specs_full.md como contexto; si no, solo usará specs.md (pendientes) y no tendrá en cuenta specs_full.md durante el análisis">
+              <input id="sdd-include-full-prompt" type="checkbox" />
+              <span>Todas las specs</span>
+            </label>
+            <div class="sidebar-section-heading sidebar-resources-heading"><span>RECURSOS</span></div>
             <nav class="main-nav" aria-label="Navegación S.D.D">
-              <button class="nav-item nav-item-sub" data-view="sdd-specs"><span class="nav-icon">≡</span>Specs</button>
-              <button class="nav-item nav-item-sub" data-view="sdd-database"><span class="nav-icon">▦</span>Base de datos</button>
-              <button class="nav-item nav-item-sub" data-view="sdd-ui"><span class="nav-icon">◧</span>UI</button>
-              <button class="nav-item nav-item-sub" data-view="sdd-resources"><span class="nav-icon">⧉</span>Recursos</button>
+              <button class="nav-item nav-item-sub" data-view="sdd-specs"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><rect x="6" y="5" width="16" height="22" rx="1.5"></rect><path d="M9.5 9h9M9.5 13h9M9.5 17h6"></path><path d="M22 8.5 22 5l6 6-6 6V13.5"></path></svg></span><span>Specs</span></button>
+              <button class="nav-item nav-item-sub" data-view="sdd-database"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><ellipse cx="16" cy="8" rx="9" ry="4.5"></ellipse><path d="M7 8v10c0 2.5 4 4.5 9 4.5s9-2 9-4.5V8"></path><path d="M7 12.5c0 2.5 4 4.5 9 4.5s9-2 9-4.5"></path></svg></span><span>Base de datos</span></button>
+              <button class="nav-item nav-item-sub" data-view="sdd-ui"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><rect x="4" y="6" width="24" height="18" rx="2"></rect><path d="M4 10h24M8 14h8M8 18h12M19 13.5h4v5h-4z"></path></svg></span><span>UI</span></button>
+              <button class="nav-item nav-item-sub" data-view="sdd-resources"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><rect x="8.5" y="11" width="15.5" height="13.5" rx="1.5"></rect><path d="M12.5 8.5h11A3 3 0 0 1 26.5 11.5v10"></path><circle cx="13.5" cy="15.5" r="1.6"></circle><path d="m10 22 4-4 3 2.5 3.5-3.5 3.5 4"></path></svg></span><span>Recursos</span></button>
             </nav>
           </div>
         </div>
@@ -70,6 +72,7 @@
         <section id="view-code-map" class="view"></section>
         <section id="view-sources" class="view"></section>
         <section id="view-file-explorer" class="view"></section>
+        <section id="view-sdd-home" class="view"></section>
         <section id="view-sdd-specs" class="view"></section>
         <section id="view-sdd-database" class="view"></section>
         <section id="view-sdd-ui" class="view"></section>
