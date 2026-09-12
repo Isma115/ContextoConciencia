@@ -3,6 +3,7 @@ const path = require('node:path');
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const { startServer } = require('../server/app');
 const { createFileExplorerService } = require('./file-explorer-service');
+const { detectFileType } = require('../server/services/media-detection');
 
 let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
@@ -31,7 +32,46 @@ const SDD_MEDIA_MIME_BY_EXTENSION = Object.freeze({
   m4v: 'video/x-m4v',
   webm: 'video/webm',
   ogv: 'video/ogg',
-  mov: 'video/quicktime'
+  mov: 'video/quicktime',
+  mp3: 'audio/mpeg',
+  mpga: 'audio/mpeg',
+  wav: 'audio/wav',
+  wave: 'audio/wav',
+  oga: 'audio/ogg',
+  ogg: 'audio/ogg',
+  opus: 'audio/opus',
+  m4a: 'audio/mp4',
+  m4b: 'audio/mp4',
+  aac: 'audio/aac',
+  flac: 'audio/flac',
+  weba: 'audio/webm',
+  wma: 'audio/x-ms-wma',
+  aiff: 'audio/aiff',
+  aif: 'audio/aiff',
+  aifc: 'audio/aiff',
+  au: 'audio/basic',
+  snd: 'audio/basic',
+  amr: 'audio/amr',
+  '3gp': 'audio/3gpp',
+  caf: 'audio/x-caf',
+  mka: 'audio/x-matroska',
+  mp2: 'audio/mpeg',
+  mpa: 'audio/mpeg',
+  ac3: 'audio/ac3',
+  dts: 'audio/vnd.dts',
+  eac3: 'audio/eac3',
+  gsm: 'audio/gsm',
+  ra: 'audio/x-realaudio',
+  ram: 'audio/x-pn-realaudio',
+  voc: 'audio/x-voc',
+  ape: 'audio/x-ape',
+  wv: 'audio/wavpack',
+  tta: 'audio/x-tta',
+  dsf: 'audio/x-dsf',
+  dff: 'audio/x-dff',
+  mid: 'audio/midi',
+  midi: 'audio/midi',
+  kar: 'audio/midi'
 });
 const closeConfirmationStates = new WeakMap();
 const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
@@ -43,6 +83,7 @@ const SDD_SPECS_RESOURCES_DIR = 'specs_resources';
 const SDD_SPECS_RESOURCES_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 const SDD_SPECS_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const SDD_SPECS_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
+const SDD_SPECS_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const SDD_SPECS_SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'out', 'coverage']);
 
 function collectSpecsResourceFiles(directoryPath) {
@@ -63,7 +104,7 @@ function collectSpecsResourceFiles(directoryPath) {
       if (entry.isDirectory()) {
         if (entry.name.startsWith('.') || SDD_SPECS_SKIP_DIRECTORIES.has(entry.name)) continue;
         stack.push(entryPath);
-      } else if (entry.isFile() && SDD_MEDIA_MIME_BY_EXTENSION[path.extname(entry.name).toLowerCase().replace('.', '')]) {
+      } else if (entry.isFile()) {
         found.push(entryPath);
       }
     }
@@ -75,24 +116,26 @@ function readSpecsFolderResources(directoryPath) {
   let totalBytes = 0;
   return collectSpecsResourceFiles(directoryPath).map((filePath) => {
     const stats = fs.statSync(filePath);
-    const extension = path.extname(filePath).toLowerCase().replace('.', '');
-    const type = SDD_MEDIA_MIME_BY_EXTENSION[extension];
-    const kind = type.startsWith('video/') ? 'video' : 'image';
-    const maxBytes = kind === 'video' ? SDD_SPECS_VIDEO_MAX_BYTES : SDD_SPECS_IMAGE_MAX_BYTES;
-    if (stats.size > maxBytes) {
-      throw new Error(`El recurso “${path.basename(filePath)}” supera el límite de ${kind === 'video' ? '100 MB' : '20 MB'}`);
+    const relativePath = path.relative(path.join(directoryPath, SDD_SPECS_RESOURCES_DIR), filePath).split(path.sep).join('/');
+    const detected = detectFileType(filePath, { fileName: relativePath });
+    const type = detected.mime || 'application/octet-stream';
+    const kind = detected.kind;
+    const maxBytes = kind === 'video' ? SDD_SPECS_VIDEO_MAX_BYTES : kind === 'audio' ? SDD_SPECS_AUDIO_MAX_BYTES : kind === 'image' ? SDD_SPECS_IMAGE_MAX_BYTES : null;
+    if (maxBytes && stats.size > maxBytes) {
+      const limit = kind === 'image' ? '20 MB' : '100 MB';
+      throw new Error(`El recurso “${path.basename(filePath)}” supera el límite de ${limit}`);
     }
     totalBytes += stats.size;
     if (totalBytes > SDD_SPECS_RESOURCES_MAX_TOTAL_BYTES) throw new Error('Los recursos de specs superan el límite de 200 MB');
-    const buffer = fs.readFileSync(filePath);
     return {
       name: path.basename(filePath),
+      relativePath,
       path: filePath,
       kind,
       type,
+      detectedBy: detected.detectedBy,
       size: stats.size,
-      modifiedAt: stats.mtime.toISOString(),
-      dataUrl: `data:${type};base64,${buffer.toString('base64')}`
+      modifiedAt: stats.mtime.toISOString()
     };
   });
 }
@@ -293,6 +336,10 @@ function setApplicationMenuForView(window, view) {
       {
         label: 'Generar specs.md completado',
         click: () => window.webContents.send('html-viewer-menu-action', 'copy-completed-specs-prompt')
+      },
+      {
+        label: 'Trabajar siguiendo specs.md',
+        click: () => window.webContents.send('html-viewer-menu-action', 'copy-follow-specs-prompt')
       }
     ]
   });
@@ -400,22 +447,27 @@ app.whenReady().then(async () => {
 
   ipcMain.handle('select-local-paths', async (_event, options = {}) => {
     const directory = Boolean(options.directory);
+    const audioExtensions = ['mp3', 'mpga', 'wav', 'wave', 'oga', 'ogg', 'opus', 'm4a', 'm4b', 'aac', 'flac', 'weba', 'wma', 'aiff', 'aif', 'aifc', 'au', 'snd', 'amr', '3gp', 'caf', 'mka', 'mp2', 'mpa', 'ac3', 'dts', 'eac3', 'gsm', 'ra', 'ram', 'voc', 'ape', 'wv', 'tta', 'dsf', 'dff', 'mid', 'midi', 'kar'];
     const result = await dialog.showOpenDialog({
       title: directory ? 'Seleccionar carpeta con documentación' : 'Seleccionar documentos',
       properties: directory ? ['openDirectory'] : ['openFile', 'multiSelections'],
-      filters: directory ? undefined : [{ name: 'Documentos compatibles', extensions: ['json', 'csv', 'txt', 'md', 'markdown', 'html', 'htm'] }]
+      filters: directory ? undefined : [{ name: 'Documentos y recursos compatibles', extensions: ['json', 'csv', 'txt', 'md', 'markdown', 'html', 'htm', 'nxd', 'png', 'jpg', 'jpeg', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg', 'gif', 'mp4', 'm4v', 'webm', 'ogv', 'mov', ...audioExtensions] }, { name: 'Todos los archivos', extensions: ['*'] }]
     });
     return result.canceled ? [] : result.filePaths;
   });
 
   ipcMain.handle('get-file-system-roots', (_event, additionalRoots) => fileExplorerService.getRoots(additionalRoots));
   ipcMain.handle('select-sdd-media', async (_event, kind = 'image') => {
-    const isVideo = kind === 'video';
-    const filters = isVideo
-      ? [{ name: 'Vídeos', extensions: ['mp4', 'm4v', 'webm', 'ogv', 'mov'] }]
-      : [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg'] }];
+    const filtersByKind = {
+      image: [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg'] }],
+      video: [{ name: 'Vídeos', extensions: ['mp4', 'm4v', 'webm', 'ogv', 'mov'] }],
+      audio: undefined
+    };
+    const labelsByKind = { image: 'imagen', video: 'vídeo', audio: 'audio' };
+    const selectedKind = filtersByKind[kind] ? kind : 'image';
+    const filters = filtersByKind[selectedKind];
     const result = await dialog.showOpenDialog({
-      title: isVideo ? 'Seleccionar vídeo' : 'Seleccionar imagen',
+      title: `Seleccionar ${labelsByKind[selectedKind]}`,
       properties: ['openFile'],
       filters
     });
@@ -423,13 +475,12 @@ app.whenReady().then(async () => {
     const filePath = path.normalize(result.filePaths[0]);
     const stats = fs.statSync(filePath);
     if (!stats.isFile()) throw new Error('La ubicación elegida no es un archivo');
-    const extension = path.extname(filePath).toLowerCase().replace('.', '');
-    const type = SDD_MEDIA_MIME_BY_EXTENSION[extension];
-    if (!type) throw new Error('El formato del archivo no es compatible');
-    const maxBytes = isVideo ? 100 * 1024 * 1024 : 20 * 1024 * 1024;
-    if (stats.size > maxBytes) throw new Error(isVideo ? 'El vídeo supera el límite de 100 MB' : 'La imagen supera el límite de 20 MB');
-    const buffer = fs.readFileSync(filePath);
-    return { name: path.basename(filePath), type, dataUrl: `data:${type};base64,${buffer.toString('base64')}` };
+    const detected = detectFileType(filePath, { fileName: path.basename(filePath) });
+    const type = detected.mime;
+    if (!type || detected.kind !== selectedKind) throw new Error('El contenido no coincide con el tipo seleccionado o el formato no es compatible');
+    const maxBytes = selectedKind === 'image' ? SDD_SPECS_IMAGE_MAX_BYTES : selectedKind === 'video' ? SDD_SPECS_VIDEO_MAX_BYTES : SDD_SPECS_AUDIO_MAX_BYTES;
+    if (stats.size > maxBytes) throw new Error(`El ${labelsByKind[selectedKind]} supera el límite de ${selectedKind === 'image' ? '20 MB' : '100 MB'}`);
+    return { name: path.basename(filePath), type, path: filePath, size: stats.size };
   });
 
   ipcMain.handle('select-sdd-specs-path', async (_event, lastPath = '') => {
@@ -449,9 +500,21 @@ app.whenReady().then(async () => {
       const example = `# Specs
 
 ## Requisito de ejemplo
-**Estado:** borrador
+- Estado: Borrador
 
 Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
+
+# BBDD
+
+No hay tablas definidas.
+
+# UI
+
+No hay referencias de interfaz definidas.
+
+# Recursos
+
+La carpeta specs_resources no contiene archivos.
 `;
       fs.writeFileSync(specsPath, example, { encoding: 'utf8', mode: 0o600 });
       return { path: directoryPath, created: true };

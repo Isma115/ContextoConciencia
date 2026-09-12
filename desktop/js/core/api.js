@@ -25,6 +25,7 @@ export async function api(path, options = {}) {
   if (!response.ok) {
     const error = new Error(payload.error || `Error ${response.status}`);
     error.status = response.status;
+    error.payload = payload;
     if (response.status === 401 && state.user && !path.startsWith('/auth/')) unauthorizedHandler?.();
     throw error;
   }

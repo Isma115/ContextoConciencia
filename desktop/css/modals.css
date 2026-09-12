@@ -77,6 +77,7 @@
 .media-viewer-body { align-items: center; justify-content: center; overflow: auto; }
 .media-viewer { min-height: 0; max-width: 100%; max-height: 100%; object-fit: contain; border: 1px solid var(--line-dark); border-radius: 3px; background: var(--surface-code); }
 .media-viewer-video { width: min(100%, 1100px); }
+.media-viewer-audio { width: min(100%, 680px); }
 .media-viewer-kind { display: block; margin-top: 2px; color: var(--muted); font-family: var(--mono); font-size: 8px; letter-spacing: .06em; text-transform: uppercase; }
 .media-viewer-error { padding: 24px; color: var(--muted); font-size: 11px; text-align: center; }
 .unsupported-viewer-body { align-items: center; justify-content: center; gap: 14px; }

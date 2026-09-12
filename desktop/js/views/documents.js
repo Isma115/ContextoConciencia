@@ -155,6 +155,7 @@ function documentContent(doc) {
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg']);
 const VIDEO_EXTENSIONS = new Set(['mp4', 'm4v', 'webm', 'ogv', 'mov']);
+const AUDIO_EXTENSIONS = new Set(['mp3', 'mpga', 'wav', 'wave', 'oga', 'ogg', 'opus', 'm4a', 'm4b', 'aac', 'flac', 'weba', 'wma', 'aiff', 'aif', 'aifc', 'au', 'snd', 'amr', '3gp', 'caf', 'mka', 'mp2', 'mpa', 'ac3', 'dts', 'eac3', 'gsm', 'ra', 'ram', 'voc', 'ape', 'wv', 'tta', 'dsf', 'dff', 'mid', 'midi', 'kar']);
 const TEXT_VIEW_TYPES = new Set(['markdown', 'json', 'csv', 'text', 'html', 'css', 'javascript', 'rest']);
 
 export function isUnsupportedFormat(doc) {
@@ -163,26 +164,28 @@ export function isUnsupportedFormat(doc) {
   if (doc.metadata?.binary === true || doc.metadata?.contentSkipped === 'too-large') return true;
   const content = doc.content === null || doc.content === undefined ? '' : String(doc.content);
   if (content.trim() === '') return true;
-  if (doc.type === 'image' || doc.type === 'gif' || doc.type === 'video') return true;
+  if (doc.type === 'image' || doc.type === 'gif' || doc.type === 'video' || doc.type === 'audio') return true;
   return false;
 }
 
 export function mediaKindFor(doc) {
   if (!doc?.path || doc.type === 'rest') return null;
   const kind = doc.metadata?.mediaKind;
-  if (kind === 'image' || kind === 'video') return kind;
+  if (kind === 'image' || kind === 'video' || kind === 'audio') return kind;
   if (doc.type === 'image' || doc.type === 'gif') return 'image';
   if (doc.type === 'video') return 'video';
+  if (doc.type === 'audio') return 'audio';
   const extension = String(doc.path).split('.').pop().toLowerCase();
   if (IMAGE_EXTENSIONS.has(extension) || extension === 'gif') return 'image';
   if (VIDEO_EXTENSIONS.has(extension)) return 'video';
+  if (AUDIO_EXTENSIONS.has(extension)) return 'audio';
   return null;
 }
 
 export function mediaSnippetLabel(doc) {
   const kind = mediaKindFor(doc);
   if (!kind) return '';
-  const label = doc.type === 'gif' ? 'GIF' : kind === 'video' ? 'Vídeo' : 'Imagen';
+  const label = doc.type === 'gif' ? 'GIF' : kind === 'video' ? 'Vídeo' : kind === 'audio' ? 'Audio' : 'Imagen';
   const size = Number(doc.metadata?.size);
   return Number.isFinite(size) && size > 0 ? `${label} · ${formatBytes(size)}` : label;
 }
@@ -191,23 +194,72 @@ function openMediaViewer(doc) {
   const kind = mediaKindFor(doc);
   const fileUrl = apiUrl(`/documents/${encodeURIComponent(doc.id)}/file`);
   const isVideo = kind === 'video';
+  const isAudio = kind === 'audio';
   const title = escapeHtml(doc.title || 'Sin título');
   const media = isVideo
     ? `<video id="document-media" class="media-viewer media-viewer-video" src="${escapeHtml(fileUrl)}" controls preload="metadata" playsinline aria-label="${title}"></video>`
-    : `<img id="document-media" class="media-viewer" src="${escapeHtml(fileUrl)}" alt="${title}" draggable="false" />`;
+    : isAudio
+      ? `<audio id="document-media" class="media-viewer media-viewer-audio" src="${escapeHtml(fileUrl)}" controls preload="metadata" aria-label="${title}"></audio>`
+      : `<img id="document-media" class="media-viewer" src="${escapeHtml(fileUrl)}" alt="${title}" draggable="false" />`;
+  const externalOpen = doc.path
+    ? '<button id="open-document-external" class="btn btn-secondary" type="button">Abrir con aplicación</button>'
+    : '';
+  const transcodeButton = isAudio
+    ? '<button id="transcode-document-audio" class="btn btn-secondary" type="button" hidden>Convertir a MP3</button>'
+    : '';
   const pathLabel = doc.path
     ? `<button id="reveal-document-path" class="viewer-path viewer-title-path" type="button" title="Mostrar el archivo en el explorador">↳ ${escapeHtml(doc.path)}</button>`
     : '';
-  $('#modal-root').innerHTML = `<div class="modal-backdrop viewer-modal-backdrop"><div class="modal viewer-modal" role="dialog" aria-modal="true"><div class="modal-head"><button class="modal-close" data-close-modal aria-label="Cerrar">×</button><div class="viewer-title-wrap"><div class="viewer-title-line"><span class="viewer-title" title="${title}">${title}</span>${pathLabel}</div><span class="media-viewer-kind">${escapeHtml(mediaSnippetLabel(doc))}</span></div></div><div class="viewer-body media-viewer-body">${media}<div id="media-viewer-error" class="media-viewer-error" hidden>No se pudo cargar el archivo. Puede que se haya movido o modificado en disco.</div></div><div class="modal-actions">${copyPathButtonMarkup(doc.path, { small: false })}${revealButtonMarkup(doc)}</div></div></div>`;
+  $('#modal-root').innerHTML = `<div class="modal-backdrop viewer-modal-backdrop"><div class="modal viewer-modal" role="dialog" aria-modal="true"><div class="modal-head"><button class="modal-close" data-close-modal aria-label="Cerrar">×</button><div class="viewer-title-wrap"><div class="viewer-title-line"><span class="viewer-title" title="${title}">${title}</span>${pathLabel}</div><span class="media-viewer-kind">${escapeHtml(mediaSnippetLabel(doc))}</span></div></div><div class="viewer-body media-viewer-body">${media}<div id="media-viewer-error" class="media-viewer-error" hidden>No se pudo cargar el archivo. Puede que se haya movido o modificado en disco.</div></div><div class="modal-actions">${transcodeButton}${externalOpen}${copyPathButtonMarkup(doc.path, { small: false })}${revealButtonMarkup(doc)}</div></div></div>`;
   bindModalClose();
   bindCopyPathActions($('#modal-root'));
   bindRevealActions($('#modal-root'));
   const mediaNode = $('#document-media');
+  const transcodeNode = $('#transcode-document-audio');
+  const showTranscode = () => {
+    if (transcodeNode) transcodeNode.hidden = false;
+  };
   mediaNode.addEventListener('error', () => {
     mediaNode.hidden = true;
     $('#media-viewer-error').hidden = false;
+    showTranscode();
   });
-  if (isVideo) {
+  if (isAudio) {
+    if (!mediaNode.canPlayType(doc.metadata?.mediaMime || '').trim()) showTranscode();
+    transcodeNode?.addEventListener('click', () => {
+      transcodeNode.disabled = true;
+      transcodeNode.textContent = 'Convirtiendo…';
+      mediaNode.hidden = false;
+      $('#media-viewer-error').hidden = true;
+      mediaNode.src = `${fileUrl}?transcode=1`;
+      mediaNode.load();
+      mediaNode.addEventListener('loadedmetadata', () => {
+        transcodeNode.hidden = true;
+        transcodeNode.disabled = false;
+        transcodeNode.textContent = 'Convertir a MP3';
+      }, { once: true });
+      mediaNode.addEventListener('error', () => {
+        transcodeNode.disabled = false;
+        transcodeNode.textContent = 'Reintentar conversión';
+        mediaNode.hidden = true;
+        $('#media-viewer-error').hidden = false;
+        showToast('No se pudo convertir el audio. Puedes abrirlo con la aplicación predeterminada del sistema.', true);
+      }, { once: true });
+    });
+  }
+  $('#open-document-external')?.addEventListener('click', async (event) => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    try {
+      if (typeof window.nexusData?.openFileSystemEntry !== 'function') throw new Error('La apertura externa no está disponible');
+      await window.nexusData.openFileSystemEntry(doc.path);
+    } catch (error) {
+      showToast(error.message, true);
+    } finally {
+      button.disabled = false;
+    }
+  });
+  if (isVideo || isAudio) {
     mediaNode.addEventListener('click', (event) => event.stopPropagation());
   }
   if (doc.path) {

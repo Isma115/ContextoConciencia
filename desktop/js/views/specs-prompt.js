@@ -4,38 +4,81 @@ const COMPLETED_SPECS_PROMPT = `Actúa como analista técnico y trabaja sobre el
 
 ## Objetivo
 
-Genera o actualiza un archivo "specs.md" en la raíz del proyecto que documente todos los requisitos verificables que ya están implementados en el código. No inventes funcionalidades, no incluyas ideas futuras y no conviertas tareas pendientes, ejemplos o documentación aspiracional en requisitos cumplidos. Cada requisito debe estar respaldado por la implementación real o por documentación que describa una funcionalidad existente.
+Genera o actualiza el archivo "specs.md" en la raíz del proyecto. Debe documentar solo elementos verificables que ya están implementados. No inventes funcionalidades, tablas, pantallas, recursos, ideas futuras ni tareas pendientes.
 
 ## Formato obligatorio compatible con S.D.D
 
-El contenido debe seguir literalmente este formato, que es el que interpreta la ventana S.D.D · Specs:
+El documento usa cuatro secciones Markdown de primer nivel, exactamente en este orden. No uses JSON, comentarios HTML, metadatos ocultos ni bloques de código para almacenar datos.
 
 # Specs
 
 ## Título claro y específico del requisito
-**Estado:** Implementada
-**Categoría:** Nombre de la categoría
+- Estado: Implementada
+- Categoría: Área funcional opcional
 
-Descripción del comportamiento implementado, su contexto, criterios de aceptación, condiciones, validaciones, excepciones y resultado observable.
+Descripción verificable del comportamiento existente.
 
-Repite un bloque como ese para cada requisito. Las reglas son:
+# BBDD
 
-- Conserva exactamente el encabezado inicial "# Specs".
-- Usa un encabezado "##" por requisito, con un título único, descriptivo y de no más de 200 caracteres.
-- Escribe exactamente "**Estado:** Implementada" en todos los requisitos. No uses Borrador, Activa, Aprobada, Pendiente ni otros estados.
-- Incluye "**Categoría:** ..." cuando ayude a organizar el requisito; la categoría es opcional.
-- Describe cada requisito con hechos comprobables y detalles útiles para verificarlo desde el proyecto. Puedes usar varios párrafos o listas dentro de la descripción, pero no añadas metadatos que S.D.D no reconoce.
-- No uses encabezados Markdown de nivel 2, 3 o 4 dentro de una descripción, porque S.D.D los interpreta como el comienzo de otro requisito.
-- Incluye todos los requisitos funcionales y técnicos ya implementados que puedan deducirse del proyecto, sin duplicarlos ni agrupar comportamientos independientes de forma ambigua.
-- No incluyas prioridades, porcentajes, campos de seguimiento, casillas sin marcar, marcadores de posición ni secciones adicionales fuera de los bloques de requisitos.
-- Mantén el archivo en UTF-8, termina con un salto de línea y no lo envuelvas en un bloque de código.
+## usuarios
+
+Descripción breve de la tabla.
+
+| Columna | Tipo | Nulo | Clave | Predeterminado | Descripción |
+| --- | --- | --- | --- | --- | --- |
+| id | INTEGER | No | PK | — | Identificador único |
+
+# UI
+
+## Pantalla de inicio
+- Tipo: Imagen
+- Archivo: specs_resources/inicio.png
+- Descripción: Vista inicial de la aplicación.
+
+# Recursos
+
+- specs_resources/inicio.png — Imagen
+
+Reglas:
+
+- Mantén siempre las cuatro secciones, incluso cuando no haya contenido: escribe una frase breve como "No hay tablas definidas." o "No hay referencias de interfaz definidas.".
+- En Specs, usa un encabezado "##" por requisito. Escribe exactamente "- Estado: Implementada" y añade "- Categoría: ..." solo cuando aporte contexto.
+- En BBDD, usa un encabezado "##" por tabla y una tabla Markdown de columnas. Usa "Sí" o "No" en Nulo, "PK" para la clave primaria y "—" si no hay valor predeterminado o descripción.
+- En UI, usa un encabezado "##" por referencia. Tipo solo puede ser Texto, Imagen o Vídeo. Para imágenes y vídeos indica Archivo con una ruta dentro de specs_resources. Para una referencia de texto, escribe el contenido debajo de sus metadatos.
+- En Recursos, enumera únicamente los archivos reales disponibles dentro de specs_resources.
+- No uses encabezados Markdown de nivel 2, 3 o 4 dentro de descripciones, porque S.D.D los interpreta como el comienzo de otro elemento.
+- No añadas texto fuera de las cuatro secciones.
 
 ## Guardado y respuesta
 
-Guarda el resultado como "specs.md" en la raíz del proyecto, reemplazando el archivo anterior si existe. Antes de guardarlo, comprueba que todos los bloques tienen título, descripción y exactamente el estado "Implementada". Después de guardarlo, responde únicamente con el contenido final de "specs.md", sin explicaciones ni texto adicional.`;
+Guarda el resultado como "specs.md" en la raíz del proyecto, reemplazando el archivo anterior si existe. Antes de guardarlo, comprueba que todas las secciones usan Markdown legible y que cada dato está respaldado por la implementación real. Después de guardarlo, responde únicamente con el contenido final de "specs.md", sin explicaciones ni texto adicional.`;
+
+const FOLLOW_SPECS_PROMPT = `Actúa como agente de desarrollo y trabaja directamente sobre el proyecto actual.
+
+## Fuente de verdad obligatoria
+
+Antes de analizar, planificar o modificar código, lee el archivo "specs.md" situado en la raíz del proyecto y recorre todos los archivos disponibles dentro de la carpeta "specs_resources", incluidas sus subcarpetas. Trata el contenido de "specs.md" como la especificación funcional y técnica del trabajo, y usa los recursos como referencias reales de diseño, contenido, comportamiento o integración.
+
+## Forma de trabajo
+
+- Sigue los requisitos, tablas, referencias de UI y recursos descritos en "specs.md" en el orden y con las restricciones que indique el documento.
+- Comprueba la implementación existente antes de cambiarla y respeta la arquitectura, las convenciones y los contratos ya usados por el proyecto.
+- Usa las imágenes, vídeos y textos de "specs_resources" cuando el documento los referencie; no los sustituyas por contenido inventado ni los elimines o sobrescribas.
+- No inventes requisitos, pantallas, datos, endpoints, recursos ni decisiones de diseño que no estén respaldados por "specs.md", "specs_resources" o la implementación existente.
+- Si encuentras una contradicción, un dato ambiguo o un recurso ausente, deja constancia del problema y resuélvelo con la opción más conservadora sin ocultar la discrepancia.
+- Implementa el trabajo completo necesario para cumplir el documento, incluyendo validaciones, estados vacíos, errores y casos límite relevantes.
+- Mantén los cambios centrados en el objetivo y evita modificar documentación o recursos de referencia salvo que el propio documento lo exija.
+
+## Validación y respuesta
+
+Después de implementar, revisa el diff, comprueba que el resultado sigue fielmente "specs.md" y que las referencias a "specs_resources" funcionan desde el proyecto. Ejecuta las pruebas, comprobaciones o validaciones disponibles y corrige los fallos que encuentres. Responde con un resumen breve de los cambios realizados y de las comprobaciones ejecutadas.`;
 
 export function buildCompletedSpecsPrompt() {
   return COMPLETED_SPECS_PROMPT;
+}
+
+export function buildFollowSpecsPrompt() {
+  return FOLLOW_SPECS_PROMPT;
 }
 
 async function copyTextToClipboard(text) {
@@ -61,5 +104,14 @@ export async function copyCompletedSpecsPrompt() {
     showToast('Prompt de specs.md copiado al portapapeles');
   } catch (error) {
     showToast(error.message || 'No se pudo copiar el prompt de specs.md', true);
+  }
+}
+
+export async function copyFollowSpecsPrompt() {
+  try {
+    await copyTextToClipboard(buildFollowSpecsPrompt());
+    showToast('Prompt para trabajar con specs.md copiado al portapapeles');
+  } catch (error) {
+    showToast(error.message || 'No se pudo copiar el prompt para trabajar con specs.md', true);
   }
 }

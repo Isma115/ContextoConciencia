@@ -4,7 +4,7 @@ import { state } from '../core/state.js';
 import { sectionIconMarkup } from '../core/section-icons.js';
 import { showToast } from '../ui/notifications.js';
 import { copyGitDiffPrompt, openNewDiagramPromptModal } from './diagram-prompt-modal.js';
-import { copyCompletedSpecsPrompt } from './specs-prompt.js';
+import { copyCompletedSpecsPrompt, copyFollowSpecsPrompt } from './specs-prompt.js';
 
 let previewRenderId = 0;
 let viewerLoadId = 0;
@@ -254,6 +254,10 @@ export function bindHtmlViewerMenu() {
     }
     if (action === 'copy-completed-specs-prompt') {
       copyCompletedSpecsPrompt();
+      return;
+    }
+    if (action === 'copy-follow-specs-prompt') {
+      copyFollowSpecsPrompt();
       return;
     }
     if (state.view !== 'html-viewer') return;

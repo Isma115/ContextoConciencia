@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { test, before, after } = require('node:test');
 const { startServer } = require('../server/app');
-const { parseSddSpecsMarkdown, sddSpecsToMarkdown } = require('../server/routes/sdd');
+const { parseSddDocument, parseSddSpecsMarkdown, sddSpecsToMarkdown } = require('../server/routes/sdd');
 
 let api;
 let fixtureDir;
@@ -110,11 +110,76 @@ test('genera markdown que vuelve a parsearse sin perder datos', () => {
   ];
   const markdown = sddSpecsToMarkdown(original);
   assert.match(markdown, /^# Specs/);
-  assert.match(markdown, /\*\*Estado:\*\* Activa/);
+  assert.match(markdown, /- Estado: Activa/);
   assert.doesNotMatch(markdown, /Prioridad/);
-  assert.match(markdown, /\*\*Categoría:\*\* Búsqueda/);
+  assert.match(markdown, /- Categoría: Búsqueda/);
   const reparsed = parseSddSpecsMarkdown(markdown);
   assert.deepEqual(reparsed, original);
+});
+
+test('parsea Specs, BBDD y UI desde secciones Markdown sin JSON', () => {
+  const document = parseSddDocument(`# Specs
+
+## Buscar documentos
+- Estado: Implementada
+- Categoría: Búsqueda
+
+Busca por título y contenido.
+
+# BBDD
+
+## usuarios
+
+Personas registradas.
+
+| Columna | Tipo | Nulo | Clave | Predeterminado | Descripción |
+| --- | --- | --- | --- | --- | --- |
+| id | INTEGER | No | PK | — | Identificador |
+| nombre | TEXT | Sí | — | — | Nombre visible |
+
+# UI
+
+## Inicio
+- Tipo: Imagen
+- Archivo: specs_resources/inicio.png
+- Descripción: Pantalla principal.
+
+## Sonido de inicio
+- Tipo: Audio
+- Archivo: specs_resources/inicio.mp3
+
+# Recursos
+
+- specs_resources/inicio.png — Imagen
+`);
+  assert.equal(document.specs[0].status, 'implemented');
+  assert.equal(document.database.tables[0].name, 'usuarios');
+  assert.deepEqual(document.database.tables[0].columns[0], {
+    id: document.database.tables[0].columns[0].id,
+    name: 'id', type: 'INTEGER', nullable: false, primaryKey: true, defaultValue: '', description: 'Identificador', position: 0
+  });
+  assert.equal(document.media.media[0].fileName, 'inicio.png');
+  assert.equal(document.media.media[1].kind, 'audio');
+  assert.equal(document.media.media[1].fileName, 'inicio.mp3');
+  assert.equal(document.sections.resources, true);
+});
+
+test('mantiene lectura del formato JSON heredado hasta que se guarde de nuevo', () => {
+  const document = parseSddDocument(`# Specs
+
+## Requisito heredado
+**Estado:** Activa
+
+<!-- nexusdata:sdd-database:start -->
+{"tables":[{"name":"usuarios","columns":[]}]}
+<!-- nexusdata:sdd-database:end -->
+
+<!-- nexusdata:sdd-ui:start -->
+{"media":[{"title":"Nota","kind":"text","content":"Texto heredado"}]}
+<!-- nexusdata:sdd-ui:end -->
+`);
+  assert.equal(document.database.tables[0].name, 'usuarios');
+  assert.equal(document.media.media[0].content, 'Texto heredado');
 });
 
 before(async () => {
@@ -182,7 +247,7 @@ test('sincroniza el editor y CRUD de Specs directamente en specs.md', async () =
   assert.doesNotMatch(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /## Añadida actualizada/);
 });
 
-test('guarda Base de datos en el bloque S.D.D de specs.md y lo vuelve a leer del disco', async () => {
+test('guarda Base de datos como una tabla Markdown y la vuelve a leer del disco', async () => {
   const projectPath = createProject('sdd-project-db-file', '# Specs\n\n## Requisito de datos\n');
   await loadProject(projectPath);
   const created = await request('/sdd/db/tables', { method: 'POST', body: JSON.stringify({ name: 'usuarios', description: 'Personas' }) }, projectPath);
@@ -193,15 +258,16 @@ test('guarda Base de datos en el bloque S.D.D de specs.md y lo vuelve a leer del
   }, projectPath);
   assert.equal(column.status, 201);
   const raw = fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8');
-  assert.match(raw, /nexusdata:sdd-database:start/);
-  assert.match(raw, /"name": "usuarios"/);
-  assert.match(raw, /"name": "id"/);
+  assert.match(raw, /^# BBDD$/m);
+  assert.match(raw, /^## usuarios$/m);
+  assert.match(raw, /\| `id` \| `INTEGER` \| No \| PK \| — \| — \|/);
+  assert.doesNotMatch(raw, /nexusdata:sdd-|"tables"/);
 
   const listed = await request('/sdd/db', {}, projectPath);
   assert.equal(listed.body.tables[0].name, 'usuarios');
   assert.equal(listed.body.tables[0].columns[0].name, 'id');
 
-  fs.writeFileSync(path.join(projectPath, 'specs.md'), raw.replace('"usuarios"', '"usuarios_externos"'), 'utf8');
+  fs.writeFileSync(path.join(projectPath, 'specs.md'), raw.replace('## usuarios', '## usuarios_externos'), 'utf8');
   const externallyUpdated = await request('/sdd/db', {}, projectPath);
   assert.equal(externallyUpdated.body.tables[0].name, 'usuarios_externos');
 });
@@ -223,9 +289,171 @@ test('guarda UI en specs.md y los ficheros multimedia en specs_resources', async
     body: Buffer.from([137, 80, 78, 71])
   }, projectPath);
   assert.equal(image.status, 201);
+  assert.doesNotMatch(image.body.fileUrl, /^data:/);
+  assert.match(image.body.fileUrl, /\/api\/sdd\/media\//);
   assert.equal(fs.existsSync(path.join(projectPath, 'specs_resources', 'screen.png')), true);
-  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /nexusdata:sdd-ui:start/);
-  assert.equal((await request('/sdd/media', {}, projectPath)).body.media.some((item) => item.fileName === 'screen.png'), true);
+  const audio = await request('/sdd/media?kind=audio&title=Sonido&fileName=click.mp3', {
+    method: 'POST',
+    headers: { 'Content-Type': 'audio/mpeg' },
+    body: Buffer.from([0x49, 0x44, 0x33])
+  }, projectPath);
+  assert.equal(audio.status, 201);
+  assert.equal(fs.existsSync(path.join(projectPath, 'specs_resources', 'click.mp3')), true);
+  const raw = fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8');
+  assert.match(raw, /^# UI$/m);
+  assert.match(raw, /^## Pantalla$/m);
+  assert.match(raw, /- Archivo: `specs_resources\/screen.png`/);
+  assert.match(raw, /^# Recursos$/m);
+  assert.match(raw, /- `specs_resources\/screen.png` — Imagen/);
+  assert.match(raw, /- `specs_resources\/click.mp3` — Audio/);
+  assert.doesNotMatch(raw, /nexusdata:sdd-|"media"/);
+  const media = (await request('/sdd/media', {}, projectPath)).body.media;
+  assert.equal(media.some((item) => item.fileName === 'screen.png'), true);
+  assert.equal(media.some((item) => item.fileName === 'click.mp3' && item.kind === 'audio'), true);
+});
+
+test('acelera la gestión de requisitos con duplicado, edición masiva, orden y reporte', async () => {
+  const projectPath = createProject('sdd-project-productivity', `# Specs
+
+## Buscar anuncios
+- Estado: Borrador
+- Categoría: Catálogo
+
+El usuario puede buscar anuncios.
+
+## Guardar favoritos
+- Estado: Activa
+- Categoría: Cuenta
+
+El usuario puede guardar favoritos.
+
+## Contactar vendedor
+- Estado: Aprobada
+- Categoría: Mensajería
+
+El usuario puede contactar con el vendedor.
+
+# BBDD
+
+## anuncios
+Catálogo de anuncios.
+
+| Columna | Tipo | Nulo | Clave | Predeterminado | Descripción |
+| --- | --- | --- | --- | --- | --- |
+| id | INTEGER | No | PK | — | Identificador |
+
+# UI
+
+## Pantalla de catálogo
+- Tipo: Texto
+- Descripción: Buscar anuncios y guardar favoritos.
+`);
+  await loadProject(projectPath);
+  const initial = await request('/sdd/specs', {}, projectPath);
+  const ids = initial.body.specs.map((spec) => spec.id);
+  assert.equal(ids.length, 3);
+
+  const bulk = await request('/sdd/specs/bulk', {
+    method: 'PATCH',
+    body: JSON.stringify({ ids: ids.slice(0, 2), changes: { status: 'approved', category: 'Producto' } })
+  }, projectPath);
+  assert.equal(bulk.status, 200);
+  assert.equal(bulk.body.updated.length, 2);
+  assert.deepEqual(bulk.body.updated.map((spec) => spec.status), ['approved', 'approved']);
+
+  const duplicate = await request(`/sdd/specs/${ids[0]}/duplicate`, { method: 'POST', body: JSON.stringify({}) }, projectPath);
+  assert.equal(duplicate.status, 201);
+  assert.match(duplicate.body.title, /^Copia de Buscar anuncios/);
+
+  const afterDuplicate = (await request('/sdd/specs', {}, projectPath)).body.specs;
+  const reordered = await request('/sdd/specs/reorder', {
+    method: 'POST',
+    body: JSON.stringify({ ids: [...afterDuplicate].reverse().map((spec) => spec.id) })
+  }, projectPath);
+  assert.equal(reordered.status, 200);
+  assert.equal(reordered.body.specs[0].title, afterDuplicate.at(-1).title);
+
+  const report = await request('/sdd/report', {}, projectPath);
+  assert.equal(report.status, 200);
+  assert.equal(report.body.coverageMatrix.length, 4);
+  assert.equal(report.body.summary.tables, 1);
+  assert.equal(report.body.summary.ui, 1);
+  assert.equal(typeof report.body.summary.coveragePercent, 'number');
+});
+
+test('gestiona recursos con carpetas, filtros, referencias y stream por rangos', async () => {
+  const projectPath = createProject('sdd-project-resources', `# Specs
+
+## Requisito con icono
+Descripción del requisito.
+
+# UI
+
+## Icono de inicio
+- Tipo: Imagen
+- Archivo: specs_resources/icon.png
+
+# Recursos
+
+- specs_resources/icon.png — Imagen
+`);
+  fs.writeFileSync(path.join(projectPath, 'specs_resources', 'icon.png'), Buffer.from('not-a-real-png'));
+  await loadProject(projectPath);
+
+  const initial = await request('/sdd/resources', {}, projectPath);
+  assert.equal(initial.status, 200);
+  assert.equal(initial.body.resources.length, 1);
+  assert.equal(initial.body.resources[0].referenced, true);
+  assert.equal(initial.body.resources[0].dataUrl, undefined);
+  assert.match(initial.body.resources[0].fileUrl, /\/api\/sdd\/resources\/file\?/);
+
+  const rangeUrl = `http://127.0.0.1:${api.port}/api/sdd/resources/file?projectPath=${encodeURIComponent(projectPath)}&fileName=icon.png`;
+  const ranged = await fetch(rangeUrl, { headers: { Range: 'bytes=0-3', Cookie: sessionCookie } });
+  assert.equal(ranged.status, 206);
+  assert.equal(ranged.headers.get('accept-ranges'), 'bytes');
+  assert.deepEqual(Buffer.from(await ranged.arrayBuffer()), Buffer.from('not-'));
+
+  const folder = await request('/sdd/resources/folders', {
+    method: 'POST',
+    body: JSON.stringify({ path: 'audio/ui' })
+  }, projectPath);
+  assert.equal(folder.status, 201);
+
+  const uploaded = await request('/sdd/resources?fileName=audio%2Fui%2Fvoice.bin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body: Buffer.from([0x49, 0x44, 0x33, 0x01])
+  }, projectPath);
+  assert.equal(uploaded.status, 201);
+  assert.equal(uploaded.body.kind, 'audio');
+  assert.equal(uploaded.body.relativePath, 'audio/ui/voice.bin');
+
+  const filtered = await request('/sdd/resources?q=voice&kind=audio', {}, projectPath);
+  assert.deepEqual(filtered.body.resources.map((resource) => resource.relativePath), ['audio/ui/voice.bin']);
+
+  const renamed = await request('/sdd/resources', {
+    method: 'PATCH',
+    body: JSON.stringify({ fileName: 'icon.png', newName: 'icon-home.png' })
+  }, projectPath);
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.body.updatedReferences, true);
+  assert.match(fs.readFileSync(path.join(projectPath, 'specs.md'), 'utf8'), /specs_resources\/icon-home\.png/);
+
+  const blocked = await request('/sdd/resources', {
+    method: 'DELETE',
+    body: JSON.stringify({ fileName: 'icon-home.png' })
+  }, projectPath);
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.body.code, 'RESOURCE_REFERENCES');
+  assert.equal(blocked.body.references.length, 1);
+
+  const deleted = await request('/sdd/resources', {
+    method: 'DELETE',
+    body: JSON.stringify({ fileName: 'icon-home.png', confirmReferences: true })
+  }, projectPath);
+  assert.equal(deleted.status, 200);
+  assert.equal(deleted.body.referencesPreserved, true);
+  assert.equal(fs.existsSync(path.join(projectPath, 'specs_resources', 'icon-home.png')), false);
 });
 
 test('mantiene aislados dos proyectos porque cada petición lee sus propios ficheros', async () => {

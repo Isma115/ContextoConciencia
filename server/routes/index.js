@@ -12,6 +12,7 @@ const { documentRows, favoriteDocuments, recentDocuments, searchDocuments } = re
 const { createWorkspaceSnapshot, importWorkspaceSnapshot } = require('../services/workspace');
 const { createSearchWorker } = require('../services/search/runner');
 const { Worker } = require('node:worker_threads');
+const { transcodeAudioToMp3 } = require('../services/media-transcode');
 const { installAuthRoutes, requireAuth } = require('../auth');
 const { installSddRoutes } = require('./sdd');
 
@@ -660,6 +661,10 @@ function installRoutes(app, db, authDb, environment = process.env, { offlineOnly
     }
     if (stats.size > mediaByteLimit(media)) {
       return res.status(413).json({ error: 'El archivo supera el tamaño máximo compatible' });
+    }
+    if (req.query?.transcode === '1' || req.query?.transcode === 'true') {
+      if (media.kind !== 'audio') return res.status(415).json({ error: 'El documento no es un audio' });
+      return transcodeAudioToMp3(req, res, filePath);
     }
     res.set('Content-Type', media.mime);
     res.set('Accept-Ranges', 'bytes');

@@ -7,6 +7,7 @@ const { startServer } = require('../server/app');
 
 const PNG_1PX = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==', 'base64');
 const GIF_1PX = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
+const MP3_SAMPLE = Buffer.from('49443304000000000000545241434b00000000000000000000000000000000000000000000000000000000000000000000', 'hex');
 
 let api;
 let root;
@@ -39,6 +40,8 @@ before(async () => {
   fs.writeFileSync(path.join(mediaDir, 'foto_test.png'), PNG_1PX);
   fs.writeFileSync(path.join(mediaDir, 'animacion.gif'), GIF_1PX);
   fs.writeFileSync(path.join(mediaDir, 'clip_demo.mp4'), Buffer.concat([Buffer.from('000000206674797069736F6D', 'hex'), Buffer.alloc(512, 7)]));
+  fs.writeFileSync(path.join(mediaDir, 'audio_demo.mp3'), MP3_SAMPLE);
+  fs.writeFileSync(path.join(mediaDir, 'audio_sin_extension.bin'), Buffer.from('ID3\x04\x00\x00\x00\x00\x00\x00\x00contenido', 'latin1'));
   fs.writeFileSync(path.join(mediaDir, 'nota.md'), '# Nota de prueba\n');
   api = await startServer({
     port: 0,
@@ -63,6 +66,12 @@ test('importa multimedia con tipos y metadatos de medio', async () => {
   assert.equal(byTitle['animacion'].metadata.mediaKind, 'image');
   assert.equal(byTitle['clip demo'].type, 'video');
   assert.equal(byTitle['clip demo'].metadata.mediaKind, 'video');
+  assert.equal(byTitle['audio demo'].type, 'audio');
+  assert.equal(byTitle['audio demo'].metadata.mediaKind, 'audio');
+  assert.equal(byTitle['audio demo'].metadata.mediaMime, 'audio/mpeg');
+  assert.equal(byTitle['audio sin extension'].type, 'audio');
+  assert.equal(byTitle['audio sin extension'].metadata.mediaKind, 'audio');
+  assert.equal(byTitle['audio sin extension'].metadata.mediaDetectedBy, 'content');
   assert.equal(byTitle['nota'].type, 'markdown');
 });
 
@@ -86,11 +95,24 @@ test('sirve el archivo multimedia con MIME correcto y soporte de rango', async (
   const video = body.documents.find((doc) => doc.type === 'video');
   const videoResponse = await request(`/documents/${video.id}/file`);
   assert.equal(videoResponse.headers.get('content-type'), 'video/mp4');
+
+  const audio = body.documents.find((doc) => doc.type === 'audio');
+  const audioResponse = await request(`/documents/${audio.id}/file`);
+  assert.equal(audioResponse.status, 200);
+  assert.equal(audioResponse.headers.get('content-type'), 'audio/mpeg');
+  assert.deepEqual(Buffer.from(await audioResponse.arrayBuffer()), MP3_SAMPLE);
+
+  const unknownAudio = body.documents.find((doc) => doc.title === 'audio sin extension');
+  const unknownAudioResponse = await request(`/documents/${unknownAudio.id}/file`);
+  assert.equal(unknownAudioResponse.status, 200);
+  assert.equal(unknownAudioResponse.headers.get('content-type'), 'audio/mpeg');
 });
 
 test('el buscador encuentra multimedia por título y el detalle no corrompe el contenido', async () => {
   const search = await requestJson('/search?q=foto');
   assert.ok(search.body.results.some((doc) => doc.type === 'image'));
+  const audioSearch = await requestJson('/search?q=audio');
+  assert.ok(audioSearch.body.results.some((doc) => doc.type === 'audio'));
   const { body } = await requestJson('/documents');
   const png = body.documents.find((doc) => doc.type === 'image');
   const detail = await requestJson(`/documents/${png.id}`);

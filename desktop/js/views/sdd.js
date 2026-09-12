@@ -107,6 +107,15 @@ function sddToolbar(label, count, addId, addLabel, extraButton = '') {
   return `<div class="sdd-toolbar">${copy}<div class="sdd-toolbar-actions">${extraButton}<button id="${addId}" class="btn btn-primary" type="button">${escapeHtml(addLabel)}</button></div></div>`;
 }
 
+function moveSddToolbarActionsToHeader(container) {
+  const header = container.querySelector('.section-top');
+  const toolbar = container.querySelector('.sdd-toolbar');
+  const actions = toolbar?.querySelector('.sdd-toolbar-actions');
+  if (!header || !toolbar || !actions) return;
+  header.append(actions);
+  if (!toolbar.querySelector('.sdd-toolbar-copy')) toolbar.remove();
+}
+
 function emptyState(title, description) {
   return `<div class="empty"><strong>${escapeHtml(title)}</strong><span>${escapeHtml(description)}</span></div>`;
 }
@@ -324,6 +333,7 @@ export function renderSddSpecs() {
   if (renderSddProjectRequired(container, 'specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.', headerOptions)) return;
   const requestId = ++renderRequestId;
   container.innerHTML = `${sddHeader('specs', 'S.D.D · SPECS', 'Specs', 'Qué debe hacer el sistema.', headerOptions)}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', '<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Volver a leer y editar specs.md del proyecto">Editar markdown</button>')}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
+  moveSddToolbarActionsToHeader(container);
   $('#sdd-spec-add').addEventListener('click', () => openSpecModal());
   const mdEdit = $('#sdd-md-edit');
   if (mdEdit) mdEdit.addEventListener('click', openSpecsMarkdownEditor);
@@ -479,6 +489,7 @@ export function renderSddDatabase() {
   if (renderSddProjectRequired(container, 'database', 'S.D.D · BASE DE DATOS', 'Base de datos', 'Tablas, columnas y restricciones.')) return;
   const requestId = ++renderRequestId;
   container.innerHTML = `${sddHeader('database', 'S.D.D · BASE DE DATOS', 'Base de datos', 'Tablas, columnas y restricciones.')}${sddToolbar('Tablas', '…', 'sdd-db-add', '＋ Añadir tabla')}<div class="sdd-list" id="sdd-db-list"><div class="empty">Cargando esquema…</div></div>`;
+  moveSddToolbarActionsToHeader(container);
   $('#sdd-db-add').addEventListener('click', () => openTableModal());
   sddApi('/sdd/db').then(({ tables }) => {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-database')) return;
@@ -611,6 +622,7 @@ export function renderSddUi() {
   if (renderSddProjectRequired(container, 'ui', 'S.D.D · UI', 'UI', 'Referencias visuales del diseño.')) return;
   const requestId = ++renderRequestId;
   container.innerHTML = `${sddHeader('ui', 'S.D.D · UI', 'UI', 'Referencias visuales del diseño.')}${sddToolbar('Referencias de diseño', '…', 'sdd-ui-add', '＋ Añadir contenido')}<div class="sdd-media-grid" id="sdd-ui-list"><div class="empty">Cargando contenido…</div></div>`;
+  moveSddToolbarActionsToHeader(container);
   $('#sdd-ui-add').addEventListener('click', () => openMediaModal());
   sddApi('/sdd/media').then(({ media }) => {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-ui')) return;
@@ -686,6 +698,7 @@ export function renderSddResources() {
   if (!container) return;
   if (renderSddProjectRequired(container, 'resources', 'S.D.D · RECURSOS', 'Recursos', `Imágenes y vídeos de la carpeta “${SPECS_RESOURCES_FOLDER_NAME}”.`)) return;
   container.innerHTML = `${sddHeader('resources', 'S.D.D · RECURSOS', 'Recursos', `Imágenes y vídeos de la carpeta “${SPECS_RESOURCES_FOLDER_NAME}”.`)}<div class="sdd-toolbar"><div class="sdd-toolbar-copy"><h2>Recursos multimedia</h2><span id="sdd-resource-count" class="sdd-count">…</span></div><div class="sdd-toolbar-actions"><button id="sdd-resource-refresh" class="btn btn-secondary" type="button" title="Volver a leer la carpeta de recursos">Actualizar</button></div></div><div class="sdd-card-meta sdd-resource-folder" id="sdd-resource-folder"></div><div class="sdd-media-grid" id="sdd-resource-list"><div class="empty">Cargando recursos…</div></div>`;
+  moveSddToolbarActionsToHeader(container);
   const showResources = (data, id) => {
     if (id !== renderRequestId || !isViewActive('view-sdd-resources')) return;
     const folderNode = $('#sdd-resource-folder');

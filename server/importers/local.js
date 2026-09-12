@@ -2,6 +2,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { parseJson } = require('../database/db');
 const { upsertDocument } = require('../services/documents');
+const { detectFileType } = require('../services/media-detection');
 
 const SUPPORTED = new Map([
   ['.json', 'json'],
@@ -32,7 +33,46 @@ const SUPPORTED = new Map([
   ['.m4v', 'video'],
   ['.webm', 'video'],
   ['.ogv', 'video'],
-  ['.mov', 'video']
+  ['.mov', 'video'],
+  ['.mp3', 'audio'],
+  ['.mpga', 'audio'],
+  ['.wav', 'audio'],
+  ['.wave', 'audio'],
+  ['.oga', 'audio'],
+  ['.ogg', 'audio'],
+  ['.opus', 'audio'],
+  ['.m4a', 'audio'],
+  ['.m4b', 'audio'],
+  ['.aac', 'audio'],
+  ['.flac', 'audio'],
+  ['.weba', 'audio'],
+  ['.wma', 'audio'],
+  ['.aiff', 'audio'],
+  ['.aif', 'audio'],
+  ['.aifc', 'audio'],
+  ['.au', 'audio'],
+  ['.snd', 'audio'],
+  ['.amr', 'audio'],
+  ['.3gp', 'audio'],
+  ['.caf', 'audio'],
+  ['.mka', 'audio'],
+  ['.mp2', 'audio'],
+  ['.mpa', 'audio'],
+  ['.ac3', 'audio'],
+  ['.dts', 'audio'],
+  ['.eac3', 'audio'],
+  ['.gsm', 'audio'],
+  ['.ra', 'audio'],
+  ['.ram', 'audio'],
+  ['.voc', 'audio'],
+  ['.ape', 'audio'],
+  ['.wv', 'audio'],
+  ['.tta', 'audio'],
+  ['.dsf', 'audio'],
+  ['.dff', 'audio'],
+  ['.mid', 'audio'],
+  ['.midi', 'audio'],
+  ['.kar', 'audio']
 ]);
 const DOCUMENT_SUPPORTED = new Map([...SUPPORTED].filter(([, type]) => !['css', 'javascript'].includes(type)));
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
@@ -54,17 +94,77 @@ const MEDIA_BY_EXTENSION = new Map([
   ['.m4v', { type: 'video', kind: 'video', mime: 'video/x-m4v' }],
   ['.webm', { type: 'video', kind: 'video', mime: 'video/webm' }],
   ['.ogv', { type: 'video', kind: 'video', mime: 'video/ogg' }],
-  ['.mov', { type: 'video', kind: 'video', mime: 'video/quicktime' }]
+  ['.mov', { type: 'video', kind: 'video', mime: 'video/quicktime' }],
+  ['.mp3', { type: 'audio', kind: 'audio', mime: 'audio/mpeg' }],
+  ['.mpga', { type: 'audio', kind: 'audio', mime: 'audio/mpeg' }],
+  ['.wav', { type: 'audio', kind: 'audio', mime: 'audio/wav' }],
+  ['.wave', { type: 'audio', kind: 'audio', mime: 'audio/wav' }],
+  ['.oga', { type: 'audio', kind: 'audio', mime: 'audio/ogg' }],
+  ['.ogg', { type: 'audio', kind: 'audio', mime: 'audio/ogg' }],
+  ['.opus', { type: 'audio', kind: 'audio', mime: 'audio/opus' }],
+  ['.m4a', { type: 'audio', kind: 'audio', mime: 'audio/mp4' }],
+  ['.m4b', { type: 'audio', kind: 'audio', mime: 'audio/mp4' }],
+  ['.aac', { type: 'audio', kind: 'audio', mime: 'audio/aac' }],
+  ['.flac', { type: 'audio', kind: 'audio', mime: 'audio/flac' }],
+  ['.weba', { type: 'audio', kind: 'audio', mime: 'audio/webm' }],
+  ['.wma', { type: 'audio', kind: 'audio', mime: 'audio/x-ms-wma' }],
+  ['.aiff', { type: 'audio', kind: 'audio', mime: 'audio/aiff' }],
+  ['.aif', { type: 'audio', kind: 'audio', mime: 'audio/aiff' }],
+  ['.aifc', { type: 'audio', kind: 'audio', mime: 'audio/aiff' }],
+  ['.au', { type: 'audio', kind: 'audio', mime: 'audio/basic' }],
+  ['.snd', { type: 'audio', kind: 'audio', mime: 'audio/basic' }],
+  ['.amr', { type: 'audio', kind: 'audio', mime: 'audio/amr' }],
+  ['.3gp', { type: 'audio', kind: 'audio', mime: 'audio/3gpp' }],
+  ['.caf', { type: 'audio', kind: 'audio', mime: 'audio/x-caf' }],
+  ['.mka', { type: 'audio', kind: 'audio', mime: 'audio/x-matroska' }],
+  ['.mp2', { type: 'audio', kind: 'audio', mime: 'audio/mpeg' }],
+  ['.mpa', { type: 'audio', kind: 'audio', mime: 'audio/mpeg' }],
+  ['.ac3', { type: 'audio', kind: 'audio', mime: 'audio/ac3' }],
+  ['.dts', { type: 'audio', kind: 'audio', mime: 'audio/vnd.dts' }],
+  ['.eac3', { type: 'audio', kind: 'audio', mime: 'audio/eac3' }],
+  ['.gsm', { type: 'audio', kind: 'audio', mime: 'audio/gsm' }],
+  ['.ra', { type: 'audio', kind: 'audio', mime: 'audio/x-realaudio' }],
+  ['.ram', { type: 'audio', kind: 'audio', mime: 'audio/x-pn-realaudio' }],
+  ['.voc', { type: 'audio', kind: 'audio', mime: 'audio/x-voc' }],
+  ['.ape', { type: 'audio', kind: 'audio', mime: 'audio/x-ape' }],
+  ['.wv', { type: 'audio', kind: 'audio', mime: 'audio/wavpack' }],
+  ['.tta', { type: 'audio', kind: 'audio', mime: 'audio/x-tta' }],
+  ['.dsf', { type: 'audio', kind: 'audio', mime: 'audio/x-dsf' }],
+  ['.dff', { type: 'audio', kind: 'audio', mime: 'audio/x-dff' }],
+  ['.mid', { type: 'audio', kind: 'audio', mime: 'audio/midi' }],
+  ['.midi', { type: 'audio', kind: 'audio', mime: 'audio/midi' }],
+  ['.kar', { type: 'audio', kind: 'audio', mime: 'audio/midi' }]
 ]);
 const MAX_MEDIA_IMAGE_BYTES = 25 * 1024 * 1024;
 const MAX_MEDIA_VIDEO_BYTES = 200 * 1024 * 1024;
+const MAX_MEDIA_AUDIO_BYTES = 200 * 1024 * 1024;
 
 function mediaForPath(filePath) {
-  return MEDIA_BY_EXTENSION.get(path.extname(filePath).toLowerCase()) || null;
+  const extensionMedia = MEDIA_BY_EXTENSION.get(path.extname(filePath).toLowerCase());
+  if (extensionMedia) return extensionMedia;
+  try {
+    const detected = detectFileType(filePath, { fileName: filePath });
+    if (!['image', 'video', 'audio'].includes(detected.kind)) return null;
+    return { type: detected.kind, kind: detected.kind, mime: detected.mime };
+  } catch {
+    return null;
+  }
+}
+
+function detectedMediaForPath(filePath) {
+  try {
+    const detected = detectFileType(filePath, { fileName: filePath });
+    if (!['image', 'video', 'audio'].includes(detected.kind)) return null;
+    return detected;
+  } catch {
+    return null;
+  }
 }
 
 function mediaByteLimit(media) {
-  return media.kind === 'video' ? MAX_MEDIA_VIDEO_BYTES : MAX_MEDIA_IMAGE_BYTES;
+  if (media.kind === 'video') return MAX_MEDIA_VIDEO_BYTES;
+  if (media.kind === 'audio') return MAX_MEDIA_AUDIO_BYTES;
+  return MAX_MEDIA_IMAGE_BYTES;
 }
 
 function collectFiles(inputPath, files = [], options = {}) {
@@ -81,7 +181,7 @@ function collectFiles(inputPath, files = [], options = {}) {
     throw error;
   }
   if (stats.isFile()) {
-    if (scanOptions.includeUnsupported || DOCUMENT_SUPPORTED.has(path.extname(absolute).toLowerCase())) files.push(absolute);
+    if (scanOptions.includeUnsupported || DOCUMENT_SUPPORTED.has(path.extname(absolute).toLowerCase()) || detectedMediaForPath(absolute)) files.push(absolute);
     return files;
   }
   if (!stats.isDirectory()) return files;
@@ -166,9 +266,13 @@ function readFileDocument(filePath, { allowLargeMetadata = false, deferContent =
     size: stats.size,
     modifiedAt: stats.mtime.toISOString()
   };
-  const media = MEDIA_BY_EXTENSION.get(extension);
+  const knownMedia = MEDIA_BY_EXTENSION.get(extension);
+  const detected = (knownMedia || !SUPPORTED.has(extension)) ? detectedMediaForPath(filePath) : null;
+  const media = detected
+    ? { type: knownMedia?.type === 'gif' ? 'gif' : detected.kind, kind: detected.kind, mime: detected.mime }
+    : knownMedia;
   if (media) {
-    metadata = { ...metadata, mediaKind: media.kind, mediaMime: media.mime, searchTitleOnly: true, contentLoaded: true };
+    metadata = { ...metadata, mediaKind: media.kind, mediaMime: media.mime, searchTitleOnly: true, contentLoaded: true, mediaDetectedBy: detected?.detectedBy || 'extension' };
     if (stats.size > mediaByteLimit(media)) metadata = { ...metadata, contentSkipped: 'too-large' };
     return {
       externalId: filePath,
