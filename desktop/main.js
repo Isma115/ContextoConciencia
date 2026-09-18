@@ -7,6 +7,7 @@ const { detectFileType } = require('../server/services/media-detection');
 
 let apiServer;
 const HTML_VIEW_MENU_NAME = 'Archivo';
+const EDIT_MENU_NAME = 'Edición';
 const DIAGRAM_MENU_NAME = 'Diagramas';
 const PROJECT_MENU_NAME = 'Proyecto';
 const SPECS_MENU_NAME = 'Specs';
@@ -15,6 +16,25 @@ const EXPORT_MENU_NAME = 'Espacio';
 const PROMPTS_MENU_NAME = 'Prompts';
 const SEARCH_PREFERENCES_FILENAME = 'search-preferences.json';
 const SDD_LAST_PROJECT_FILENAME = 'sdd-last-project.json';
+const LAST_VIEW_FILENAME = 'last-view.json';
+const DEFAULT_VIEW = 'global-search';
+const AVAILABLE_VIEWS = new Set([
+  'global-search',
+  'search',
+  'recent-documents',
+  'favorites',
+  'html-viewer',
+  'diagrams',
+  'code-map',
+  'sources',
+  'file-explorer',
+  'prompt-config',
+  'sdd-home',
+  'sdd-specs',
+  'sdd-database',
+  'sdd-ui',
+  'sdd-resources'
+]);
 const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DIAGRAM_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
@@ -77,6 +97,8 @@ const SDD_MEDIA_MIME_BY_EXTENSION = Object.freeze({
   kar: 'audio/midi'
 });
 const closeConfirmationStates = new WeakMap();
+const applicationMenuViews = new WeakMap();
+const applicationMenuPromptItems = new WeakMap();
 const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
 
 // Evita un destello blanco y cierres del proceso GPU en equipos Windows sin
@@ -175,7 +197,7 @@ function ensureSddStructure(directoryPath) {
   const example = `# Specs
 
 ## Requisito de ejemplo
-- Estado: Borrador
+- Estado: Activa
 
 Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
 
@@ -268,7 +290,69 @@ function writeSddLastProject(payload) {
   return true;
 }
 
+function lastViewPath() {
+  return path.join(app.getPath('userData'), LAST_VIEW_FILENAME);
+}
+
+function normaliseLastView(value) {
+  return typeof value === 'string' && AVAILABLE_VIEWS.has(value.trim())
+    ? value.trim()
+    : DEFAULT_VIEW;
+}
+
+function readLastView() {
+  try {
+    const value = JSON.parse(fs.readFileSync(lastViewPath(), 'utf8'));
+    return normaliseLastView(value?.view);
+  } catch (error) {
+    if (error.code !== 'ENOENT') console.warn('No se pudo cargar la última sección:', error.message);
+    return DEFAULT_VIEW;
+  }
+}
+
+function writeLastView(value) {
+  const view = normaliseLastView(value);
+  fs.writeFileSync(lastViewPath(), `${JSON.stringify({ version: 1, view })}\n`, { encoding: 'utf8', mode: 0o600 });
+  return view;
+}
+
+function windowFromEvent(event) {
+  try {
+    const window = BrowserWindow.fromWebContents(event?.sender);
+    return window && !window.isDestroyed() ? window : null;
+  } catch {
+    return null;
+  }
+}
+
+async function showOpenDialogFor(event, options) {
+  const parent = windowFromEvent(event);
+  return parent ? dialog.showOpenDialog(parent, options) : dialog.showOpenDialog(options);
+}
+
+async function showSaveDialogFor(event, options) {
+  const parent = windowFromEvent(event);
+  return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
+}
+
+// Menú nativo de edición: los roles de Electron habilitan Ctrl/Cmd+C y Ctrl/Cmd+X
+// en los campos de texto del renderer, además de pegar y seleccionar todo.
+function applicationEditMenu() {
+  return {
+    label: EDIT_MENU_NAME,
+    submenu: [
+      { role: 'cut' },
+      { role: 'copy' },
+      { role: 'paste' },
+      { type: 'separator' },
+      { role: 'selectAll' }
+    ]
+  };
+}
+
 function setApplicationMenuForView(window, view) {
+  applicationMenuViews.set(window, view);
+  const customPromptItems = applicationMenuPromptItems.get(window) || [];
   const template = [
     {
       // macOS reserves the first top-level item for the application menu.
@@ -287,6 +371,8 @@ function setApplicationMenuForView(window, view) {
       ]
     }
   ];
+
+  template.push(applicationEditMenu());
 
   template.push({
     label: PROJECT_MENU_NAME,
@@ -452,6 +538,11 @@ function setApplicationMenuForView(window, view) {
     label: PROMPTS_MENU_NAME,
     submenu: [
       {
+        label: 'Configurar prompts',
+        click: () => window.webContents.send('html-viewer-menu-action', 'configure-prompts')
+      },
+      { type: 'separator' },
+      {
         label: 'Nuevo diagrama prompt',
         click: () => window.webContents.send('html-viewer-menu-action', 'new-diagram-prompt')
       },
@@ -464,9 +555,19 @@ function setApplicationMenuForView(window, view) {
         click: () => window.webContents.send('html-viewer-menu-action', 'copy-completed-specs-prompt')
       },
       {
-        label: 'Trabajar siguiendo specs.md',
+        label: 'Trabajar siguiendo specs',
         click: () => window.webContents.send('html-viewer-menu-action', 'copy-follow-specs-prompt')
-      }
+      },
+      ...(customPromptItems.length ? [
+        { type: 'separator' },
+        {
+          label: 'Mis prompts',
+          submenu: customPromptItems.map((prompt) => ({
+            label: prompt.name,
+            click: () => window.webContents.send('html-viewer-menu-action', 'copy-custom-prompt', prompt.id)
+          }))
+        }
+      ] : [])
     ]
   });
 
@@ -527,6 +628,22 @@ app.whenReady().then(async () => {
     return true;
   });
 
+  ipcMain.handle('update-prompt-menu', (event, items) => {
+    const window = BrowserWindow.fromWebContents(event.sender);
+    if (!window) return false;
+    const values = Array.isArray(items) ? items : [];
+    const safeItems = values
+      .filter((item) => item && typeof item.id === 'string' && typeof item.name === 'string')
+      .slice(0, 100)
+      .map((item) => ({
+        id: item.id.slice(0, 120),
+        name: item.name.trim().slice(0, 120) || 'Prompt sin nombre'
+      }));
+    applicationMenuPromptItems.set(window, safeItems);
+    setApplicationMenuForView(window, applicationMenuViews.get(window) || null);
+    return true;
+  });
+
   ipcMain.on('close-confirmation-result', (event, confirmed) => {
     const window = BrowserWindow.fromWebContents(event.sender);
     const closeState = window ? closeConfirmationStates.get(window) : null;
@@ -542,9 +659,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('save-search-preferences', (_event, preferences) => writeSearchPreferences(preferences));
   ipcMain.handle('load-sdd-last-project', () => readSddLastProject());
   ipcMain.handle('save-sdd-last-project', (_event, payload) => writeSddLastProject(payload));
+  ipcMain.handle('load-last-view', () => readLastView());
+  ipcMain.handle('save-last-view', (_event, view) => writeLastView(view));
 
-  ipcMain.handle('select-workspace-file', async () => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('select-workspace-file', async (event) => {
+    const result = await showOpenDialogFor(event, {
       title: 'Importar espacio de trabajo',
       properties: ['openFile'],
       filters: [{ name: 'Espacio de trabajo NexusData', extensions: ['json'] }]
@@ -557,10 +676,10 @@ app.whenReady().then(async () => {
     return { path: filePath, content: fs.readFileSync(filePath, 'utf8') };
   });
 
-  ipcMain.handle('save-workspace-file', async (_event, payload = {}) => {
+  ipcMain.handle('save-workspace-file', async (event, payload = {}) => {
     if (!payload || typeof payload.content !== 'string') throw new Error('El contenido del espacio de trabajo no es válido');
     if (Buffer.byteLength(payload.content, 'utf8') > WORKSPACE_MAX_FILE_BYTES) throw new Error('El espacio de trabajo supera el límite de 50 MB');
-    const result = await dialog.showSaveDialog({
+    const result = await showSaveDialogFor(event, {
       title: 'Exportar espacio de trabajo',
       defaultPath: path.join(app.getPath('documents'), 'nexusdata-workspace.json'),
       filters: [{ name: 'Espacio de trabajo NexusData', extensions: ['json'] }]
@@ -573,19 +692,30 @@ app.whenReady().then(async () => {
     return filePath;
   });
 
-  ipcMain.handle('select-local-paths', async (_event, options = {}) => {
+  ipcMain.handle('select-local-paths', async (event, options = {}) => {
     const directory = Boolean(options.directory);
     const audioExtensions = ['mp3', 'mpga', 'wav', 'wave', 'oga', 'ogg', 'opus', 'm4a', 'm4b', 'aac', 'flac', 'weba', 'wma', 'aiff', 'aif', 'aifc', 'au', 'snd', 'amr', '3gp', 'caf', 'mka', 'mp2', 'mpa', 'ac3', 'dts', 'eac3', 'gsm', 'ra', 'ram', 'voc', 'ape', 'wv', 'tta', 'dsf', 'dff', 'mid', 'midi', 'kar'];
-    const result = await dialog.showOpenDialog({
-      title: directory ? 'Seleccionar carpeta con documentación' : 'Seleccionar documentos',
-      properties: directory ? ['openDirectory'] : ['openFile', 'multiSelections'],
-      filters: directory ? undefined : [{ name: 'Documentos y recursos compatibles', extensions: ['json', 'csv', 'txt', 'md', 'markdown', 'html', 'htm', 'nxd', 'png', 'jpg', 'jpeg', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg', 'gif', 'mp4', 'm4v', 'webm', 'ogv', 'mov', ...audioExtensions] }, { name: 'Todos los archivos', extensions: ['*'] }]
-    });
-    return result.canceled ? [] : result.filePaths;
+    // No se usa `extensions: ['*']` para "Todos los archivos": en macOS
+    // (Electron 36.2+) rompe el NSOpenPanel con el error view-bridge
+    // `Connection interrupted` y el diálogo no llega a abrirse.
+    // Sin `filters`, macOS muestra todos los archivos por defecto.
+    const dialogOptions = directory
+      ? {
+        title: 'Seleccionar carpeta con documentación',
+        properties: ['openDirectory', 'createDirectory']
+      }
+      : {
+        title: 'Seleccionar documentos',
+        properties: ['openFile', 'multiSelections'],
+        filters: [{ name: 'Documentos y recursos compatibles', extensions: ['json', 'csv', 'txt', 'md', 'markdown', 'html', 'htm', 'nxd', 'png', 'jpg', 'jpeg', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg', 'gif', 'mp4', 'm4v', 'webm', 'ogv', 'mov', ...audioExtensions] }]
+      };
+    const result = await showOpenDialogFor(event, dialogOptions);
+    if (result.canceled || !Array.isArray(result.filePaths)) return [];
+    return result.filePaths;
   });
 
   ipcMain.handle('get-file-system-roots', (_event, additionalRoots) => fileExplorerService.getRoots(additionalRoots));
-  ipcMain.handle('select-sdd-media', async (_event, kind = 'image') => {
+  ipcMain.handle('select-sdd-media', async (event, kind = 'image') => {
     const filtersByKind = {
       image: [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg'] }],
       video: [{ name: 'Vídeos', extensions: ['mp4', 'm4v', 'webm', 'ogv', 'mov'] }],
@@ -594,10 +724,10 @@ app.whenReady().then(async () => {
     const labelsByKind = { image: 'imagen', video: 'vídeo', audio: 'audio' };
     const selectedKind = filtersByKind[kind] ? kind : 'image';
     const filters = filtersByKind[selectedKind];
-    const result = await dialog.showOpenDialog({
+    const result = await showOpenDialogFor(event, {
       title: `Seleccionar ${labelsByKind[selectedKind]}`,
       properties: ['openFile'],
-      filters
+      ...(filters ? { filters } : {})
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const filePath = path.normalize(result.filePaths[0]);
@@ -614,12 +744,13 @@ app.whenReady().then(async () => {
     return { name: path.basename(filePath), type, path: filePath, size: stats.size, dataUrl: `data:${type};base64,${buffer.toString('base64')}` };
   });
 
-  ipcMain.handle('select-sdd-specs-path', async (_event, lastPath = '') => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('select-sdd-specs-path', async (event, lastPath = '') => {
+    const trimmedLastPath = String(lastPath || '').trim();
+    const result = await showOpenDialogFor(event, {
       title: 'Seleccionar carpeta contenedora',
       buttonLabel: 'Crear SDD_specs',
-      defaultPath: path.normalize(String(lastPath || '')),
-      properties: ['openDirectory']
+      ...(trimmedLastPath ? { defaultPath: path.normalize(trimmedLastPath) } : {}),
+      properties: ['openDirectory', 'createDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return null;
     const directoryPath = path.normalize(result.filePaths[0]);
@@ -628,12 +759,15 @@ app.whenReady().then(async () => {
     return { path: sddProjectDirectoryFor(directoryPath), sddPath: structure.sddDirectory, created: structure.created };
   });
 
-  const loadSddProject = async (folderPath = '', options = {}) => {
+  const loadSddProject = async (eventOrFolderPath = '', folderOrOptions = '', maybeOptions = {}) => {
+    const event = eventOrFolderPath && typeof eventOrFolderPath === 'object' && eventOrFolderPath.sender ? eventOrFolderPath : null;
+    const folderPath = event ? folderOrOptions : eventOrFolderPath;
+    const options = event ? maybeOptions : folderOrOptions;
     const requestedPath = String(folderPath || '').trim();
     let directoryPath = requestedPath ? path.normalize(requestedPath) : '';
     if (!directoryPath || !fs.existsSync(directoryPath) || !fs.statSync(directoryPath).isDirectory()) {
       if (options?.prompt === false) return null;
-      const result = await dialog.showOpenDialog({
+      const result = await showOpenDialogFor(event, {
         title: 'Seleccionar proyecto S.D.D',
         buttonLabel: 'Cargar',
         defaultPath: directoryPath || undefined,
@@ -665,9 +799,9 @@ app.whenReady().then(async () => {
     };
   };
 
-  ipcMain.handle('load-sdd-project', (_event, folderPath = '', options = {}) => loadSddProject(folderPath, options));
+  ipcMain.handle('load-sdd-project', (event, folderPath = '', options = {}) => loadSddProject(event, folderPath, options));
   // Compatibilidad con versiones del renderer que todavía usan el nombre anterior.
-  ipcMain.handle('load-sdd-specs-markdown', (_event, folderPath = '', options = {}) => loadSddProject(folderPath, options));
+  ipcMain.handle('load-sdd-specs-markdown', (event, folderPath = '', options = {}) => loadSddProject(event, folderPath, options));
 
   ipcMain.handle('read-sdd-specs-resources', (_event, folderPath = '') => {
     const directoryPath = path.normalize(String(folderPath || ''));
@@ -686,8 +820,8 @@ app.whenReady().then(async () => {
   ipcMain.handle('delete-file-system-entries', (_event, payload) => fileExplorerService.deleteEntries(payload));
   ipcMain.handle('transfer-file-system-entries', (_event, payload) => fileExplorerService.transferEntries(payload));
 
-  ipcMain.handle('select-diagram-file', async () => {
-    const result = await dialog.showOpenDialog({
+  ipcMain.handle('select-diagram-file', async (event) => {
+    const result = await showOpenDialogFor(event, {
       title: 'Importar diagrama por texto',
       properties: ['openFile'],
       filters: [{ name: 'Diagramas de texto', extensions: ['nxd', 'txt', 'md', 'markdown', 'json'] }]
@@ -700,7 +834,7 @@ app.whenReady().then(async () => {
     return { path: filePath, content: fs.readFileSync(filePath, 'utf8') };
   });
 
-  ipcMain.handle('save-diagram-file', async (_event, payload = {}) => {
+  ipcMain.handle('save-diagram-file', async (event, payload = {}) => {
     if (!payload || typeof payload.content !== 'string') throw new Error('El contenido del diagrama no es válido');
     const format = payload.format === 'json' ? 'json' : payload.format === 'png' ? 'png' : 'nxd';
     let imageBuffer = null;
@@ -717,7 +851,7 @@ app.whenReady().then(async () => {
       throw new Error('El diagrama supera el límite de 2 MB');
     }
     const extension = `.${format}`;
-    const result = await dialog.showSaveDialog({
+    const result = await showSaveDialogFor(event, {
       title: 'Exportar diagrama',
       defaultPath: path.join(app.getPath('documents'), `diagrama${extension}`),
       filters: [{
@@ -737,8 +871,8 @@ app.whenReady().then(async () => {
     return filePath;
   });
 
-  ipcMain.handle('create-project-directory', async () => {
-    const result = await dialog.showSaveDialog({
+  ipcMain.handle('create-project-directory', async (event) => {
+    const result = await showSaveDialogFor(event, {
       title: 'Crear proyecto global',
       buttonLabel: 'Crear proyecto',
       defaultPath: path.join(app.getPath('documents'), 'ContextoConciencia')
@@ -752,8 +886,8 @@ app.whenReady().then(async () => {
     return projectPath;
   });
 
-  ipcMain.handle('create-sdd-project', async () => {
-    const result = await dialog.showSaveDialog({
+  ipcMain.handle('create-sdd-project', async (event) => {
+    const result = await showSaveDialogFor(event, {
       title: 'Nuevo Proyecto',
       buttonLabel: 'Crear proyecto',
       defaultPath: path.join(app.getPath('documents'), 'ContextoConciencia')
