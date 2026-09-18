@@ -30,7 +30,6 @@ contextBridge.exposeInMainWorld('nexusData', {
   selectWorkspaceFile: () => ipcRenderer.invoke('select-workspace-file'),
   saveWorkspaceFile: (payload) => ipcRenderer.invoke('save-workspace-file', payload),
   selectLocalPaths: (options) => ipcRenderer.invoke('select-local-paths', options),
-  selectSddMedia: (kind) => ipcRenderer.invoke('select-sdd-media', kind),
   selectSddSpecsPath: (lastPath) => ipcRenderer.invoke('select-sdd-specs-path', lastPath),
   loadSddProject: (folderPath, options) => ipcRenderer.invoke('load-sdd-project', folderPath, options),
   loadSddSpecsMarkdown: (folderPath, options) => ipcRenderer.invoke('load-sdd-specs-markdown', folderPath, options),

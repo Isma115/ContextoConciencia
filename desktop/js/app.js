@@ -12,7 +12,7 @@ import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/di
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
 import { renderFileExplorer } from './views/file-explorer.js';
-import { bindSddSectionToggle, collapseSddSection, configureSdd, expandSddSection, renderSddHome, renderSddSpecs, renderSddDatabase, renderSddUi, renderSddResources, bindSddMenu, bindSddReload, bindSddPromptOption, bindProjectMenu, restoreLastSddProject } from './views/sdd.js';
+import { bindSddSectionToggle, collapseSddSection, configureSdd, expandSddSection, renderSddHome, renderSddSpecs, renderSddDatabase, renderSddResources, bindSddMenu, bindSddReload, bindProjectMenu, restoreLastSddProject } from './views/sdd.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 import { loadDiagramFontSize, loadDiagramLineContrast } from './core/diagram-settings.js';
@@ -39,7 +39,6 @@ const AVAILABLE_VIEWS = new Set([
   'sdd-home',
   'sdd-specs',
   'sdd-database',
-  'sdd-ui',
   'sdd-resources'
 ]);
 
@@ -155,7 +154,6 @@ function renderView() {
   if (state.view === 'prompt-config') renderPromptConfig();
   if (state.view === 'sdd-specs') renderSddSpecs();
   if (state.view === 'sdd-database') renderSddDatabase();
-  if (state.view === 'sdd-ui') renderSddUi();
   if (state.view === 'sdd-resources') renderSddResources();
 }
 
@@ -263,7 +261,6 @@ bindSidebarSearch();
 bindCloseConfirmation();
 bindSddMenu();
 bindSddReload();
-bindSddPromptOption();
 bindSddSectionToggle();
 bindProjectMenu();
 loadPalettePreference();

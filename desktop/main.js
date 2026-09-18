@@ -32,7 +32,6 @@ const AVAILABLE_VIEWS = new Set([
   'sdd-home',
   'sdd-specs',
   'sdd-database',
-  'sdd-ui',
   'sdd-resources'
 ]);
 const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
@@ -108,6 +107,8 @@ const SDD_SPECS_RESOURCES_DIR = 'specs_resources';
 // La estructura S.D.D. se guarda siempre bajo <proyecto>/SDD_specs.
 // El diseño anterior, con specs.md en la raíz, ya no se carga ni se crea.
 const SDD_SPECS_DIR = 'SDD_specs';
+const SDD_SPECS_VERSIONS_DIR = 'specs';
+const SDD_DATABASE_FILENAME = 'bbdd.md';
 const SDD_FULL_FILENAME = 'specs_full.md';
 const SDD_SPECS_RESOURCES_MAX_TOTAL_BYTES = 200 * 1024 * 1024;
 const SDD_SPECS_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
@@ -190,39 +191,63 @@ function ensureSddStructure(directoryPath) {
   fs.mkdirSync(sddDirectory, { recursive: true });
   const resourcesDirectory = path.join(sddDirectory, SDD_SPECS_RESOURCES_DIR);
   if (!fs.existsSync(resourcesDirectory)) fs.mkdirSync(resourcesDirectory, { recursive: true });
-  const specsPath = path.join(sddDirectory, 'specs.md');
+  const legacySpecsPath = path.join(sddDirectory, 'specs.md');
+  const specsDirectory = path.join(sddDirectory, SDD_SPECS_VERSIONS_DIR);
+  const initialVersionPath = path.join(specsDirectory, '0.0.0.md');
   const fullPath = path.join(sddDirectory, SDD_FULL_FILENAME);
-  if (fs.existsSync(specsPath) && !fs.statSync(specsPath).isFile()) throw new Error('specs.md no es un archivo en la carpeta configurada');
+  const databasePath = path.join(sddDirectory, SDD_DATABASE_FILENAME);
+  if (fs.existsSync(legacySpecsPath) && !fs.statSync(legacySpecsPath).isFile()) throw new Error('specs.md no es un archivo en la carpeta configurada');
+  if (fs.existsSync(specsDirectory) && !fs.statSync(specsDirectory).isDirectory()) throw new Error('specs no es una carpeta en la carpeta configurada');
   if (fs.existsSync(fullPath) && !fs.statSync(fullPath).isFile()) throw new Error(`${SDD_FULL_FILENAME} no es un archivo en la carpeta configurada`);
-  const example = `# Specs
+  if (fs.existsSync(databasePath) && !fs.statSync(databasePath).isFile()) throw new Error(`${SDD_DATABASE_FILENAME} no es un archivo en la carpeta configurada`);
+
+  // Un proyecto existente con specs.md como archivo se conserva intacto para
+  // que el renderer pueda ofrecer la migración explícita; nunca se convierte
+  // ni se sobrescribe de forma implícita al abrirlo.
+  if (fs.existsSync(legacySpecsPath) && !fs.existsSync(specsDirectory)) {
+    return { sddDirectory, legacySpecsPath, specsDirectory, fullPath, databasePath, resourcesDirectory, created: false, legacy: true };
+  }
+  if (fs.existsSync(legacySpecsPath)) {
+    throw new Error('El proyecto mezcla specs.md antiguo con la carpeta specs; migra o limpia el formato anterior antes de continuar');
+  }
+
+  const exampleSpecs = `# Specs
 
 ## Requisito de ejemplo
 - Estado: Activa
 
 Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
-
-# BBDD
+`;
+  const exampleDatabase = `# BBDD
 
 No hay tablas definidas.
+`;
+  const exampleFull = `# Specs completas
 
-# UI
+## Versión 0.0.0
 
-No hay referencias de interfaz definidas.
+### Requisito de ejemplo
+- Estado: Activa
 
-# Recursos
-
-La carpeta specs_resources no contiene archivos.
+Describe el requisito: contexto, criterios de aceptación, condiciones y excepciones.
 `;
   let created = false;
-  if (!fs.existsSync(specsPath)) {
-    fs.writeFileSync(specsPath, example, { encoding: 'utf8', mode: 0o600 });
+  if (!fs.existsSync(specsDirectory)) fs.mkdirSync(specsDirectory, { recursive: true, mode: 0o700 });
+  const hasVersionFiles = fs.readdirSync(specsDirectory, { withFileTypes: true })
+    .some((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'));
+  if (!hasVersionFiles) {
+    fs.writeFileSync(initialVersionPath, exampleSpecs, { encoding: 'utf8', mode: 0o600 });
     created = true;
   }
   if (!fs.existsSync(fullPath)) {
-    fs.copyFileSync(specsPath, fullPath);
+    fs.writeFileSync(fullPath, exampleFull, { encoding: 'utf8', mode: 0o600 });
     created = true;
   }
-  return { sddDirectory, specsPath, fullPath, resourcesDirectory, created };
+  if (!fs.existsSync(databasePath)) {
+    fs.writeFileSync(databasePath, exampleDatabase, { encoding: 'utf8', mode: 0o600 });
+    created = true;
+  }
+  return { sddDirectory, specsDirectory, initialVersionPath, fullPath, databasePath, resourcesDirectory, created, legacy: false };
 }
 
 function searchPreferencesPath() {
@@ -551,7 +576,7 @@ function setApplicationMenuForView(window, view) {
         click: () => window.webContents.send('html-viewer-menu-action', 'copy-git-diff-prompt')
       },
       {
-        label: 'Generar specs.md completado',
+        label: 'Generar especificaciones completadas',
         click: () => window.webContents.send('html-viewer-menu-action', 'copy-completed-specs-prompt')
       },
       {
@@ -715,35 +740,6 @@ app.whenReady().then(async () => {
   });
 
   ipcMain.handle('get-file-system-roots', (_event, additionalRoots) => fileExplorerService.getRoots(additionalRoots));
-  ipcMain.handle('select-sdd-media', async (event, kind = 'image') => {
-    const filtersByKind = {
-      image: [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'avif', 'bmp', 'tif', 'tiff', 'svg'] }],
-      video: [{ name: 'Vídeos', extensions: ['mp4', 'm4v', 'webm', 'ogv', 'mov'] }],
-      audio: undefined
-    };
-    const labelsByKind = { image: 'imagen', video: 'vídeo', audio: 'audio' };
-    const selectedKind = filtersByKind[kind] ? kind : 'image';
-    const filters = filtersByKind[selectedKind];
-    const result = await showOpenDialogFor(event, {
-      title: `Seleccionar ${labelsByKind[selectedKind]}`,
-      properties: ['openFile'],
-      ...(filters ? { filters } : {})
-    });
-    if (result.canceled || !result.filePaths[0]) return null;
-    const filePath = path.normalize(result.filePaths[0]);
-    const stats = fs.statSync(filePath);
-    if (!stats.isFile()) throw new Error('La ubicación elegida no es un archivo');
-    const detected = detectFileType(filePath, { fileName: path.basename(filePath) });
-    const type = detected.mime;
-    if (!type || detected.kind !== selectedKind) throw new Error('El contenido no coincide con el tipo seleccionado o el formato no es compatible');
-    const maxBytes = selectedKind === 'image' ? SDD_SPECS_IMAGE_MAX_BYTES : selectedKind === 'video' ? SDD_SPECS_VIDEO_MAX_BYTES : SDD_SPECS_AUDIO_MAX_BYTES;
-    if (stats.size > maxBytes) throw new Error(`El ${labelsByKind[selectedKind]} supera el límite de ${selectedKind === 'image' ? '20 MB' : '100 MB'}`);
-    // El data URL solo se usa durante la selección para enviar el fichero al
-    // servidor; la aplicación lo guarda y sirve después como archivo real.
-    const buffer = fs.readFileSync(filePath);
-    return { name: path.basename(filePath), type, path: filePath, size: stats.size, dataUrl: `data:${type};base64,${buffer.toString('base64')}` };
-  });
-
   ipcMain.handle('select-sdd-specs-path', async (event, lastPath = '') => {
     const trimmedLastPath = String(lastPath || '').trim();
     const result = await showOpenDialogFor(event, {
@@ -779,23 +775,38 @@ app.whenReady().then(async () => {
     if (!fs.statSync(directoryPath).isDirectory()) throw new Error('La ubicación elegida no es una carpeta');
     const projectPath = sddProjectDirectoryFor(directoryPath);
     const sddDirectory = sddDirectoryFor(directoryPath);
-    const specsPath = path.join(sddDirectory, 'specs.md');
-    if (!fs.existsSync(specsPath) || !fs.statSync(specsPath).isFile()) throw new Error(`El proyecto no contiene un archivo ${SDD_SPECS_DIR}/specs.md`);
+    const legacySpecsPath = path.join(sddDirectory, 'specs.md');
+    const specsDirectory = path.join(sddDirectory, SDD_SPECS_VERSIONS_DIR);
+    const legacy = fs.existsSync(legacySpecsPath) && fs.statSync(legacySpecsPath).isFile() && !fs.existsSync(specsDirectory);
+    if (!legacy && (!fs.existsSync(specsDirectory) || !fs.statSync(specsDirectory).isDirectory())) {
+      throw new Error(`El proyecto no contiene la carpeta ${SDD_SPECS_DIR}/${SDD_SPECS_VERSIONS_DIR}`);
+    }
+    const versionFiles = legacy
+      ? []
+      : fs.readdirSync(specsDirectory, { withFileTypes: true })
+        .filter((entry) => entry.isFile() && entry.name.toLowerCase().endsWith('.md'))
+        .map((entry) => entry.name)
+        .sort((left, right) => left.localeCompare(right, 'es', { numeric: true, sensitivity: 'base' }));
+    if (!legacy && !versionFiles.length) throw new Error(`El proyecto no contiene versiones en ${SDD_SPECS_DIR}/${SDD_SPECS_VERSIONS_DIR}`);
+    const specsPath = legacy ? legacySpecsPath : path.join(specsDirectory, versionFiles.at(-1));
     const resourcesDir = path.join(sddDirectory, SDD_SPECS_RESOURCES_DIR);
-    if (!fs.existsSync(resourcesDir) || !fs.statSync(resourcesDir).isDirectory()) throw new Error(`El proyecto no contiene la carpeta ${SDD_SPECS_DIR}/${SDD_SPECS_RESOURCES_DIR}`);
+    if (!legacy && (!fs.existsSync(resourcesDir) || !fs.statSync(resourcesDir).isDirectory())) throw new Error(`El proyecto no contiene la carpeta ${SDD_SPECS_DIR}/${SDD_SPECS_RESOURCES_DIR}`);
     const fullPath = path.join(sddDirectory, SDD_FULL_FILENAME);
-    if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) throw new Error(`El proyecto no contiene un archivo ${SDD_SPECS_DIR}/${SDD_FULL_FILENAME}`);
-    const content = fs.readFileSync(fullPath, 'utf8');
-    if (!content.trim()) throw new Error(`${SDD_FULL_FILENAME} está vacío`);
+    const databasePath = path.join(sddDirectory, SDD_DATABASE_FILENAME);
+    if (!legacy && (!fs.existsSync(databasePath) || !fs.statSync(databasePath).isFile())) throw new Error(`El proyecto no contiene un archivo ${SDD_SPECS_DIR}/${SDD_DATABASE_FILENAME}`);
+    const content = fs.existsSync(fullPath) && fs.statSync(fullPath).isFile() ? fs.readFileSync(fullPath, 'utf8') : '';
     return {
       name: path.basename(projectPath) || projectPath,
       path: projectPath,
       sddPath: sddDirectory,
       specsPath,
+      specsDirectory,
       fullPath,
+      databasePath,
       resourcesPath: resourcesDir,
       content,
-      resources: readSpecsFolderResources(directoryPath)
+      resources: readSpecsFolderResources(directoryPath),
+      legacy
     };
   };
 
@@ -905,8 +916,10 @@ app.whenReady().then(async () => {
       name: path.basename(directoryPath) || directoryPath,
       path: directoryPath,
       sddPath: structure.sddDirectory,
-      specsPath: structure.specsPath,
+      specsPath: structure.initialVersionPath,
+      specsDirectory: structure.specsDirectory,
       fullPath: structure.fullPath,
+      databasePath: structure.databasePath,
       resourcesPath: structure.resourcesDirectory,
       content,
       resources: readSpecsFolderResources(directoryPath),

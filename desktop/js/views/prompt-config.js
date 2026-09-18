@@ -19,8 +19,7 @@ import {
 import {
   getDefaultCompletedSpecsPrompt,
   getDefaultFollowSpecsPrompt,
-  readStoredSddPromptIncludeFull,
-  readStoredSddPromptSkipTests
+  readStoredSddPromptIncludeFull
 } from './specs-prompt.js';
 
 let selectedPromptId = 'new-diagram';
@@ -31,7 +30,7 @@ function defaultPromptContent(id) {
   if (id === 'new-diagram') return getDefaultDiagramPromptTemplate();
   if (id === 'git-diff') return getDefaultGitDiffPrompt();
   if (id === 'completed-specs') return getDefaultCompletedSpecsPrompt({ includeFull: readStoredSddPromptIncludeFull() });
-  if (id === 'follow-specs') return getDefaultFollowSpecsPrompt({ skipTests: readStoredSddPromptSkipTests() });
+  if (id === 'follow-specs') return getDefaultFollowSpecsPrompt();
   return '';
 }
 
@@ -88,7 +87,6 @@ function editorMarkup(prompt) {
       ${customForm ? `<label class="form-label" for="prompt-config-name">Nombre<input id="prompt-config-name" class="field" name="name" maxlength="120" value="${escapeHtml(prompt.name)}" required></label>` : ''}
       <label class="form-label prompt-config-content-label" for="prompt-config-content">Contenido<textarea id="prompt-config-content" class="textarea prompt-config-content" name="content" maxlength="200000" required>${escapeHtml(prompt.content)}</textarea></label>
       ${prompt.id === 'new-diagram' ? '<p class="prompt-config-help">Usa [FUNCIONALIDAD] para insertar la descripción del diagrama.</p>' : ''}
-      ${prompt.id === 'follow-specs' ? '<p class="prompt-config-help">Usa [SIN_TESTS] para conservar la opción de no ejecutar tests.</p>' : ''}
       <div class="prompt-config-actions"><button class="btn btn-secondary" type="button" data-prompt-action="copy" data-prompt-id="${escapeHtml(prompt.id)}">Copiar</button>${prompt.builtIn && prompt.customized ? `<button class="btn btn-danger" type="button" data-prompt-action="reset" data-prompt-id="${escapeHtml(prompt.id)}">Restablecer</button>` : ''}${customForm ? `<button class="btn btn-danger" type="button" data-prompt-action="delete" data-prompt-id="${escapeHtml(prompt.id)}">Eliminar</button>` : ''}<button class="btn btn-primary" type="submit">${prompt.builtIn ? 'Guardar cambios' : 'Guardar prompt'}</button></div>
     </form>
   </section>`;
@@ -142,10 +140,7 @@ function promptContentForCopy(id) {
   if (!definition) return '';
   if (id === 'new-diagram') return replacePromptVariables(getPromptOverride(id) || defaultPromptContent(id), { FUNCIONALIDAD: '[FUNCIONALIDAD]' });
   if (id === 'follow-specs') {
-    const skipTests = readStoredSddPromptSkipTests();
-    return replacePromptVariables(getPromptOverride(id) || defaultPromptContent(id), {
-      SIN_TESTS: skipTests ? '- No realices pruebas sobre los cambios aplicados ni ejecutes tests.' : ''
-    });
+    return replacePromptVariables(getPromptOverride(id) || defaultPromptContent(id), { SIN_TESTS: '' });
   }
   return getPromptOverride(id) || defaultPromptContent(id);
 }

@@ -2,7 +2,6 @@ import { showToast } from '../ui/notifications.js';
 import { getPromptOverride, replacePromptVariables } from '../core/prompt-store.js';
 
 export const SDD_PROMPT_INCLUDE_FULL_KEY = 'nexusdata.sdd-prompt-include-full';
-export const SDD_PROMPT_SKIP_TESTS_KEY = 'nexusdata.sdd-prompt-skip-tests';
 
 export function readStoredSddPromptIncludeFull() {
   try {
@@ -34,38 +33,6 @@ export function persistSddPromptIncludeFull(includeFull) {
     // La preferencia del prompt sigue funcionando aunque no se pueda persistir.
   }
   return includeFull === true;
-}
-
-export function readStoredSddPromptSkipTests() {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      return window.localStorage.getItem(SDD_PROMPT_SKIP_TESTS_KEY) === 'true';
-    }
-  } catch {
-    // El almacenamiento local puede no estar disponible.
-  }
-  return false;
-}
-
-export function readSddPromptSkipTests() {
-  try {
-    const checkbox = typeof document !== 'undefined' ? document.querySelector('#sdd-skip-tests-prompt') : null;
-    if (checkbox instanceof HTMLInputElement) return checkbox.checked === true;
-  } catch {
-    // Sin acceso al DOM: se usa el valor almacenado.
-  }
-  return readStoredSddPromptSkipTests();
-}
-
-export function persistSddPromptSkipTests(skipTests) {
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      window.localStorage.setItem(SDD_PROMPT_SKIP_TESTS_KEY, String(skipTests === true));
-    }
-  } catch {
-    // La preferencia del prompt sigue funcionando aunque no se pueda persistir.
-  }
-  return skipTests === true;
 }
 
 function completedSpecsPromptBody(includeFull) {
@@ -182,25 +149,14 @@ export function buildCompletedSpecsPrompt(options = {}) {
   return custom || getDefaultCompletedSpecsPrompt({ includeFull });
 }
 
-export function getDefaultFollowSpecsPrompt(options = {}) {
-  const skipTests = typeof options?.skipTests === 'boolean'
-    ? options.skipTests
-    : readSddPromptSkipTests();
-  return skipTests
-    ? `${FOLLOW_SPECS_PROMPT}\n- No realices pruebas sobre los cambios aplicados ni ejecutes tests.`
-    : FOLLOW_SPECS_PROMPT;
+export function getDefaultFollowSpecsPrompt() {
+  return FOLLOW_SPECS_PROMPT;
 }
 
-export function buildFollowSpecsPrompt(options = {}) {
-  const skipTests = typeof options?.skipTests === 'boolean'
-    ? options.skipTests
-    : readSddPromptSkipTests();
+export function buildFollowSpecsPrompt() {
   const custom = getPromptOverride('follow-specs');
-  return custom
-    ? replacePromptVariables(custom, {
-      SIN_TESTS: skipTests ? '- No realices pruebas sobre los cambios aplicados ni ejecutes tests.' : ''
-    })
-    : getDefaultFollowSpecsPrompt({ skipTests });
+  // [SIN_TESTS] se resuelve a vacío: la opción de omitir tests ya no existe.
+  return custom ? replacePromptVariables(custom, { SIN_TESTS: '' }) : getDefaultFollowSpecsPrompt();
 }
 
 async function copyTextToClipboard(text) {

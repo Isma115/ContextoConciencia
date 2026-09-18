@@ -5,7 +5,6 @@ import { showToast } from '../ui/notifications.js';
 import { closeModal, bindModalClose } from '../ui/modals.js';
 import { shortDate } from '../core/format.js';
 import { state } from '../core/state.js';
-import { persistSddPromptIncludeFull, readStoredSddPromptIncludeFull, persistSddPromptSkipTests, readStoredSddPromptSkipTests } from './specs-prompt.js';
 
 const SPEC_STATUS = Object.freeze({ active: 'Activa', implemented: 'Implementada' });
 const SPEC_CATEGORIES = Object.freeze(['Funcional', 'Usabilidad', 'Base de datos', 'Seguridad', 'Rendimiento', 'Integración']);
@@ -27,7 +26,7 @@ const SPEC_CARD_COLORS = Object.freeze([
   { id: 'pink', label: 'Rosa' },
   { id: 'rose', label: 'Rosado' }
 ]);
-const MEDIA_KIND = Object.freeze({ text: 'Texto', image: 'Imagen', video: 'Vídeo', audio: 'Audio' });
+const RESOURCE_KIND = Object.freeze({ image: 'Imagen', video: 'Vídeo', audio: 'Audio', file: 'Archivo' });
 const SDD_FILTER_NONE = '__none__';
 const SDD_FILTER_DEFINITIONS = Object.freeze({
   specs: [
@@ -37,11 +36,8 @@ const SDD_FILTER_DEFINITIONS = Object.freeze({
   database: [
     { id: 'sdd-db-columns-filter', field: 'columns', label: 'Columnas', allLabel: 'Todas las tablas', options: [{ value: 'with-columns', label: 'Con columnas' }, { value: 'without-columns', label: 'Sin columnas' }] }
   ],
-  ui: [
-    { id: 'sdd-ui-kind-filter', field: 'kind', label: 'Tipo', allLabel: 'Todos los tipos', options: Object.entries(MEDIA_KIND).map(([value, label]) => ({ value, label })) }
-  ],
   resources: [
-    { id: 'sdd-resource-kind-filter', field: 'kind', label: 'Tipo', allLabel: 'Todos los tipos', options: Object.entries(MEDIA_KIND).filter(([value]) => value !== 'text').map(([value, label]) => ({ value, label })) }
+    { id: 'sdd-resource-kind-filter', field: 'kind', label: 'Tipo', allLabel: 'Todos los tipos', options: Object.entries(RESOURCE_KIND).map(([value, label]) => ({ value, label })) }
   ]
 });
 const SDD_SORT_DEFINITIONS = Object.freeze({
@@ -57,11 +53,6 @@ const SDD_SORT_DEFINITIONS = Object.freeze({
     { value: 'columns-desc', label: 'Más columnas primero' },
     { value: 'updated-desc', label: 'Actualizadas primero' }
   ],
-  ui: [
-    { value: '', label: 'Orden original' },
-    { value: 'title-asc', label: 'Título A–Z' },
-    { value: 'updated-desc', label: 'Actualizados primero' }
-  ],
   resources: [
     { value: '', label: 'Orden original' },
     { value: 'name-asc', label: 'Nombre A–Z' },
@@ -70,11 +61,13 @@ const SDD_SORT_DEFINITIONS = Object.freeze({
   ]
 });
 const SPECS_FOLDER_NAME = 'SDD_specs';
-const SPECS_FILE_NAME = 'specs.md';
+const SPECS_DIRECTORY_NAME = 'specs';
 const SPECS_FULL_FILE_NAME = 'specs_full.md';
+const SPECS_DATABASE_FILE_NAME = 'bbdd.md';
 const SPECS_RESOURCES_FOLDER_NAME = 'specs_resources';
 const SDD_PROJECT_PATH_STORAGE_KEY = 'nexusdata.sdd-project-path.v1';
 const SDD_LAST_PROJECT_STORAGE_KEY = 'nexusdata.sdd-last-project';
+const SDD_ACTIVE_VERSION_STORAGE_KEY = 'nexusdata.sdd-active-version.v1';
 const SDD_SPECS_FILTERS_STORAGE_KEY = 'nexusdata.sdd-specs-filters.v1';
 // Solo se guardan los combobox de la vista de Specs: estado, categoría y orden.
 const SDD_SPECS_STORED_SELECT_FIELDS = Object.freeze(['status', 'category', 'sort']);
@@ -92,7 +85,9 @@ function readStoredSddSpecsFilters() {
     const sort = String(value.sort ?? '').trim();
     if (statusValues.includes(status)) stored.status = status;
     // La categoría puede venir de los propios specs, así que solo se exige que sea texto.
-    if (category && category !== SDD_FILTER_NONE) stored.category = category;
+    // `SDD_FILTER_NONE` es también una opción válida del combobox y debe sobrevivir
+    // a la restauración igual que cualquier categoría con nombre.
+    if (category) stored.category = category;
     if (sortValues.includes(sort)) stored.sort = sort;
   } catch {
     return { status: '', category: '', sort: '' };
@@ -119,7 +114,6 @@ function persistStoredSddSpecsFilters({ force = false } = {}) {
 const sddListFilters = {
   specs: { query: '', ...readStoredSddSpecsFilters() },
   database: { query: '', columns: '', sort: '' },
-  ui: { query: '', kind: '', sort: '' },
   resources: { query: '', kind: '', sort: '' }
 };
 storedSddSpecsFilters = SDD_SPECS_STORED_SELECT_FIELDS.reduce((accumulator, field) => {
@@ -128,7 +122,6 @@ storedSddSpecsFilters = SDD_SPECS_STORED_SELECT_FIELDS.reduce((accumulator, fiel
 }, {});
 let renderRequestId = 0;
 let specStatusRefreshId = 0;
-let selectedMedia = { dataUrl: null, name: '' };
 let navigateToSddView = null;
 let sddActionInProgress = false;
 
@@ -223,14 +216,90 @@ function persistSddProjectPath(projectPath) {
   }
 }
 
+function storedSddActiveVersion(projectPath) {
+  try {
+    if (!projectPath || typeof window === 'undefined' || !window.localStorage) return '';
+    return String(window.localStorage.getItem(`${SDD_ACTIVE_VERSION_STORAGE_KEY}:${projectPath}`) || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+function persistSddActiveVersion(projectPath, version) {
+  try {
+    if (!projectPath || typeof window === 'undefined' || !window.localStorage) return;
+    const key = `${SDD_ACTIVE_VERSION_STORAGE_KEY}:${projectPath}`;
+    if (version) window.localStorage.setItem(key, version);
+    else window.localStorage.removeItem(key);
+  } catch {
+    // La versión sigue activa durante la sesión aunque no se pueda persistir.
+  }
+}
+
+function normaliseSddVersions(versions) {
+  if (!Array.isArray(versions)) return [];
+  const known = new Set();
+  return versions.map((version) => {
+    const name = String(version?.name || '').trim();
+    if (!name || known.has(name)) return null;
+    known.add(name);
+    return { ...version, name };
+  }).filter(Boolean);
+}
+
+function activeSddVersion(project, preferred = '') {
+  const versions = normaliseSddVersions(project?.versions);
+  if (!versions.length) return '';
+  const candidates = [preferred, storedSddActiveVersion(project?.path), project?.activeVersion];
+  const selected = candidates.map((value) => String(value || '').trim()).find((name) => versions.some((version) => version.name === name));
+  return selected || versions.at(-1).name;
+}
+
+function renderSddVersionControl() {
+  const control = $('#sdd-version-control');
+  const select = $('#sdd-active-version');
+  if (!control || !select) return;
+  const project = state.sddProject;
+  const versions = project?.legacy ? [] : normaliseSddVersions(project?.versions);
+  control.hidden = !versions.length;
+  if (!versions.length) {
+    select.innerHTML = '';
+    return;
+  }
+  select.innerHTML = versions.map((version) => `<option value="${escapeHtml(version.name)}">${escapeHtml(version.name)}</option>`).join('');
+  select.value = activeSddVersion(project);
+  if (select.dataset.sddVersionBound === 'true') return;
+  select.dataset.sddVersionBound = 'true';
+  select.addEventListener('change', () => {
+    const next = String(select.value || '').trim();
+    const current = state.sddProject;
+    if (!current || !next || current.activeVersion === next) return;
+    state.sddProject = { ...current, activeVersion: next };
+    persistSddActiveVersion(current.path, next);
+    renderRequestId += 1;
+    renderSddVersionControl();
+    renderActiveSddViews();
+    showToast(`Versión activa: ${next}`);
+  });
+}
+
 export function setSddProject(project = null, { refresh = false } = {}) {
   const previousPath = state.sddProject?.path || '';
-  const nextProject = project && typeof project.path === 'string' && project.path.trim()
-    ? { ...project, path: project.path.trim() }
+  const previousVersion = state.sddProject?.activeVersion || '';
+  let nextProject = project && typeof project.path === 'string' && project.path.trim()
+    ? { ...project, path: project.path.trim(), versions: normaliseSddVersions(project.versions) }
     : null;
+  if (nextProject && !nextProject.legacy) {
+    nextProject = {
+      ...nextProject,
+      activeVersion: activeSddVersion(nextProject, previousPath === nextProject.path ? previousVersion : '')
+    };
+    persistSddActiveVersion(nextProject.path, nextProject.activeVersion);
+  }
   state.sddProject = nextProject;
   persistSddProjectPath(nextProject?.path || '');
   persistLastSddProject(nextProject);
+  renderSddVersionControl();
   if (!refresh && previousPath === (nextProject?.path || '')) return;
   renderRequestId += 1;
 }
@@ -329,12 +398,14 @@ function hasSddProject() {
 function sddApi(route, options = {}) {
   const projectPath = currentSddProjectPath();
   if (!projectPath) throw new Error('Carga un proyecto S.D.D antes de continuar');
+  const activeVersion = state.sddProject?.activeVersion || '';
   return api(route, {
     ...options,
     cache: 'no-store',
     headers: {
       ...(options.headers || {}),
-      'X-SDD-Project-Path': projectPath
+      'X-SDD-Project-Path': projectPath,
+      ...(activeVersion ? { 'X-SDD-Spec-Version': activeVersion } : {})
     }
   });
 }
@@ -507,16 +578,10 @@ function filterSddTables(tables) {
   });
 }
 
-function filterSddMedia(items) {
-  const filter = sddListFilters.ui;
-  return items.filter((item) => (!filter.kind || item.kind === filter.kind)
-    && sddFilterMatches([item.title, item.description, item.content, MEDIA_KIND[item.kind], item.fileName], filter.query));
-}
-
 function filterSddResources(resources) {
   const filter = sddListFilters.resources;
   return resources.filter((resource) => (!filter.kind || resource.kind === filter.kind)
-    && sddFilterMatches([resource.name, resource.relativePath, resource.path, MEDIA_KIND[resource.kind]], filter.query));
+    && sddFilterMatches([resource.name, resource.relativePath, resource.path, RESOURCE_KIND[resource.kind]], filter.query));
 }
 
 function compareSddText(left, right) {
@@ -587,27 +652,6 @@ function sortSddTables(list) {
   return sorted;
 }
 
-function mediaTimestamp(item) {
-  return sddTimestamp(item.updatedAt || item.createdAt);
-}
-
-function sortSddMedia(list) {
-  const sort = sddListFilters.ui.sort || '';
-  if (!sort) return list;
-  const sorted = [...list];
-  switch (sort) {
-    case 'title-asc':
-      sorted.sort((left, right) => compareSddText(left.title, right.title));
-      break;
-    case 'updated-desc':
-      sorted.sort((left, right) => mediaTimestamp(right) - mediaTimestamp(left) || compareSddText(left.title, right.title));
-      break;
-    default:
-      break;
-  }
-  return sorted;
-}
-
 function sortSddResources(list) {
   const sort = sddListFilters.resources.sort || '';
   if (!sort) return list;
@@ -639,15 +683,6 @@ function previewText(value, limit = 120) {
   return text.length > limit ? `${text.slice(0, limit).trimEnd()}…` : text;
 }
 
-function dataUrlToBytes(dataUrl) {
-  const match = /^data:([^;,]+);base64,(.*)$/.exec(String(dataUrl || ''));
-  if (!match) throw new Error('El archivo no se pudo leer');
-  const binary = atob(match[2]);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  return bytes;
-}
-
 async function confirmDelete(message) {
   return window.confirm(message);
 }
@@ -655,8 +690,11 @@ async function confirmDelete(message) {
 /* ------------------------------------------------------------ Crear specs */
 
 function renderSddProjectRequired(container, icon, title) {
-  if (hasSddProject()) return false;
-  container.innerHTML = `${sddHeader(icon, title)}${emptyState('Sin proyecto S.D.D', `Usa el menú superior “Proyecto” > “Cargar Proyecto” para seleccionar un proyecto que contenga la carpeta ${SPECS_FOLDER_NAME} (con ${SPECS_FILE_NAME}, ${SPECS_FULL_FILE_NAME} y ${SPECS_RESOURCES_FOLDER_NAME}).`)}`;
+  if (hasSddProject() && !state.sddProject?.legacy) return false;
+  const message = hasSddProject()
+    ? 'Este proyecto usa el formato anterior. Abre S.D.D. y usa “Migrar especificaciones” para convertirlo.'
+    : `Usa el menú superior “Proyecto” > “Cargar Proyecto” para seleccionar un proyecto con ${SPECS_FOLDER_NAME}/${SPECS_DIRECTORY_NAME}, ${SPECS_DATABASE_FILE_NAME} y ${SPECS_RESOURCES_FOLDER_NAME}.`;
+  container.innerHTML = `${sddHeader(icon, title)}${emptyState(hasSddProject() ? 'Migración necesaria' : 'Sin proyecto S.D.D', message)}`;
   return true;
 }
 
@@ -664,7 +702,6 @@ function renderActiveSddViews() {
   if (isViewActive('view-sdd-home')) renderSddHome();
   if (isViewActive('view-sdd-specs')) renderSddSpecs();
   if (isViewActive('view-sdd-database')) renderSddDatabase();
-  if (isViewActive('view-sdd-ui')) renderSddUi();
   if (isViewActive('view-sdd-resources')) renderSddResources();
 }
 
@@ -781,7 +818,7 @@ function sddHomeSection(id, title, view) {
 
 function sddHomeSummaryStrip() {
   const stat = (id, label) => `<div class="sdd-summary-stat"><span class="sdd-summary-value" id="sdd-home-summary-${id}">…</span><span class="sdd-summary-label">${escapeHtml(label)}</span></div>`;
-  return `<div class="sdd-summary-strip" id="sdd-home-summary">${stat('specs', 'Specs')}${stat('database', 'Base de datos')}${stat('ui', 'UI')}${stat('resources', 'Recursos')}</div>`;
+  return `<div class="sdd-summary-strip" id="sdd-home-summary">${stat('specs', 'Specs')}${stat('database', 'Base de datos')}${stat('resources', 'Recursos')}</div>`;
 }
 
 function sddHomeSpecSummary(spec) {
@@ -794,13 +831,8 @@ function sddHomeTableSummary(table) {
   return `<article class="sdd-card" data-sdd-goto-card="sdd-database"><div class="sdd-card-head"><div class="sdd-card-main"><h3 class="sdd-card-title sdd-table-name">${escapeHtml(table.name)}</h3><div class="sdd-badges"><span class="sdd-badge sdd-badge-table">${columns.length} ${columns.length === 1 ? 'columna' : 'columnas'}</span></div></div></div>${table.description ? `<p class="sdd-card-desc">${escapeHtml(previewText(table.description))}</p>` : ''}${columnNames ? `<div class="sdd-card-meta sdd-summary-columns">${columnNames}${columns.length > 6 ? '…' : ''}</div>` : ''}</article>`;
 }
 
-function sddHomeMediaSummary(item) {
-  const snippet = item.kind === 'text' && item.content ? `<p class="sdd-card-desc">${escapeHtml(previewText(item.content))}</p>` : (item.description ? `<p class="sdd-card-desc">${escapeHtml(previewText(item.description))}</p>` : '');
-  return `<article class="sdd-card" data-sdd-goto-card="sdd-ui"><div class="sdd-card-main"><h3 class="sdd-card-title">${escapeHtml(item.title)}</h3><div class="sdd-media-meta">${mediaBadge(item.kind)}<span>${escapeHtml(shortDate(item.updatedAt))}</span></div></div>${snippet}</article>`;
-}
-
 function sddHomeResourceSummary(resource) {
-  return `<article class="sdd-card" data-sdd-goto-card="sdd-resources"><div class="sdd-card-main"><h3 class="sdd-card-title">${escapeHtml(resource.name)}</h3><div class="sdd-media-meta">${mediaBadge(resource.kind)}<span>${escapeHtml(formatBytes(resource.size))}</span></div></div></article>`;
+  return `<article class="sdd-card" data-sdd-goto-card="sdd-resources"><div class="sdd-card-main"><h3 class="sdd-card-title">${escapeHtml(resource.name)}</h3><div class="sdd-media-meta">${resourceBadge(resource.kind)}<span>${escapeHtml(formatBytes(resource.size))}</span></div></div></article>`;
 }
 
 export function renderSddHome() {
@@ -810,18 +842,25 @@ export function renderSddHome() {
     container.innerHTML = sddHeader('sdd', 'S.D.D');
     return;
   }
-  // Con proyecto y especificaciones cargadas: resumen de todos los
-  // requerimientos de las 4 vistas (Specs, Base de datos, UI y Recursos).
+  if (state.sddProject?.legacy) {
+    container.innerHTML = `${sddHeader('sdd', state.sddProject?.name || 'S.D.D')}${emptyState('Formato antiguo detectado', 'Convierte specs.md y specs_full.md a versiones independientes y bbdd.md.')}`;
+    const action = document.createElement('div');
+    action.className = 'sdd-toolbar-actions';
+    action.innerHTML = '<button id="sdd-migrate" class="btn btn-primary" type="button">Migrar especificaciones</button>';
+    container.append(action);
+    $('#sdd-migrate')?.addEventListener('click', () => { void migrateLegacySddProject(); });
+    return;
+  }
   const projectName = state.sddProject?.name || state.sddProject?.path || 'Resumen del proyecto';
+  const activeVersion = state.sddProject?.activeVersion || '—';
   const requestId = ++renderRequestId;
   container.innerHTML = `${sddHeader('sdd', projectName)}`
     + sddHomeSummaryStrip()
-    + `<div class="sdd-toolbar"><div class="sdd-toolbar-copy"><h2>Secciones</h2></div><div class="sdd-toolbar-actions">`
+    + `<div class="sdd-toolbar"><div class="sdd-toolbar-copy"><h2>Versión activa: ${escapeHtml(activeVersion)}</h2></div><div class="sdd-toolbar-actions">`
     + `<button id="sdd-home-reload" class="btn btn-secondary btn-small" type="button">Recargar</button>`
     + `</div></div>`
     + sddHomeSection('specs', 'Specs', 'sdd-specs')
     + sddHomeSection('database', 'Base de datos', 'sdd-database')
-    + sddHomeSection('ui', 'UI', 'sdd-ui')
     + sddHomeSection('resources', 'Recursos', 'sdd-resources');
   const bindGoto = (root) => {
     root.querySelectorAll('[data-sdd-goto]').forEach((button) => button.addEventListener('click', () => goToSddView(button.dataset.sddGoto)));
@@ -875,19 +914,6 @@ export function renderSddHome() {
     setList('database', emptyState('No se pudo cargar', error.message));
   });
 
-  sddApi('/sdd/media').then(({ media }) => {
-    if (requestId !== renderRequestId || !isViewActive('view-sdd-home')) return;
-    const list = Array.isArray(media) ? media : [];
-    setCount('ui', '');
-    setSummary('ui', `${list.length}`);
-    setList('ui', list.length ? list.map(sddHomeMediaSummary).join('') : emptyState('Sin contenido', 'Añade con “＋ Añadir contenido”.'));
-  }).catch((error) => {
-    if (requestId !== renderRequestId || !isViewActive('view-sdd-home')) return;
-    setCount('ui', '—');
-    setSummary('ui', '—');
-    setList('ui', emptyState('No se pudo cargar', error.message));
-  });
-
   readSpecsResources().then((data) => {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-home')) return;
     const list = Array.isArray(data?.resources) ? data.resources : [];
@@ -903,6 +929,19 @@ export function renderSddHome() {
   });
 }
 
+async function migrateLegacySddProject() {
+  if (!state.sddProject?.legacy) return;
+  if (!await confirmDelete('Se creará la versión 0.0.0, se extraerá BBDD a bbdd.md y se eliminarán los archivos antiguos de especificaciones. ¿Continuar?')) return;
+  try {
+    const result = await sddApi('/sdd/migrate', { method: 'POST' });
+    setSddProject(result.project, { refresh: true });
+    showToast('Especificaciones migradas a la versión 0.0.0');
+    renderActiveSddViews();
+  } catch (error) {
+    showToast(error.message || 'No se pudieron migrar las especificaciones', true);
+  }
+}
+
 async function createSddProjectFromMenu() {
   const createProject = window.nexusData?.createSddProject;
   if (typeof createProject !== 'function') {
@@ -914,7 +953,7 @@ async function createSddProjectFromMenu() {
     if (!selection) return;
     const result = await api('/sdd/project', { method: 'POST', body: JSON.stringify({ path: selection.path || selection.sddPath }) });
     setSddProject(result.project, { refresh: true });
-    showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} cargados desde ${SPECS_FULL_FILE_NAME}`);
+    showToast(`Proyecto creado con la versión activa ${state.sddProject?.activeVersion || '0.0.0'}`);
     renderActiveSddViews();
   } catch (error) {
     showToast(error.message, true);
@@ -928,50 +967,14 @@ export function bindProjectMenu() {
   });
 }
 
-export function bindSddPromptOption() {
-  const checkbox = $('#sdd-include-full-prompt');
-  if (checkbox) {
-    try {
-      // Al arrancar, el checkbox del DOM aún tiene su valor por defecto (sin marcar):
-      // hay que inicializarlo desde lo almacenado, no desde el propio checkbox.
-      checkbox.checked = readStoredSddPromptIncludeFull();
-    } catch {
-      checkbox.checked = false;
-    }
-    checkbox.addEventListener('change', () => {
-      persistSddPromptIncludeFull(checkbox.checked);
-      showToast(checkbox.checked
-        ? 'El Agente tendrá en cuenta todas las especificaciones'
-        : 'El Agente solo tendrá en cuenta las especificaciones no implementadas',
-      false,
-      { replaceKey: 'sdd-prompt-option' });
-    });
-  }
-
-  const skipTestsCheckbox = $('#sdd-skip-tests-prompt');
-  if (!skipTestsCheckbox) return;
-  try {
-    skipTestsCheckbox.checked = readStoredSddPromptSkipTests();
-  } catch {
-    skipTestsCheckbox.checked = false;
-  }
-  skipTestsCheckbox.addEventListener('change', () => {
-    persistSddPromptSkipTests(skipTestsCheckbox.checked);
-    showToast(skipTestsCheckbox.checked
-      ? 'El Agente no realizará tests sobre los cambios aplicados'
-      : 'El Agente podrá realizar tests sobre los cambios aplicados',
-    false,
-    { replaceKey: 'sdd-skip-tests-prompt-option' });
-  });
-}
-
 /* -------------------------------------------------------------------- Cargar */
 
 async function openSpecsMarkdownEditor() {
   if (!hasSddProject()) return;
   try {
-    const { path, markdown } = await sddApi('/sdd/specs/markdown');
-    $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal sdd-md-modal" role="dialog" aria-modal="true" aria-labelledby="sdd-md-modal-title"><div class="modal-head"><div><h2 id="sdd-md-modal-title">Editar ${SPECS_FULL_FILE_NAME} del proyecto</h2><p>${escapeHtml(path)}</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><textarea id="sdd-md-content" class="textarea sdd-md-textarea" spellcheck="false">${escapeHtml(markdown)}</textarea></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="sdd-md-apply" class="btn btn-primary" type="button">Aplicar al proyecto</button></div></div></div>`;
+    const { path, markdown, version } = await sddApi('/sdd/specs/markdown');
+    const selectedVersion = version || state.sddProject?.activeVersion || '';
+    $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal sdd-md-modal" role="dialog" aria-modal="true" aria-labelledby="sdd-md-modal-title"><div class="modal-head"><div><h2 id="sdd-md-modal-title">Editar versión ${escapeHtml(selectedVersion)}</h2><p>${escapeHtml(path)}</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><textarea id="sdd-md-content" class="textarea sdd-md-textarea" spellcheck="false">${escapeHtml(markdown)}</textarea></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="sdd-md-apply" class="btn btn-primary" type="button">Guardar versión</button></div></div></div>`;
     bindModalClose();
     $('#sdd-md-apply').addEventListener('click', async () => {
       const content = $('#sdd-md-content');
@@ -980,9 +983,8 @@ async function openSpecsMarkdownEditor() {
       try {
         const result = await sddApi('/sdd/specs/sync', { method: 'POST', body: JSON.stringify({ markdown: content.value }) });
         closeModal();
-        const pending = Number(result.pendingTotal ?? result.total ?? 0);
         const total = Number(result.total ?? 0);
-        showToast(`${total} ${total === 1 ? 'requisito' : 'requisitos'} en ${SPECS_FULL_FILE_NAME} (${pending} ${pending === 1 ? 'pendiente' : 'pendientes'} en ${SPECS_FILE_NAME})`);
+        showToast(`${total} ${total === 1 ? 'requisito' : 'requisitos'} guardados en la versión ${result.version || selectedVersion}`);
         if (isViewActive('view-sdd-specs')) renderSddSpecs();
       } catch (error) {
         showToast(error.message, true);
@@ -1007,7 +1009,9 @@ async function loadSddProjectFromMenu() {
     if (!selection) return;
     const result = await api('/sdd/project', { method: 'POST', body: JSON.stringify({ path: selection.path || selection.sddPath }) });
     setSddProject(result.project, { refresh: true });
-    showToast(`${result.total} ${result.total === 1 ? 'requisito' : 'requisitos'} cargados desde ${SPECS_FULL_FILE_NAME}`);
+    showToast(result.project?.legacy
+      ? 'Formato antiguo detectado: puedes migrar las especificaciones desde S.D.D.'
+      : `Proyecto cargado: versión activa ${state.sddProject?.activeVersion || '—'}`);
     renderActiveSddViews();
   } catch (error) {
     showToast(error.message, true);
@@ -1028,7 +1032,7 @@ async function createSddSpecsFromMenu() {
     const selection = await selectSpecsPath(currentSddProjectPath());
     if (!selection) return;
     showToast(selection.created
-      ? `${SPECS_FOLDER_NAME} creado con ${SPECS_FILE_NAME}, ${SPECS_FULL_FILE_NAME} y ${SPECS_RESOURCES_FOLDER_NAME}`
+      ? `${SPECS_FOLDER_NAME} creado con ${SPECS_DIRECTORY_NAME}/0.0.0.md, ${SPECS_DATABASE_FILE_NAME} y ${SPECS_RESOURCES_FOLDER_NAME}`
       : `${SPECS_FOLDER_NAME} ya existía; no se ha modificado nada`);
   } catch (error) {
     showToast(error.message, true);
@@ -1183,15 +1187,55 @@ function openSpecModal(existing = null) {
   });
 }
 
+function openSddVersionModal() {
+  const sourceVersion = state.sddProject?.activeVersion || '';
+  if (!sourceVersion) {
+    showToast('Selecciona una versión activa antes de crear otra', true);
+    return;
+  }
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-version-modal-title"><div class="modal-head"><div><h2 id="sdd-version-modal-title">Nueva versión de especificaciones</h2><p>Se creará un snapshot independiente a partir de ${escapeHtml(sourceVersion)}.</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><label class="form-label">Nombre de versión<input id="sdd-version-name" class="field" type="text" value="" placeholder="Ej. 1.1.0" maxlength="120" autocomplete="off" autofocus /></label><p class="form-note">Se permiten letras, números, punto, guion y guion bajo. No escribas la extensión .md.</p></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="sdd-version-save" class="btn btn-primary" type="button">Crear versión</button></div></div></div>`;
+  bindModalClose();
+  $('#sdd-version-save').addEventListener('click', async () => {
+    const button = $('#sdd-version-save');
+    const version = $('#sdd-version-name').value.trim();
+    if (!version) {
+      showToast('Indica el nombre de la nueva versión', true);
+      return;
+    }
+    button.disabled = true;
+    try {
+      const result = await sddApi('/sdd/versions', {
+        method: 'POST',
+        body: JSON.stringify({ version, sourceVersion })
+      });
+      const current = state.sddProject || {};
+      setSddProject({
+        ...current,
+        versions: result.versions || current.versions,
+        activeVersion: result.activeVersion || version
+      }, { refresh: true });
+      closeModal();
+      showToast(`Versión ${state.sddProject?.activeVersion || version} creada`);
+      renderActiveSddViews();
+    } catch (error) {
+      showToast(error.message || 'No se pudo crear la versión', true);
+      button.disabled = false;
+    }
+  });
+}
+
 export function renderSddSpecs() {
   const container = $('#view-sdd-specs');
   if (!container) return;
   if (renderSddProjectRequired(container, 'specs', 'Specs')) return;
   const requestId = ++renderRequestId;
   const filterDefinitions = SDD_FILTER_DEFINITIONS.specs;
-  container.innerHTML = `${sddHeader('specs', 'Specs')}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', `<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Volver a leer y editar ${SPECS_FULL_FILE_NAME} del proyecto">Editar markdown</button>`)}${sddFilterBar('specs', 'Filtros de requisitos', 'Buscar por título, categoría o descripción…', filterDefinitions)}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
+  const activeVersion = state.sddProject?.activeVersion || '—';
+  const actions = `<button id="sdd-version-add" class="btn btn-secondary" type="button" title="Crear un snapshot independiente desde la versión activa">＋ Nueva versión</button><button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Editar el snapshot ${escapeHtml(activeVersion)}">Editar markdown</button>`;
+  container.innerHTML = `${sddHeader('specs', `Specs · ${activeVersion}`)}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', actions)}${sddFilterBar('specs', 'Filtros de requisitos', 'Buscar por título, categoría o descripción…', filterDefinitions)}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
   moveSddToolbarActionsToHeader(container);
   $('#sdd-spec-add').addEventListener('click', () => openSpecModal());
+  $('#sdd-version-add')?.addEventListener('click', openSddVersionModal);
   const mdEdit = $('#sdd-md-edit');
   if (mdEdit) mdEdit.addEventListener('click', openSpecsMarkdownEditor);
   let specs = null;
@@ -1374,153 +1418,6 @@ export function renderSddDatabase() {
   });
 }
 
-/* ---------------------------------------------------------------------- UI */
-
-function mediaBadge(kind) {
-  return `<span class="sdd-badge sdd-badge-kind">${MEDIA_KIND[kind] || escapeHtml(kind)}</span>`;
-}
-
-function mediaFrame(item) {
-  if (item.kind === 'text') return `<div class="sdd-media-text">${escapeHtml(item.content)}</div>`;
-  if (item.fileMissing || !item.fileUrl) return `<div class="sdd-media-text">No se encuentra el fichero en ${SPECS_FOLDER_NAME}/${SPECS_RESOURCES_FOLDER_NAME}.</div>`;
-  if (item.kind === 'image') return `<img src="${escapeHtml(item.fileUrl)}" alt="${escapeHtml(item.title)}" loading="lazy" />`;
-  if (item.kind === 'video') return `<video src="${escapeHtml(item.fileUrl)}" controls preload="metadata"></video>`;
-  if (item.kind === 'audio') return `<audio src="${escapeHtml(item.fileUrl)}" controls preload="metadata"></audio>`;
-  return '<div class="sdd-media-text"></div>';
-}
-
-function mediaCard(item) {
-  return `<article class="sdd-media-card" data-media-id="${escapeHtml(item.id)}">
-    <div class="sdd-media-frame">${mediaFrame(item)}</div>
-    <div class="sdd-media-copy">
-      <h3 class="sdd-card-title">${escapeHtml(item.title)}</h3>
-      ${item.description ? `<p class="sdd-card-desc">${escapeHtml(item.description)}</p>` : ''}
-      <div class="sdd-media-meta">${mediaBadge(item.kind)}<span>${escapeHtml(shortDate(item.updatedAt))}</span></div>
-    </div>
-    <div class="sdd-card-actions sdd-media-actions">
-      <button class="btn btn-secondary btn-small" type="button" data-edit-media="${escapeHtml(item.id)}">Editar</button>
-      <button class="btn btn-danger btn-small" type="button" data-delete-media="${escapeHtml(item.id)}">Eliminar</button>
-    </div>
-  </article>`;
-}
-
-function renderMediaList(items) {
-  const allItems = Array.isArray(items) ? items : [];
-  const visibleItems = sortSddMedia(filterSddMedia(allItems));
-  const count = $('#sdd-ui-add-count');
-  if (count) count.textContent = sddCollectionCount(visibleItems.length, allItems.length, 'contenido', 'contenidos');
-  const list = $('#sdd-ui-list');
-  if (!list) return;
-  list.innerHTML = visibleItems.length
-    ? visibleItems.map(mediaCard).join('')
-    : allItems.length
-      ? emptyState('Sin resultados', 'Prueba con otros filtros.')
-      : emptyState('Sin contenido', 'Usa “＋ Añadir contenido”.');
-  list.querySelectorAll('[data-edit-media]').forEach((button) => button.addEventListener('click', () => {
-    const item = allItems.find((media) => media.id === button.dataset.editMedia);
-    if (item) openMediaModal(item);
-  }));
-  list.querySelectorAll('[data-delete-media]').forEach((button) => button.addEventListener('click', async () => {
-    const item = allItems.find((media) => media.id === button.dataset.deleteMedia);
-    if (!item) return;
-    if (!await confirmDelete(`¿Eliminar el contenido “${item.title}”?`)) return;
-    try {
-      await sddApi(`/sdd/media/${item.id}`, { method: 'DELETE' });
-      showToast('Contenido eliminado');
-      renderSddUi();
-    } catch (error) { showToast(error.message, true); }
-  }));
-}
-
-function mediaPreviewMarkup(kind, dataUrl, name) {
-  if (!dataUrl) return '';
-  if (kind === 'image') return `<div class="sdd-media-preview"><img src="${dataUrl}" alt="Vista previa" /></div>`;
-  if (kind === 'video') return `<div class="sdd-media-preview"><video src="${dataUrl}" controls preload="metadata"></video></div>`;
-  if (kind === 'audio') return `<div class="sdd-media-preview"><audio src="${dataUrl}" controls preload="metadata"></audio></div>`;
-  return '';
-}
-
-function renderMediaFormBody(kind) {
-  const zone = $('#media-file-zone');
-  if (!zone) return;
-  if (kind === 'text') {
-    zone.innerHTML = '<label class="form-label">Contenido<textarea id="media-content" class="textarea" maxlength="20000" placeholder="Escribe el texto a mostrar en el diseño…"></textarea></label>';
-    return;
-  }
-  const selectedName = selectedMedia.name ? escapeHtml(selectedMedia.name) : 'Ningún archivo seleccionado';
-  const label = kind === 'image' ? 'imagen' : kind === 'video' ? 'vídeo' : 'audio';
-  zone.innerHTML = `<div class="form-label">Archivo<div class="sdd-media-picker"><button id="media-pick-file" class="btn btn-secondary btn-small" type="button">Seleccionar ${label}…</button><span class="form-note">${selectedName}</span></div>${mediaPreviewMarkup(kind, selectedMedia.dataUrl)}</div>`;
-  $('#media-pick-file').addEventListener('click', async () => {
-    try {
-      const file = await window.nexusData.selectSddMedia(kind);
-      if (!file) return;
-      selectedMedia = { dataUrl: file.dataUrl, name: file.name };
-      renderMediaFormBody(kind);
-    } catch (error) { showToast(error.message, true); }
-  });
-}
-
-function openMediaModal(existing = null) {
-  selectedMedia = { dataUrl: null, name: '' };
-  const kindOptions = Object.entries(MEDIA_KIND).map(([value, label]) => `<option value="${value}"${existing?.kind === value ? ' selected' : ''}>${label}</option>`).join('');
-  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-media-modal-title"><div class="modal-head"><div><h2 id="sdd-media-modal-title">${existing ? 'Editar contenido' : 'Añadir contenido'}</h2></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><div class="form-grid"><label class="form-label">Título<input id="media-title" class="field" type="text" value="${escapeHtml(existing?.title || '')}" placeholder="Ej. Pantalla de inicio, Mapa del sitio, Logo" maxlength="200" autocomplete="off" autofocus /></label><div class="form-grid two"><label class="form-label">Tipo<select id="media-kind" class="select">${kindOptions}</select></label><div></div></div><label class="form-label">Descripción<textarea id="media-description" class="textarea" maxlength="5000" placeholder="Contexto del diseño, qué se muestra, decisiones visuales…">${escapeHtml(existing?.description || '')}</textarea></label><div id="media-file-zone"></div></div></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="media-save" class="btn btn-primary" type="button">${existing ? 'Guardar cambios' : 'Añadir contenido'}</button></div></div></div>`;
-  bindModalClose();
-  const kind = existing?.kind || 'text';
-  renderMediaFormBody(kind);
-  if (existing?.kind === 'text') {
-    const content = $('#media-content');
-    if (content) content.value = existing.content || '';
-  }
-  $('#media-kind').addEventListener('change', (event) => renderMediaFormBody(event.target.value));
-  $('#media-save').addEventListener('click', async () => {
-    try {
-      const saveKind = $('#media-kind').value;
-      const title = $('#media-title').value.trim();
-      const description = $('#media-description').value;
-      if (existing) {
-        const body = { title, description };
-        if (existing.kind === 'text') body.content = $('#media-content')?.value || '';
-        await sddApi(`/sdd/media/${existing.id}`, { method: 'PUT', body: JSON.stringify(body) });
-      } else if (saveKind === 'text') {
-        const params = new URLSearchParams({ title, description, kind: 'text' });
-        const bytes = new TextEncoder().encode($('#media-content').value);
-        await sddApi(`/sdd/media?${params}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: bytes });
-      } else {
-        if (!selectedMedia.dataUrl) throw new Error('Selecciona un archivo para el contenido');
-        const params = new URLSearchParams({ title, description, kind: saveKind, fileName: selectedMedia.name || 'archivo' });
-        await sddApi(`/sdd/media?${params}`, { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: dataUrlToBytes(selectedMedia.dataUrl) });
-      }
-      closeModal();
-      showToast(existing ? 'Contenido actualizado' : 'Contenido añadido');
-      renderSddUi();
-    } catch (error) { showToast(error.message, true); }
-  });
-}
-
-export function renderSddUi() {
-  const container = $('#view-sdd-ui');
-  if (!container) return;
-  if (renderSddProjectRequired(container, 'ui', 'UI')) return;
-  const requestId = ++renderRequestId;
-  const filterDefinitions = SDD_FILTER_DEFINITIONS.ui;
-  container.innerHTML = `${sddHeader('ui', 'UI')}${sddToolbar('Referencias de diseño', '…', 'sdd-ui-add', '＋ Añadir contenido')}${sddFilterBar('ui', 'Filtros de referencias de diseño', 'Buscar título, descripción o contenido…', filterDefinitions)}<div class="sdd-media-grid" id="sdd-ui-list"><div class="empty">Cargando contenido…</div></div>`;
-  moveSddToolbarActionsToHeader(container);
-  $('#sdd-ui-add').addEventListener('click', () => openMediaModal());
-  let media = null;
-  const render = () => {
-    if (media !== null) renderMediaList(media);
-  };
-  bindSddFilterBar('ui', render, filterDefinitions);
-  sddApi('/sdd/media').then(({ media: loadedMedia }) => {
-    if (requestId !== renderRequestId || !isViewActive('view-sdd-ui')) return;
-    media = Array.isArray(loadedMedia) ? loadedMedia : [];
-    render();
-  }).catch((error) => {
-    if (requestId !== renderRequestId || !isViewActive('view-sdd-ui')) return;
-    $('#sdd-ui-list').innerHTML = emptyState('No se pudo cargar', error.message);
-  });
-}
-
 /* ---------------------------------------------------------------- Recursos */
 
 function formatBytes(bytes) {
@@ -1531,6 +1428,10 @@ function formatBytes(bytes) {
   let unit = 0;
   while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
   return `${size >= 10 ? Math.round(size) : size.toFixed(1)} ${units[unit]}`;
+}
+
+function resourceBadge(kind) {
+  return `<span class="sdd-badge sdd-badge-kind">${RESOURCE_KIND[kind] || escapeHtml(kind || 'file')}</span>`;
 }
 
 function resourceCard(resource) {
@@ -1546,7 +1447,7 @@ function resourceCard(resource) {
     <div class="sdd-media-frame">${frame}</div>
     <div class="sdd-media-copy">
       <h3 class="sdd-card-title">${escapeHtml(resource.name)}</h3>
-      <div class="sdd-media-meta">${mediaBadge(resource.kind)}<span>${escapeHtml(formatBytes(resource.size))}</span><span>${escapeHtml(shortDate(resource.modifiedAt))}</span></div>
+      <div class="sdd-media-meta">${resourceBadge(resource.kind)}<span>${escapeHtml(formatBytes(resource.size))}</span><span>${escapeHtml(shortDate(resource.modifiedAt))}</span></div>
     </div>
     <div class="sdd-card-actions sdd-media-actions">
       <button class="btn btn-secondary btn-small" type="button" data-reveal-resource="${escapeHtml(resource.path)}" title="Mostrar “${escapeHtml(resource.name)}” en el explorador del sistema">Mostrar</button>
