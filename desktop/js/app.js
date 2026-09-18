@@ -17,9 +17,78 @@ import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 import { loadDiagramFontSize, loadDiagramLineContrast } from './core/diagram-settings.js';
 import { bindWorkspaceControls, configureWorkspace } from './core/workspace.js';
+import { configurePromptConfig, renderPromptConfig } from './views/prompt-config.js';
 
 let nativeMenuView = null;
 let offlineSessionRecovery = null;
+let persistedView = null;
+
+const DEFAULT_VIEW = 'global-search';
+const LAST_VIEW_STORAGE_KEY = 'nexusdata.last-view.v1';
+const AVAILABLE_VIEWS = new Set([
+  'global-search',
+  'search',
+  'recent-documents',
+  'favorites',
+  'html-viewer',
+  'diagrams',
+  'code-map',
+  'sources',
+  'file-explorer',
+  'prompt-config',
+  'sdd-home',
+  'sdd-specs',
+  'sdd-database',
+  'sdd-ui',
+  'sdd-resources'
+]);
+
+function normaliseView(value) {
+  const view = typeof value === 'string' ? value.trim() : '';
+  return AVAILABLE_VIEWS.has(view) ? view : DEFAULT_VIEW;
+}
+
+function browserLastView() {
+  try {
+    const raw = window.localStorage?.getItem(LAST_VIEW_STORAGE_KEY);
+    const value = raw ? JSON.parse(raw) : null;
+    return value?.view || value || null;
+  } catch {
+    return null;
+  }
+}
+
+async function loadLastView() {
+  let view = null;
+  try {
+    if (typeof window.nexusData?.loadLastView === 'function') view = await window.nexusData.loadLastView();
+    else view = browserLastView();
+  } catch {
+    view = browserLastView();
+  }
+  state.view = normaliseView(view);
+  persistedView = typeof view === 'string' && view.trim() === state.view ? state.view : null;
+}
+
+function persistLastView(view) {
+  const normalised = normaliseView(view);
+  if (persistedView === normalised) return;
+  persistedView = normalised;
+  try {
+    if (typeof window.nexusData?.saveLastView === 'function') {
+      Promise.resolve(window.nexusData.saveLastView(normalised)).catch(() => {
+        if (persistedView === normalised) persistedView = null;
+      });
+      return;
+    }
+    if (window.localStorage) {
+      window.localStorage.setItem(LAST_VIEW_STORAGE_KEY, JSON.stringify({ version: 1, view: normalised }));
+    }
+  } catch {
+    // La persistencia no debe impedir la navegación.
+    if (persistedView === normalised) persistedView = null;
+  }
+}
 
 configureApi({ onUnauthorized: () => { void recoverOfflineSession(); } });
 
@@ -61,6 +130,8 @@ async function refreshData() {
 }
 
 function renderView() {
+  state.view = normaliseView(state.view);
+  persistLastView(state.view);
   if (nativeMenuView !== state.view && typeof window.nexusData?.setViewMenu === 'function') {
     nativeMenuView = state.view;
     window.nexusData.setViewMenu(state.view).catch(() => { nativeMenuView = null; });
@@ -81,6 +152,7 @@ function renderView() {
   if (state.view === 'code-map') renderCodeMap();
   if (state.view === 'sources') renderSources();
   if (state.view === 'file-explorer') renderFileExplorer();
+  if (state.view === 'prompt-config') renderPromptConfig();
   if (state.view === 'sdd-specs') renderSddSpecs();
   if (state.view === 'sdd-database') renderSddDatabase();
   if (state.view === 'sdd-ui') renderSddUi();
@@ -180,6 +252,7 @@ configureSourceModal({ onRefresh: refreshData, onSync: syncSource });
 configureCodeMap({ onNavigate: (view) => { state.view = view; renderView(); } });
 configureSdd({ onNavigate: (view) => { state.view = view; renderView(); } });
 configureWorkspace({ onRefresh: refreshData });
+configurePromptConfig();
 bindHtmlViewerMenu();
 bindDiagramMenu();
 bindPreferencesMenu();
@@ -198,6 +271,7 @@ loadDiagramLineContrast();
 loadDiagramFontSize();
 
 async function startApplication() {
+  await loadLastView();
   await loadSearchPreferences();
   renderSidebarSearch();
   await recoverOfflineSession();

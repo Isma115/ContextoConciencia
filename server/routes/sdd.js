@@ -6,10 +6,29 @@ const { detectFileType, detectMimeFromBuffer, kindForMime, probeFile } = require
 const { transcodeAudioToMp3 } = require('../services/media-transcode');
 
 const ID = (prefix) => `${prefix}_${crypto.randomUUID()}`;
-const SPEC_STATUSES = Object.freeze(['draft', 'active', 'approved', 'implemented']);
+const SPEC_STATUSES = Object.freeze(['active', 'implemented']);
 const SPEC_STATUS_BY_LABEL = Object.freeze({
-  draft: 'draft', borrador: 'draft', active: 'active', activa: 'active',
-  approved: 'approved', aprobada: 'approved', implemented: 'implemented', implementada: 'implemented'
+  active: 'active', activa: 'active', implemented: 'implemented', implementada: 'implemented',
+  // Compatibilidad de lectura: los estados retirados pasan a Activa.
+  draft: 'active', borrador: 'active', approved: 'active', aprobada: 'active'
+});
+const SPEC_CARD_COLORS = Object.freeze([
+  'red', 'coral', 'orange', 'amber', 'yellow', 'lime', 'green', 'teal',
+  'cyan', 'blue', 'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'
+]);
+const SPEC_CARD_COLOR_LABELS = Object.freeze({
+  red: 'Rojo', coral: 'Coral', orange: 'Naranja', amber: 'Ámbar',
+  yellow: 'Amarillo', lime: 'Lima', green: 'Verde', teal: 'Turquesa',
+  cyan: 'Cian', blue: 'Azul', indigo: 'Índigo', violet: 'Violeta',
+  purple: 'Morado', fuchsia: 'Fucsia', pink: 'Rosa', rose: 'Rosado'
+});
+const SPEC_CARD_COLOR_BY_LABEL = Object.freeze({
+  rojo: 'red', red: 'red', coral: 'coral', naranja: 'orange', orange: 'orange',
+  ambar: 'amber', amber: 'amber', amarillo: 'yellow', yellow: 'yellow',
+  lima: 'lime', lime: 'lime', verde: 'green', green: 'green', turquesa: 'teal', teal: 'teal',
+  cian: 'cyan', cyan: 'cyan', azul: 'blue', blue: 'blue', indigo: 'indigo',
+  violeta: 'violet', violet: 'violet', morado: 'purple', purpura: 'purple', purple: 'purple',
+  fucsia: 'fuchsia', fuchsia: 'fuchsia', rosa: 'pink', pink: 'pink', rosado: 'rose', rose: 'rose'
 });
 const MEDIA_KINDS = Object.freeze(['text', 'image', 'video', 'audio']);
 const MEDIA_MIME_BY_EXTENSION = Object.freeze({
@@ -207,8 +226,9 @@ function specForResponse(row, index = 0, timestamp = null) {
     id: row.id || stableId('spec', index),
     title: row.title,
     description: row.description,
-    status: row.status,
+    status: normalizeSpecStatus(row.status),
     category: row.category,
+    color: normalizeSpecCardColor(row.color),
     createdAt: row.createdAt || row.created_at || timestamp,
     updatedAt: row.updatedAt || row.updated_at || timestamp
   };
@@ -291,11 +311,15 @@ function mediaForResponse(item, projectPath) {
 function specInput(body, existing = null) {
   const title = asText(body?.title, existing?.title || '').slice(0, 200);
   if (!title) throw new Error('Indica un título para la especificación');
+  const hasStatus = Object.prototype.hasOwnProperty.call(body || {}, 'status');
+  if (hasStatus && !SPEC_STATUSES.includes(body.status)) throw new Error('El estado de la especificación no es válido');
+  const hasColor = Object.prototype.hasOwnProperty.call(body || {}, 'color');
   return {
     title,
     description: sliceText(body?.description, 10000),
-    status: SPEC_STATUSES.includes(body?.status) ? body.status : (existing?.status || 'draft'),
-    category: asText(body?.category).slice(0, 60)
+    status: hasStatus ? body.status : normalizeSpecStatus(existing?.status),
+    category: asText(body?.category).slice(0, 60),
+    color: hasColor ? specCardColorInput(body.color) : normalizeSpecCardColor(existing?.color)
   };
 }
 
@@ -307,6 +331,7 @@ function specChanges(body = {}) {
   }
   if (Object.prototype.hasOwnProperty.call(body, 'category')) changes.category = asText(body.category).slice(0, 60);
   if (Object.prototype.hasOwnProperty.call(body, 'description')) changes.description = sliceText(body.description, 10000);
+  if (Object.prototype.hasOwnProperty.call(body, 'color')) changes.color = specCardColorInput(body.color);
   if (!Object.keys(changes).length) throw new Error('Indica al menos un cambio para aplicar');
   return changes;
 }
@@ -316,7 +341,11 @@ function normalizeSpecValue(raw, map, fallback) {
   return value ? (map[value] || fallback) : fallback;
 }
 
-const SPEC_STATUS_LABELS = Object.freeze({ draft: 'Borrador', active: 'Activa', approved: 'Aprobada', implemented: 'Implementada' });
+const SPEC_STATUS_LABELS = Object.freeze({ active: 'Activa', implemented: 'Implementada' });
+
+function normalizeSpecStatus(value, fallback = 'active') {
+  return normalizeSpecValue(value, SPEC_STATUS_BY_LABEL, fallback);
+}
 
 function normalizeMarkdownLabel(value) {
   return String(value ?? '')
@@ -325,6 +354,20 @@ function normalizeMarkdownLabel(value) {
     .toLowerCase()
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeSpecCardColor(value, fallback = '') {
+  const normalized = normalizeMarkdownLabel(value);
+  if (!normalized) return fallback;
+  if (SPEC_CARD_COLORS.includes(normalized)) return normalized;
+  return SPEC_CARD_COLOR_BY_LABEL[normalized] || fallback;
+}
+
+function specCardColorInput(value) {
+  if (!asText(value)) return '';
+  const color = normalizeSpecCardColor(value);
+  if (!color) throw new Error('El color de la tarjeta no es válido');
+  return color;
 }
 
 function cleanMarkdownValue(value) {
@@ -389,7 +432,7 @@ function parseSpecsSection(lines) {
     if (headingMatch) {
       flush();
       const title = markdownHeadingText(headingMatch[1], 200);
-      current = title ? { title, description: '', status: 'draft', category: '' } : null;
+      current = title ? { title, description: '', status: 'active', category: '' } : null;
       continue;
     }
     if (!current) continue;
@@ -400,11 +443,15 @@ function parseSpecsSection(lines) {
     }
     const field = markdownField(rawLine);
     if (field?.key === 'estado') {
-      current.status = normalizeSpecValue(field.value, SPEC_STATUS_BY_LABEL, current.status);
+      current.status = normalizeSpecStatus(field.value, current.status);
       continue;
     }
     if (field?.key === 'categoria') {
       current.category = sliceText(field.value, 60);
+      continue;
+    }
+    if (field?.key === 'color' || field?.key === 'color de tarjeta') {
+      current.color = normalizeSpecCardColor(field.value);
       continue;
     }
     if (field?.key === 'prioridad') continue;
@@ -621,7 +668,7 @@ function markdownTableCell(value) {
 }
 
 function isCompletedSpecStatus(status) {
-  return String(status || '').toLowerCase() === 'implemented';
+  return normalizeSpecStatus(status) === 'implemented';
 }
 
 function pendingSddSpecs(specs) {
@@ -631,8 +678,11 @@ function pendingSddSpecs(specs) {
 function sddSpecsToMarkdown(specs) {
   if (!specs.length) return '# Specs\n';
   const blocks = specs.map((spec) => {
-    const lines = [`## ${markdownHeadingText(spec.title, 200)}`, `- Estado: ${SPEC_STATUS_LABELS[spec.status] || spec.status}`];
+    const status = normalizeSpecStatus(spec.status);
+    const lines = [`## ${markdownHeadingText(spec.title, 200)}`, `- Estado: ${SPEC_STATUS_LABELS[status]}`];
     if (spec.category) lines.push(`- Categoría: ${sliceText(spec.category, 60)}`);
+    const color = normalizeSpecCardColor(spec.color);
+    if (color) lines.push(`- Color: ${SPEC_CARD_COLOR_LABELS[color]}`);
     if (spec.description) lines.push('', spec.description.trim());
     return lines.join('\n');
   });
@@ -889,7 +939,7 @@ function sddReport(projectPath, document, resourceListing) {
   const tables = document.database.tables || [];
   const media = document.media.media || [];
   const resources = resourceListing.resources || [];
-  const statusCoverage = { draft: 0, active: 50, approved: 75, implemented: 100 };
+  const statusCoverage = { active: 50, implemented: 100 };
   const coverageMatrix = document.specs.map((spec) => {
     const specText = [spec.title, spec.category, spec.description].join(' ');
     const relatedUi = media.filter((item) => reportTextRelated(specText, [item.title, item.description, item.fileName].join(' ')));
@@ -1048,7 +1098,6 @@ function readSddProjectDocument(projectPath) {
   const rawMarkdown = fs.readFileSync(sourcePath, 'utf8');
   if (!rawMarkdown.trim()) throw new Error(`${path.basename(sourcePath)} está vacío`);
   const parsed = parseSddDocument(rawMarkdown);
-  if (!parsed.specs.length) throw new Error(`No se encontraron specs en ${path.basename(sourcePath)}`);
   const timestamp = fs.statSync(sourcePath).mtime.toISOString();
   const specs = specsWithIdentity(parsed.specs, timestamp);
   return {
@@ -1067,7 +1116,6 @@ function writeSddProjectDocument(projectPath, markdown, database, media) {
   const paths = resolveSddPaths(projectPath);
   const parsed = parseSddDocument(markdown);
   const specs = parsed.specs;
-  if (!specs.length) throw new Error('No se encontraron specs en el markdown');
   const normalizedDatabase = database === undefined || database === null
     ? parsed.database
     : normalizeDatabase(database);
@@ -1300,7 +1348,7 @@ function installSddRoutes(app) {
       const title = asText(req.body?.title) || `Copia de ${source.title}`;
       const timestamp = new Date().toISOString();
       const duplicate = {
-        ...specInput({ title, status: source.status, category: source.category, description: source.description }),
+        ...specInput({ title, status: source.status, category: source.category, description: source.description, color: source.color }),
         createdAt: timestamp,
         updatedAt: timestamp
       };
@@ -1382,7 +1430,6 @@ function installSddRoutes(app) {
       const projectPath = requestSddProjectPath(req);
       const markdown = typeof req.body?.markdown === 'string' ? req.body.markdown : '';
       const parsed = parseSddDocument(markdown);
-      if (!parsed.specs.length) throw new Error('No se encontraron specs en el markdown');
       const document = readSddProjectDocument(projectPath);
       writeSddProjectDocument(
         projectPath,

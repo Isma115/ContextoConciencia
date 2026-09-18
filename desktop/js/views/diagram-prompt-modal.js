@@ -1,8 +1,9 @@
 import { $ } from '../core/dom.js';
 import { showToast } from '../ui/notifications.js';
 import { closeModal, bindModalClose } from '../ui/modals.js';
+import { getPromptOverride, replacePromptVariables } from '../core/prompt-store.js';
 
-const DIAGRAM_CODE_INSTRUCTIONS = `NexusData crea diagramas con un lenguaje de texto propio que se puede pegar en Diagramas > Código y ejecutar con “Generar diagrama”. El archivo es texto plano .nxd.
+export const DIAGRAM_CODE_INSTRUCTIONS = `NexusData crea diagramas con un lenguaje de texto propio que se puede pegar en Diagramas > Código y ejecutar con “Generar diagrama”. El archivo es texto plano .nxd.
 
 Sintaxis disponible:
 
@@ -19,25 +20,25 @@ Reglas del lenguaje:
 - Las conexiones usan -> y solo pueden apuntar a nodos declarados.
 - Las direcciones son forward/directo, backward/reverse/reversa y none/simple. Usa forward salvo que el flujo necesite otro sentido o una línea sin flecha.
 - La etiqueta de un edge es opcional y debe ir entre comillas; también puede escribirse después de dos puntos.
-- at x, y es opcional. Si no lo indicas, NexusData separa automáticamente las tarjetas. Cuando se use, coloca x entre 20 y 1190 e y entre 20 y 792, y deja al menos 140 unidades entre los bordes de las tarjetas conectadas para que las flechas sean legibles.
+- at x, y es opcional. Si no lo indicas, NexusData separa automáticamente las tarjetas con un layout holgado. Cuando se use, el lienzo crece dinámicamente hasta 20000 × 20000: coloca x entre 20 y 19500 e y entre 20 y 19500, deja al menos 240 unidades horizontales y 180 verticales entre los bordes de las tarjetas (paso sugerido de ~430 en x y ~270 en y) para que las flechas respiren y nada se superponga.
 - Las líneas vacías y los comentarios que comienzan por # o // se ignoran.
 - No añadas instrucciones distintas de diagram, node, edge o connect.
 
 Ejemplo válido:
 
 diagram "Registro de usuario"
-node formulario "Completar formulario" start at 100, 300
-node validar "Validar datos" decision at 430, 300
-node guardar "Guardar usuario" step at 800, 140
-node error "Mostrar errores" step at 800, 500
-node fin "Cuenta creada" end at 1170, 140
+node formulario "Completar formulario" start at 100, 400
+node validar "Validar datos" decision at 530, 400
+node guardar "Guardar usuario" step at 960, 180
+node error "Mostrar errores" step at 960, 640
+node fin "Cuenta creada" end at 1390, 180
 edge formulario -> validar "Enviar" forward
 edge validar -> guardar "Correctos" forward
 edge validar -> error "Incorrectos" forward
 edge guardar -> fin "Confirmar" forward
 edge error -> formulario "Corregir" backward`;
 
-const DIAGRAM_PROMPT_TEMPLATE = `Actúa como analista técnico y trabaja sobre el código, la documentación y la configuración de mi proyecto. Analiza primero la implementación real de la funcionalidad y sus puntos de entrada, dependencias, validaciones, decisiones, errores y resultados.
+export const DIAGRAM_PROMPT_TEMPLATE = `Actúa como analista técnico y trabaja sobre el código, la documentación y la configuración de mi proyecto. Analiza primero la implementación real de la funcionalidad y sus puntos de entrada, dependencias, validaciones, decisiones, errores y resultados.
 
 ## Funcionalidad que debes representar
 
@@ -56,7 +57,7 @@ ${DIAGRAM_CODE_INSTRUCTIONS}
 - Usa nombres de nodo estables, descriptivos y fáciles de relacionar con el código.
 - Usa start para el punto de entrada, decision para preguntas o bifurcaciones y end para cada resultado final.
 - Etiqueta las ramas de las decisiones, por ejemplo "Sí", "No", "Válido" o "Error".
-- Coloca los nodos de izquierda a derecha o de arriba abajo, mantén al menos 140 unidades entre los bordes de las tarjetas conectadas y evita que se superpongan.
+- Coloca los nodos de izquierda a derecha o de arriba abajo con un layout holgado: mantén al menos 240 unidades horizontales y 180 verticales entre los bordes de las tarjetas, evita que se superpongan y reparte el flujo por el lienzo en vez de compactarlo.
 - Conecta todos los pasos relevantes y comprueba que el origen y el destino de cada edge existen.
 - Mantén las etiquetas breves, pero suficientemente claras para entender el flujo sin consultar una explicación adicional.
 
@@ -70,10 +71,23 @@ ${DIAGRAM_CODE_INSTRUCTIONS}
 ## Formato de respuesta obligatorio
 
 Después de guardar el archivo, devuelve únicamente un bloque de código con el lenguaje textual de NexusData, listo para copiarlo en Diagramas > Código > Generar diagrama. No devuelvas un documento HTML, CSS, JavaScript, SVG, Mermaid o JSON. No añadas explicaciones, títulos ni texto fuera del bloque de código.`;
-const GIT_DIFF_PROMPT = 'Analizar diff de git y describir con detalle los cambios';
+export const GIT_DIFF_PROMPT = 'Analizar diff de git y describir con detalle los cambios';
+
+export function getDefaultDiagramPromptTemplate() {
+  return DIAGRAM_PROMPT_TEMPLATE;
+}
+
+export function getDefaultGitDiffPrompt() {
+  return GIT_DIFF_PROMPT;
+}
+
+export function buildDefaultDiagramPrompt(functionality) {
+  return replacePromptVariables(DIAGRAM_PROMPT_TEMPLATE, { FUNCIONALIDAD: String(functionality || '').trim() });
+}
 
 export function buildDiagramPrompt(functionality) {
-  return DIAGRAM_PROMPT_TEMPLATE.replace('[FUNCIONALIDAD]', String(functionality || '').trim());
+  const template = getPromptOverride('new-diagram') || DIAGRAM_PROMPT_TEMPLATE;
+  return replacePromptVariables(template, { FUNCIONALIDAD: String(functionality || '').trim() });
 }
 
 async function copyTextToClipboard(text) {
@@ -95,7 +109,7 @@ async function copyTextToClipboard(text) {
 
 export async function copyGitDiffPrompt() {
   try {
-    await copyTextToClipboard(GIT_DIFF_PROMPT);
+    await copyTextToClipboard(getPromptOverride('git-diff') || GIT_DIFF_PROMPT);
     showToast('Prompt copiado al portapapeles');
   } catch (error) {
     showToast(error.message || 'No se pudo copiar el prompt', true);

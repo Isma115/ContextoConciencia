@@ -7,8 +7,15 @@ import { bindModalClose, closeModal } from '../ui/modals.js';
 import { parseDiagramText, serializeDiagram } from './diagram-language.mjs';
 
 const STORAGE_KEY = 'nexusdata.diagrams.v1';
-const BOARD_WIDTH = 1400;
-const BOARD_HEIGHT = 900;
+const BOARD_MIN_WIDTH = 1400;
+const BOARD_MIN_HEIGHT = 900;
+// Compatibilidad: el tamaño mínimo conserva las dimensiones históricas del tablero.
+const BOARD_WIDTH = BOARD_MIN_WIDTH;
+const BOARD_HEIGHT = BOARD_MIN_HEIGHT;
+const BOARD_MAX_WIDTH = 20000;
+const BOARD_MAX_HEIGHT = 20000;
+const BOARD_CONTENT_PADDING = 600;
+const BOARD_SIZE_STEP = 200;
 const NODE_WIDTH = 190;
 const NODE_HEIGHT = 88;
 const NODE_MIN_WIDTH = 120;
@@ -19,10 +26,10 @@ const NODE_DESCRIPTION_MIN_HEIGHT = 176;
 const NODE_DESCRIPTION_MAX_LENGTH = 2000;
 const NODE_MARGIN = 20;
 const AUTO_LAYOUT_COLUMNS = 4;
-const AUTO_LAYOUT_COLUMN_GAP = 140;
-const AUTO_LAYOUT_ROW_GAP = 120;
+const AUTO_LAYOUT_COLUMN_GAP = 240;
+const AUTO_LAYOUT_ROW_GAP = 180;
 const ARROW_INSET = 0;
-const DIAGRAM_ZOOM_MIN = 0.2;
+const DIAGRAM_ZOOM_MIN = 0.05;
 const DIAGRAM_ZOOM_MAX = 3;
 const DIAGRAM_ZOOM_SENSITIVITY = 0.0015;
 const DIAGRAM_ZOOM_STEP = 1.15;
@@ -85,6 +92,45 @@ function makeId(prefix) {
 
 function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(maximum, value));
+}
+
+function diagramBoardSize(diagram) {
+  let maxRight = 0;
+  let maxBottom = 0;
+  const nodes = Array.isArray(diagram?.nodes) ? diagram.nodes : [];
+  nodes.forEach((node) => {
+    const x = Number.isFinite(Number(node?.x)) ? Number(node.x) : 0;
+    const y = Number.isFinite(Number(node?.y)) ? Number(node.y) : 0;
+    maxRight = Math.max(maxRight, x + nodeWidth(node));
+    maxBottom = Math.max(maxBottom, y + nodeHeight(node));
+  });
+  const width = clamp(
+    Math.ceil((maxRight + BOARD_CONTENT_PADDING) / BOARD_SIZE_STEP) * BOARD_SIZE_STEP,
+    BOARD_MIN_WIDTH,
+    BOARD_MAX_WIDTH
+  );
+  const height = clamp(
+    Math.ceil((maxBottom + BOARD_CONTENT_PADDING) / BOARD_SIZE_STEP) * BOARD_SIZE_STEP,
+    BOARD_MIN_HEIGHT,
+    BOARD_MAX_HEIGHT
+  );
+  return { width, height };
+}
+
+function refreshBoardSize(diagram) {
+  const board = typeof document !== 'undefined' ? $('#diagram-board') : null;
+  const edgeLayer = typeof document !== 'undefined' ? $('#diagram-edge-layer') : null;
+  if (!board) return diagramBoardSize(diagram || null);
+  const size = diagramBoardSize(diagram || null);
+  const currentWidth = Number.parseFloat(board.style.width) || board.offsetWidth || size.width;
+  const currentHeight = Number.parseFloat(board.style.height) || board.offsetHeight || size.height;
+  if (currentWidth !== size.width) board.style.width = `${size.width}px`;
+  if (currentHeight !== size.height) board.style.height = `${size.height}px`;
+  if (edgeLayer) {
+    const viewBox = `0 0 ${size.width} ${size.height}`;
+    if (edgeLayer.getAttribute('viewBox') !== viewBox) edgeLayer.setAttribute('viewBox', viewBox);
+  }
+  return size;
 }
 
 function nodeWidth(node) {
@@ -195,8 +241,8 @@ function normaliseNode(raw, index, usedIds) {
     id,
     label: typeof raw?.label === 'string' && raw.label.trim() ? raw.label.slice(0, 160) : `Paso ${index + 1}`,
     type: validNodeType(raw?.type),
-    x: clamp(Number.isFinite(Number(raw?.x)) ? Number(raw.x) : fallbackPosition.x, NODE_MARGIN, BOARD_WIDTH - width - NODE_MARGIN),
-    y: clamp(Number.isFinite(Number(raw?.y)) ? Number(raw.y) : fallbackPosition.y, NODE_MARGIN, BOARD_HEIGHT - height - NODE_MARGIN),
+    x: clamp(Number.isFinite(Number(raw?.x)) ? Number(raw.x) : fallbackPosition.x, NODE_MARGIN, BOARD_MAX_WIDTH - width - NODE_MARGIN),
+    y: clamp(Number.isFinite(Number(raw?.y)) ? Number(raw.y) : fallbackPosition.y, NODE_MARGIN, BOARD_MAX_HEIGHT - height - NODE_MARGIN),
     width,
     height
   };
@@ -854,7 +900,7 @@ function addNodeDescription() {
   const before = historySnapshot();
   node.description = '';
   node.height = Math.max(nodeHeight(node), NODE_DESCRIPTION_MIN_HEIGHT);
-  node.y = clamp(node.y, NODE_MARGIN, BOARD_HEIGHT - node.height - NODE_MARGIN);
+  node.y = clamp(node.y, NODE_MARGIN, BOARD_MAX_HEIGHT - node.height - NODE_MARGIN);
   focusNodeDescriptionId = node.id;
   recordHistory(before);
   persistDiagrams();
@@ -975,11 +1021,20 @@ function applyDiagramViewport() {
 function fitDiagramViewport() {
   const canvas = $('#diagram-canvas');
   if (!canvas || !canvas.clientWidth || !canvas.clientHeight) return;
-  const zoom = clamp(Math.min(canvas.clientWidth / BOARD_WIDTH, canvas.clientHeight / BOARD_HEIGHT), DIAGRAM_ZOOM_MIN, 1);
+  let boardWidth = BOARD_MIN_WIDTH;
+  let boardHeight = BOARD_MIN_HEIGHT;
+  try {
+    const sized = diagramBoardSize(activeDiagram());
+    boardWidth = sized.width;
+    boardHeight = sized.height;
+  } catch {
+    // Mantiene el tamaño mínimo si el diagrama aún no está disponible.
+  }
+  const zoom = clamp(Math.min(canvas.clientWidth / boardWidth, canvas.clientHeight / boardHeight), DIAGRAM_ZOOM_MIN, 1);
   diagramViewport = {
     zoom,
-    offsetX: (canvas.clientWidth - BOARD_WIDTH * zoom) / 2,
-    offsetY: (canvas.clientHeight - BOARD_HEIGHT * zoom) / 2,
+    offsetX: (canvas.clientWidth - boardWidth * zoom) / 2,
+    offsetY: (canvas.clientHeight - boardHeight * zoom) / 2,
     initialized: true,
     userZoomed: false
   };
@@ -1007,8 +1062,8 @@ function boardPointFromCanvasCoordinates(x, y) {
   if (!diagramViewport.initialized) fitDiagramViewport();
   const zoom = diagramViewport.zoom || 1;
   return {
-    x: clamp((x - diagramViewport.offsetX) / zoom, 0, BOARD_WIDTH),
-    y: clamp((y - diagramViewport.offsetY) / zoom, 0, BOARD_HEIGHT)
+    x: clamp((x - diagramViewport.offsetX) / zoom, 0, BOARD_MAX_WIDTH),
+    y: clamp((y - diagramViewport.offsetY) / zoom, 0, BOARD_MAX_HEIGHT)
   };
 }
 
@@ -1058,10 +1113,12 @@ function nodePoint(node, portName) {
   if (board && portElement) {
     const boardRect = board.getBoundingClientRect();
     const portRect = portElement.getBoundingClientRect();
-    if (boardRect.width && boardRect.height) {
+    const boardWidth = board.offsetWidth || diagramBoardSize(activeDiagram()).width;
+    const boardHeight = board.offsetHeight || diagramBoardSize(activeDiagram()).height;
+    if (boardRect.width && boardRect.height && boardWidth && boardHeight) {
       return {
-        x: (portRect.left + portRect.width / 2 - boardRect.left) * BOARD_WIDTH / boardRect.width,
-        y: (portRect.top + portRect.height / 2 - boardRect.top) * BOARD_HEIGHT / boardRect.height
+        x: (portRect.left + portRect.width / 2 - boardRect.left) * boardWidth / boardRect.width,
+        y: (portRect.top + portRect.height / 2 - boardRect.top) * boardHeight / boardRect.height
       };
     }
   }
@@ -1250,6 +1307,7 @@ function updateSelectionUI() {
 
 function renderDiagramCanvas() {
   const diagram = activeDiagram();
+  refreshBoardSize(diagram);
   renderNodes(diagram);
   renderEdges(diagram);
   const hint = $('#diagram-empty-hint');
@@ -1263,7 +1321,8 @@ export function renderDiagrams() {
   hideEdgeContextMenu();
   const diagram = activeDiagram();
   const selectableDiagrams = visibleDiagrams();
-  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap">${sectionIconMarkup('diagrams')}<div class="diagram-title-copy"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${selectableDiagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${BOARD_WIDTH}px; height: ${BOARD_HEIGHT}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
+  const boardSize = diagramBoardSize(diagram);
+  root.innerHTML = `<div class="diagram-shell"><header class="diagram-toolbar"><div class="diagram-title-wrap">${sectionIconMarkup('diagrams')}<div class="diagram-title-copy"><span class="diagram-eyebrow">DIAGRAMAS</span><input id="diagram-title" class="diagram-title" value="${escapeHtml(diagram.title)}" maxlength="120" aria-label="Nombre del diagrama" /></div></div><div class="diagram-toolbar-actions"><label class="diagram-select-wrap"><span>Documento</span><select id="diagram-select" class="diagram-select">${selectableDiagrams.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === diagram.id ? ' selected' : ''}>${escapeHtml(item.title)}</option>`).join('')}</select></label></div></header><div class="diagram-main"><div class="diagram-canvas" id="diagram-canvas"><div class="diagram-board" id="diagram-board" style="width: ${boardSize.width}px; height: ${boardSize.height}px;"><svg id="diagram-edge-layer" class="diagram-edge-layer" viewBox="0 0 ${boardSize.width} ${boardSize.height}" aria-label="Conexiones del diagrama"><defs><marker id="diagram-arrow" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker><marker id="diagram-arrow-preview" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="currentColor"></path></marker></defs><g id="diagram-edge-paths"></g></svg><div id="diagram-node-layer" class="diagram-node-layer"></div><div id="diagram-empty-hint" class="diagram-empty-hint"><strong>Empieza tu flujo</strong><span>Añade un nodo o haz doble clic en el lienzo</span></div></div></div></div></div>`;
   ensureDiagramViewport();
   observeDiagramCanvas();
   const arrowMarker = root.querySelector('#diagram-arrow');
@@ -1311,7 +1370,10 @@ function setSelection(type = '', id = '') {
 
 function boardPoint(event) {
   const canvas = $('#diagram-canvas');
-  if (!canvas) return { x: BOARD_WIDTH / 2, y: BOARD_HEIGHT / 2 };
+  if (!canvas) {
+    const fallbackSize = diagramBoardSize(activeDiagram());
+    return { x: fallbackSize.width / 2, y: fallbackSize.height / 2 };
+  }
   ensureDiagramViewport();
   const rect = canvas.getBoundingClientRect();
   return boardPointFromCanvasCoordinates(event.clientX - rect.left, event.clientY - rect.top);
@@ -1329,6 +1391,9 @@ function nodePositionIsFree(diagram, x, y) {
 }
 
 function findAvailableNodePosition(diagram, preferred) {
+  const boardSize = diagramBoardSize(diagram);
+  const maxX = Math.max(NODE_MARGIN, BOARD_MAX_WIDTH - NODE_WIDTH - NODE_MARGIN);
+  const maxY = Math.max(NODE_MARGIN, BOARD_MAX_HEIGHT - NODE_HEIGHT - NODE_MARGIN);
   const candidates = [
     preferred,
     { x: preferred.x + NODE_WIDTH + 44, y: preferred.y },
@@ -1339,20 +1404,26 @@ function findAvailableNodePosition(diagram, preferred) {
     { x: preferred.x - NODE_WIDTH - 44, y: preferred.y + NODE_HEIGHT + 44 }
   ];
   for (const candidate of candidates) {
-    const x = clamp(candidate.x, NODE_MARGIN, BOARD_WIDTH - NODE_WIDTH - NODE_MARGIN);
-    const y = clamp(candidate.y, NODE_MARGIN, BOARD_HEIGHT - NODE_HEIGHT - NODE_MARGIN);
+    const x = clamp(candidate.x, NODE_MARGIN, maxX);
+    const y = clamp(candidate.y, NODE_MARGIN, maxY);
     if (nodePositionIsFree(diagram, x, y)) return { x, y };
   }
-  for (let row = 0; row < 6; row += 1) {
-    for (let column = 0; column < 6; column += 1) {
+  const columns = Math.max(1, Math.floor((boardSize.width - NODE_MARGIN * 2) / (NODE_WIDTH + 44)));
+  const rows = Math.max(1, Math.floor((boardSize.height - NODE_MARGIN * 2) / (NODE_HEIGHT + 44)));
+  for (let row = 0; row < rows; row += 1) {
+    for (let column = 0; column < columns; column += 1) {
       const x = NODE_MARGIN + column * (NODE_WIDTH + 44);
       const y = NODE_MARGIN + row * (NODE_HEIGHT + 44);
       if (nodePositionIsFree(diagram, x, y)) return { x, y };
     }
   }
+  let maxBottom = NODE_MARGIN;
+  diagram.nodes.forEach((node) => {
+    maxBottom = Math.max(maxBottom, (Number(node.y) || 0) + nodeHeight(node) + 44);
+  });
   return {
-    x: clamp(preferred.x, NODE_MARGIN, BOARD_WIDTH - NODE_WIDTH - NODE_MARGIN),
-    y: clamp(preferred.y, NODE_MARGIN, BOARD_HEIGHT - NODE_HEIGHT - NODE_MARGIN)
+    x: clamp(preferred.x, NODE_MARGIN, maxX),
+    y: clamp(maxBottom, NODE_MARGIN, maxY)
   };
 }
 
@@ -1688,8 +1759,10 @@ function handleNodePointerDown(event) {
   const rect = element.getBoundingClientRect();
   const board = $('#diagram-board');
   const boardRect = board?.getBoundingClientRect();
-  const scaleX = boardRect?.width ? boardRect.width / BOARD_WIDTH : 1;
-  const scaleY = boardRect?.height ? boardRect.height / BOARD_HEIGHT : 1;
+  const boardLayoutWidth = board?.offsetWidth || 0;
+  const boardLayoutHeight = board?.offsetHeight || 0;
+  const scaleX = boardRect?.width && boardLayoutWidth ? boardRect.width / boardLayoutWidth : diagramViewport.zoom || 1;
+  const scaleY = boardRect?.height && boardLayoutHeight ? boardRect.height / boardLayoutHeight : diagramViewport.zoom || 1;
   dragState = {
     id: element.dataset.nodeId,
     pointerId: event.pointerId,
@@ -1993,9 +2066,12 @@ function diagramEdgeSvg(edge, diagram, colors, index = 0) {
 function createDiagramImageSvg(diagram) {
   const colors = diagramImageColors();
   const safeDiagram = diagram || { title: 'Diagrama', nodes: [], edges: [] };
+  const boardSize = diagramBoardSize(safeDiagram);
+  const boardWidth = boardSize.width;
+  const boardHeight = boardSize.height;
   const edges = Array.isArray(safeDiagram.edges) ? safeDiagram.edges.map((edge, index) => diagramEdgeSvg(edge, safeDiagram, colors, index)).join('') : '';
   const nodes = Array.isArray(safeDiagram.nodes) ? safeDiagram.nodes.map((node) => diagramNodeSvg(node, colors)).join('') : '';
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" viewBox="0 0 ${BOARD_WIDTH} ${BOARD_HEIGHT}" role="img" aria-labelledby="diagram-image-title"><title id="diagram-image-title">${escapeSvg(safeDiagram.title || 'Diagrama')}</title><defs><pattern id="diagram-image-grid" width="${DIAGRAM_GRID_SIZE}" height="${DIAGRAM_GRID_SIZE}" patternUnits="userSpaceOnUse"><path d="M ${DIAGRAM_GRID_SIZE} 0 L 0 0 0 ${DIAGRAM_GRID_SIZE}" fill="none" stroke="${escapeSvg(colors.gridLine)}" stroke-width="1"></path></pattern><filter id="diagram-image-shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity=".3"></feDropShadow></filter><marker id="diagram-image-arrow-forward" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(colors.blue)}"></path></marker><marker id="diagram-image-arrow-backward" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(colors.purple)}"></path></marker></defs><rect width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" fill="${escapeSvg(colors.canvas)}"></rect><rect width="${BOARD_WIDTH}" height="${BOARD_HEIGHT}" fill="url(#diagram-image-grid)"></rect><g aria-label="Conexiones">${edges}</g><g aria-label="Nodos">${nodes}</g></svg>`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${boardWidth}" height="${boardHeight}" viewBox="0 0 ${boardWidth} ${boardHeight}" role="img" aria-labelledby="diagram-image-title"><title id="diagram-image-title">${escapeSvg(safeDiagram.title || 'Diagrama')}</title><defs><pattern id="diagram-image-grid" width="${DIAGRAM_GRID_SIZE}" height="${DIAGRAM_GRID_SIZE}" patternUnits="userSpaceOnUse"><path d="M ${DIAGRAM_GRID_SIZE} 0 L 0 0 0 ${DIAGRAM_GRID_SIZE}" fill="none" stroke="${escapeSvg(colors.gridLine)}" stroke-width="1"></path></pattern><filter id="diagram-image-shadow" x="-20%" y="-30%" width="140%" height="170%"><feDropShadow dx="0" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity=".3"></feDropShadow></filter><marker id="diagram-image-arrow-forward" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(colors.blue)}"></path></marker><marker id="diagram-image-arrow-backward" markerWidth="14" markerHeight="14" refX="12" refY="7" orient="auto-start-reverse" markerUnits="userSpaceOnUse"><path d="M 0 0 L 12 7 L 0 14 z" fill="${escapeSvg(colors.purple)}"></path></marker></defs><rect width="${boardWidth}" height="${boardHeight}" fill="${escapeSvg(colors.canvas)}"></rect><rect width="${boardWidth}" height="${boardHeight}" fill="url(#diagram-image-grid)"></rect><g aria-label="Conexiones">${edges}</g><g aria-label="Nodos">${nodes}</g></svg>`;
 }
 
 function canvasToPngDataUrl(canvas) {
@@ -2040,8 +2116,13 @@ function svgToPngDataUrl(svg) {
     image.onload = async () => {
       try {
         const canvas = document.createElement('canvas');
-        canvas.width = BOARD_WIDTH * DIAGRAM_IMAGE_SCALE;
-        canvas.height = BOARD_HEIGHT * DIAGRAM_IMAGE_SCALE;
+        const sizeMatch = /width="(\d+(?:\.\d+)?)"[^>]*height="(\d+(?:\.\d+)?)"/.exec(svg);
+        const svgWidth = sizeMatch ? Number(sizeMatch[1]) : BOARD_MIN_WIDTH;
+        const svgHeight = sizeMatch ? Number(sizeMatch[2]) : BOARD_MIN_HEIGHT;
+        const exportWidth = Number.isFinite(svgWidth) && svgWidth > 0 ? svgWidth : BOARD_MIN_WIDTH;
+        const exportHeight = Number.isFinite(svgHeight) && svgHeight > 0 ? svgHeight : BOARD_MIN_HEIGHT;
+        canvas.width = Math.round(exportWidth * DIAGRAM_IMAGE_SCALE);
+        canvas.height = Math.round(exportHeight * DIAGRAM_IMAGE_SCALE);
         const context = canvas.getContext('2d');
         if (!context) throw new Error('El navegador no permite crear un lienzo de imagen');
         context.imageSmoothingEnabled = true;
@@ -2111,14 +2192,16 @@ function handlePointerMove(event) {
     const board = $('#diagram-board');
     if (!node || !board) return;
     const boardRect = board.getBoundingClientRect();
-    const scaleX = boardRect.width ? boardRect.width / BOARD_WIDTH : 1;
-    const scaleY = boardRect.height ? boardRect.height / BOARD_HEIGHT : 1;
+    const boardLayoutWidth = board.offsetWidth || 0;
+    const boardLayoutHeight = board.offsetHeight || 0;
+    const scaleX = boardRect.width && boardLayoutWidth ? boardRect.width / boardLayoutWidth : diagramViewport.zoom || 1;
+    const scaleY = boardRect.height && boardLayoutHeight ? boardRect.height / boardLayoutHeight : diagramViewport.zoom || 1;
     const distance = Math.hypot(event.clientX - resizeState.startX, event.clientY - resizeState.startY);
     if (!resizeState.moved && distance < 5) return;
     resizeState.moved = true;
     event.preventDefault();
-    const maxWidth = Math.min(NODE_MAX_WIDTH, BOARD_WIDTH - node.x - NODE_MARGIN);
-    const maxHeight = Math.min(NODE_MAX_HEIGHT, BOARD_HEIGHT - node.y - NODE_MARGIN);
+    const maxWidth = Math.min(NODE_MAX_WIDTH, BOARD_MAX_WIDTH - node.x - NODE_MARGIN);
+    const maxHeight = Math.min(NODE_MAX_HEIGHT, BOARD_MAX_HEIGHT - node.y - NODE_MARGIN);
     node.width = Math.round(clamp(resizeState.startWidth + (event.clientX - resizeState.startX) / scaleX, NODE_MIN_WIDTH, maxWidth));
     node.height = Math.round(clamp(resizeState.startHeight + (event.clientY - resizeState.startY) / scaleY, NODE_MIN_HEIGHT, maxHeight));
     const element = document.querySelector(`[data-node-id="${node.id}"]`);
@@ -2127,6 +2210,7 @@ function handlePointerMove(event) {
       element.style.height = `${node.height}px`;
     }
     renderEdges(diagram);
+    refreshBoardSize(diagram);
     return;
   }
   if (panState && panState.pointerId === event.pointerId) {
@@ -2150,11 +2234,12 @@ function handlePointerMove(event) {
   dragState.moved = true;
   event.preventDefault();
   const point = boardPoint(event);
-  node.x = clamp(point.x - dragState.offsetX, NODE_MARGIN, BOARD_WIDTH - nodeWidth(node) - NODE_MARGIN);
-  node.y = clamp(point.y - dragState.offsetY, NODE_MARGIN, BOARD_HEIGHT - nodeHeight(node) - NODE_MARGIN);
+  node.x = clamp(point.x - dragState.offsetX, NODE_MARGIN, BOARD_MAX_WIDTH - nodeWidth(node) - NODE_MARGIN);
+  node.y = clamp(point.y - dragState.offsetY, NODE_MARGIN, BOARD_MAX_HEIGHT - nodeHeight(node) - NODE_MARGIN);
   const element = document.querySelector(`[data-node-id="${node.id}"]`);
   if (element) element.style.transform = `translate(${node.x}px, ${node.y}px)`;
   renderEdges(diagram);
+  refreshBoardSize(diagram);
 }
 
 function handlePointerUp(event) {

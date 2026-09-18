@@ -1,12 +1,12 @@
-const BOARD_WIDTH = 1400;
-const BOARD_HEIGHT = 900;
+const BOARD_MAX_WIDTH = 20000;
+const BOARD_MAX_HEIGHT = 20000;
 const NODE_WIDTH = 190;
 const NODE_HEIGHT = 88;
 const NODE_DESCRIPTION_MAX_LENGTH = 2000;
 const NODE_MARGIN = 20;
 const AUTO_LAYOUT_COLUMNS = 4;
-const AUTO_LAYOUT_COLUMN_GAP = 140;
-const AUTO_LAYOUT_ROW_GAP = 120;
+const AUTO_LAYOUT_COLUMN_GAP = 240;
+const AUTO_LAYOUT_ROW_GAP = 180;
 const NODE_ID_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]*$/;
 
 const TYPE_ALIASES = Object.freeze({
@@ -167,8 +167,8 @@ function parseNode(tokens, lineNumber, index) {
     id: idToken.value,
     label: String(labelToken.value).slice(0, 160),
     type,
-    x: clamp(position.x, NODE_MARGIN, BOARD_WIDTH - NODE_WIDTH - NODE_MARGIN),
-    y: clamp(position.y, NODE_MARGIN, BOARD_HEIGHT - NODE_HEIGHT - NODE_MARGIN)
+    x: clamp(position.x, NODE_MARGIN, BOARD_MAX_WIDTH - NODE_WIDTH - NODE_MARGIN),
+    y: clamp(position.y, NODE_MARGIN, BOARD_MAX_HEIGHT - NODE_HEIGHT - NODE_MARGIN)
   };
 }
 

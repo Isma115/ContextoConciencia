@@ -45,6 +45,11 @@
   .sdd-filter-search { min-width: 0; flex-basis: 100%; }
   .sdd-filter-select { min-width: 0; flex: 1 1 140px; }
   .sdd-filter-clear { align-self: end; }
+  .prompt-config-layout { grid-template-columns: minmax(0, 1fr); }
+  .prompt-config-header { align-items: start; flex-direction: column; }
+  .prompt-config-library { max-height: 300px; }
+  .prompt-config-editor { min-height: 520px; }
+  .view#view-prompt-config.active { overflow-y: auto; }
 }
 
 .file-explorer-breadcrumbs { overflow: hidden; }

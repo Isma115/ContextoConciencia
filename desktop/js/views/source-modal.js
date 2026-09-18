@@ -31,8 +31,18 @@ export function openSourceModal(existing = null, forcedType = null, initialPaths
         paths.splice(index, 1);
         renderConfig('local');
       }));
-      $('#choose-files').addEventListener('click', async () => { const selected = await window.nexusData.selectLocalPaths({ directory: false }); paths.push(...selected); renderConfig('local'); });
-      $('#choose-folder').addEventListener('click', async () => { const selected = await window.nexusData.selectLocalPaths({ directory: true }); paths.push(...selected); renderConfig('local'); });
+      const choosePaths = async (directory) => {
+        try {
+          if (typeof window.nexusData?.selectLocalPaths !== 'function') throw new Error('El selector de archivos no está disponible');
+          const selected = await window.nexusData.selectLocalPaths({ directory });
+          if (Array.isArray(selected) && selected.length) {
+            paths.push(...selected);
+            renderConfig('local');
+          }
+        } catch (error) { showToast(error?.message || 'No se pudo abrir el selector de archivos', true); }
+      };
+      $('#choose-files').addEventListener('click', () => choosePaths(false));
+      $('#choose-folder').addEventListener('click', () => choosePaths(true));
     }
   };
   renderConfig(type);

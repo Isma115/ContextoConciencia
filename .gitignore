@@ -6,3 +6,4 @@ data/*.db-*
 .env
 npm-debug.log*
 /wallacepop_ejemplo/
+/release/

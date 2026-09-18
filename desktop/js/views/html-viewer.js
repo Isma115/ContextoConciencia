@@ -5,6 +5,7 @@ import { sectionIconMarkup } from '../core/section-icons.js';
 import { showToast } from '../ui/notifications.js';
 import { copyGitDiffPrompt, openNewDiagramPromptModal } from './diagram-prompt-modal.js';
 import { copyCompletedSpecsPrompt, copyFollowSpecsPrompt } from './specs-prompt.js';
+import { copyPromptById } from './prompt-config.js';
 
 let previewRenderId = 0;
 let viewerLoadId = 0;
@@ -243,7 +244,11 @@ async function chooseHtmlViewerPaths(directory) {
 }
 
 export function bindHtmlViewerMenu() {
-  window.nexusData?.onHtmlViewerMenuAction?.((action) => {
+  window.nexusData?.onHtmlViewerMenuAction?.((action, value) => {
+    if (action === 'configure-prompts') {
+      navigateToView?.('prompt-config');
+      return;
+    }
     if (action === 'new-diagram-prompt') {
       openNewDiagramPromptModal();
       return;
@@ -258,6 +263,10 @@ export function bindHtmlViewerMenu() {
     }
     if (action === 'copy-follow-specs-prompt') {
       copyFollowSpecsPrompt();
+      return;
+    }
+    if (action === 'copy-custom-prompt') {
+      void copyPromptById(value);
       return;
     }
     if (state.view !== 'html-viewer') return;

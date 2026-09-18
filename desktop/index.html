@@ -38,8 +38,14 @@
             <button class="nav-item nav-item-sub" data-view="diagrams"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><circle cx="8" cy="9" r="3"></circle><circle cx="24" cy="9" r="3"></circle><circle cx="16" cy="24" r="3"></circle><path d="m10.7 10.3 3.7 10.8M21.3 10.3l-3.7 10.8M11 9h10"></path></svg></span><span>Diagramas</span></button>
             <button class="nav-item" data-view="code-map" hidden><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="m12 7-7 9 7 9M20 7l7 9-7 9M17 5l-2 22"></path></svg></span><span>Mapa de código</span></button>
             <button class="nav-item" data-view="sources"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M4.5 9.5h8l2.2-3h12.8v19H4.5z"></path><path d="M4.5 10.5h23"></path><path d="M16 14.5v6M13 17.5h6"></path></svg></span><span>Fuentes</span></button>
-            <button class="nav-item" data-view="file-explorer"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M5 7.5h8l2.5 3H27v14H5z"></path><path d="M5 11h22"></path><path d="M10 16h.01M15 16h.01M20 16h.01"></path></svg></span><span>Explorador de ficheros</span></button>
+            <button class="nav-item" data-view="file-explorer" hidden><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M5 7.5h8l2.5 3H27v14H5z"></path><path d="M5 11h22"></path><path d="M10 16h.01M15 16h.01M20 16h.01"></path></svg></span><span>Explorador de ficheros</span></button>
           </nav>
+          <div class="sidebar-section sidebar-section-prompts" aria-label="Configuración">
+            <div class="sidebar-section-heading"><span>CONFIGURACIÓN</span></div>
+            <nav class="main-nav" aria-label="Configuración">
+              <button class="nav-item" data-view="prompt-config"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 32 32" focusable="false"><path d="M7 8h18M7 16h18M7 24h18"></path><circle cx="12" cy="8" r="2.3"></circle><circle cx="21" cy="16" r="2.3"></circle><circle cx="15" cy="24" r="2.3"></circle></svg></span><span>Configurar prompts</span></button>
+            </nav>
+          </div>
           <div class="sidebar-section sidebar-section-sdd is-collapsed" aria-label="Sección S.D.D">
             <div class="sidebar-section-heading sidebar-project-heading"><span>PROYECTO</span></div>
             <div class="sidebar-label-row sdd-label-row">
@@ -49,6 +55,10 @@
             <label class="sidebar-prompt-option" title="Si está marcado, el prompt de Generar specs.md usará specs.md y specs_full.md como contexto; si no, solo usará specs.md (pendientes) y no tendrá en cuenta specs_full.md durante el análisis">
               <input id="sdd-include-full-prompt" type="checkbox" />
               <span>Todas las specs</span>
+            </label>
+            <label class="sidebar-prompt-option" title="Si está marcado, el prompt de “Trabajar siguiendo specs” indicará al Agente que no realice pruebas sobre los cambios aplicados">
+              <input id="sdd-skip-tests-prompt" type="checkbox" />
+              <span>Sin tests</span>
             </label>
             <div class="sidebar-section-heading sidebar-resources-heading"><span>RECURSOS</span></div>
             <nav class="main-nav" aria-label="Navegación S.D.D">
@@ -72,6 +82,7 @@
         <section id="view-code-map" class="view"></section>
         <section id="view-sources" class="view"></section>
         <section id="view-file-explorer" class="view"></section>
+        <section id="view-prompt-config" class="view"></section>
         <section id="view-sdd-home" class="view"></section>
         <section id="view-sdd-specs" class="view"></section>
         <section id="view-sdd-database" class="view"></section>

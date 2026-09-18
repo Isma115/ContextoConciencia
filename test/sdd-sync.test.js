@@ -111,7 +111,7 @@ El usuario puede exportar el diagrama como PNG.
   assert.match(specs[1].description, /exportar el diagrama como PNG/);
 });
 
-test('parsea valores por defecto y listas de metadatos', () => {
+test('usa Activa por defecto y normaliza los estados retirados', () => {
   const specs = parseSddSpecsMarkdown(`## Requisito sin metadatos
 Solo una descripción.
 
@@ -122,15 +122,15 @@ Solo una descripción.
   assert.equal(specs.length, 2);
   assert.deepEqual(
     { status: specs[0].status, category: specs[0].category },
-    { status: 'draft', category: '' }
+    { status: 'active', category: '' }
   );
-  assert.equal(specs[1].status, 'draft');
+  assert.equal(specs[1].status, 'active');
   assert.equal(specs[1].description, '');
 });
 
 test('genera markdown que vuelve a parsearse sin perder datos', () => {
   const original = [
-    { title: 'Buscar documentos', description: 'Permite buscar por contenido.', status: 'active', category: 'Búsqueda' },
+    { title: 'Buscar documentos', description: 'Permite buscar por contenido.', status: 'active', category: 'Búsqueda', color: 'blue' },
     { title: 'Exportar diagramas', description: '', status: 'implemented', category: '' }
   ];
   const markdown = sddSpecsToMarkdown(original);
@@ -138,6 +138,7 @@ test('genera markdown que vuelve a parsearse sin perder datos', () => {
   assert.match(markdown, /- Estado: Activa/);
   assert.doesNotMatch(markdown, /Prioridad/);
   assert.match(markdown, /- Categoría: Búsqueda/);
+  assert.match(markdown, /- Color: Azul/);
   const reparsed = parseSddSpecsMarkdown(markdown);
   assert.deepEqual(reparsed, original);
 });
@@ -267,25 +268,41 @@ test('sincroniza el editor y CRUD de Specs dentro de SDD_specs', async () => {
 
   const synced = await request('/sdd/specs/sync', {
     method: 'POST',
-    body: JSON.stringify({ markdown: '# Specs\n\n## Desde editor\n**Estado:** aprobada\n\nDescripción editada.\n' })
+    body: JSON.stringify({ markdown: '# Specs\n\n## Desde editor\n**Estado:** activa\n\nDescripción editada.\n' })
   }, projectPath);
   assert.equal(synced.body.total, 1);
   assert.match(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Desde editor/);
   assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Desde editor/);
 
-  const created = await request('/sdd/specs', { method: 'POST', body: JSON.stringify({ title: 'Añadida', status: 'draft', description: 'Texto' }) }, projectPath);
+  const created = await request('/sdd/specs', { method: 'POST', body: JSON.stringify({ title: 'Añadida', status: 'active', description: 'Texto', color: 'violet' }) }, projectPath);
   assert.equal(created.status, 201);
+  assert.equal(created.body.color, 'violet');
+  const retiredStatus = await request('/sdd/specs', { method: 'POST', body: JSON.stringify({ title: 'Estado retirado', status: 'draft' }) }, projectPath);
+  assert.equal(retiredStatus.status, 400);
+  assert.match(retiredStatus.body.error, /estado.*válido/i);
   assert.match(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Añadida/);
   assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Añadida/);
-  const updated = await request(`/sdd/specs/${created.body.id}`, { method: 'PUT', body: JSON.stringify({ title: 'Añadida actualizada', status: 'implemented' }) }, projectPath);
+  assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /- Color: Violeta/);
+  const updated = await request(`/sdd/specs/${created.body.id}`, { method: 'PUT', body: JSON.stringify({ title: 'Añadida actualizada', status: 'implemented', color: 'rose' }) }, projectPath);
   assert.equal(updated.status, 200);
+  assert.equal(updated.body.color, 'rose');
   // Implementada: sale de specs.md pero se conserva en specs_full.md.
   assert.doesNotMatch(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Añadida actualizada/);
   assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Añadida actualizada/);
+  assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /- Color: Rosado/);
   const removed = await request(`/sdd/specs/${created.body.id}`, { method: 'DELETE' }, projectPath);
   assert.equal(removed.status, 204);
   assert.doesNotMatch(fs.readFileSync(specsFile(projectPath), 'utf8'), /## Añadida actualizada/);
   assert.doesNotMatch(fs.readFileSync(fullFile(projectPath), 'utf8'), /## Añadida actualizada/);
+
+  const remaining = (await request('/sdd/specs', {}, projectPath)).body.specs[0];
+  const removedLast = await request(`/sdd/specs/${remaining.id}`, { method: 'DELETE' }, projectPath);
+  assert.equal(removedLast.status, 204);
+  const emptySpecs = await request('/sdd/specs', {}, projectPath);
+  assert.equal(emptySpecs.status, 200);
+  assert.deepEqual(emptySpecs.body.specs, []);
+  assert.match(fs.readFileSync(specsFile(projectPath), 'utf8'), /^# Specs$/m);
+  assert.match(fs.readFileSync(fullFile(projectPath), 'utf8'), /^# Specs$/m);
 });
 
 test('guarda Base de datos como una tabla Markdown y la vuelve a leer del disco', async () => {
@@ -358,7 +375,7 @@ test('acelera la gestión de requisitos con duplicado, edición masiva, orden y 
   const projectPath = createProject('sdd-project-productivity', `# Specs
 
 ## Buscar anuncios
-- Estado: Borrador
+- Estado: Activa
 - Categoría: Catálogo
 
 El usuario puede buscar anuncios.
@@ -370,7 +387,7 @@ El usuario puede buscar anuncios.
 El usuario puede guardar favoritos.
 
 ## Contactar vendedor
-- Estado: Aprobada
+- Estado: Activa
 - Categoría: Mensajería
 
 El usuario puede contactar con el vendedor.
@@ -397,11 +414,11 @@ Catálogo de anuncios.
 
   const bulk = await request('/sdd/specs/bulk', {
     method: 'PATCH',
-    body: JSON.stringify({ ids: ids.slice(0, 2), changes: { status: 'approved', category: 'Producto' } })
+    body: JSON.stringify({ ids: ids.slice(0, 2), changes: { status: 'implemented', category: 'Producto' } })
   }, projectPath);
   assert.equal(bulk.status, 200);
   assert.equal(bulk.body.updated.length, 2);
-  assert.deepEqual(bulk.body.updated.map((spec) => spec.status), ['approved', 'approved']);
+  assert.deepEqual(bulk.body.updated.map((spec) => spec.status), ['implemented', 'implemented']);
 
   const duplicate = await request(`/sdd/specs/${ids[0]}/duplicate`, { method: 'POST', body: JSON.stringify({}) }, projectPath);
   assert.equal(duplicate.status, 201);
@@ -538,7 +555,7 @@ Ya hecho.
 });
 
 test('marcar una spec como implementada la saca de specs.md pero la conserva en specs_full.md', async () => {
-  const projectPath = createSddProject('sdd-project-pending-filter', '# Specs\n\n## Algo por hacer\n**Estado:** borrador\n');
+  const projectPath = createSddProject('sdd-project-pending-filter', '# Specs\n\n## Algo por hacer\n**Estado:** activa\n');
   await loadProject(projectPath);
   const created = await request('/sdd/specs', { method: 'POST', body: JSON.stringify({ title: 'Otra tarea', status: 'active', description: 'Detalle' }) }, projectPath);
   assert.equal(created.status, 201);

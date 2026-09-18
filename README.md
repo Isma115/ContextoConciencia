@@ -26,6 +26,18 @@ pnpm server
 
 El servidor que usa Electron es interno y solo sirve la interfaz y la persistencia local; no habilita conexiones a servicios remotos.
 
+## Generar instaladores
+
+```bash
+# macOS: crea un instalador universal (.dmg) para Apple Silicon e Intel
+pnpm build:mac
+
+# Windows x64: crea un instalador asistido (.exe / NSIS)
+pnpm build:win
+```
+
+Los artefactos se guardan en `release/`. La firma y notarización para distribución pública no están incluidas; los comandos generan paquetes instalables sin firmar.
+
 ## Integraciones online
 
 Las integraciones REST, MySQL y el servidor HTTP de prueba se conservan en el código para una futura activación, pero no se usan en esta versión offline.

@@ -41,10 +41,10 @@ edge validar -> terminar
 
   assert.deepEqual(diagram.nodes.map(({ x, y }) => ({ x, y })), [
     { x: 100, y: 100 },
-    { x: 430, y: 100 },
-    { x: 760, y: 100 }
+    { x: 530, y: 100 },
+    { x: 960, y: 100 }
   ]);
-  assert.ok(diagram.nodes[1].x - diagram.nodes[0].x - 190 >= 140);
+  assert.ok(diagram.nodes[1].x - diagram.nodes[0].x - 190 >= 240);
 });
 
 test('exporta una forma canónica que se puede volver a importar', async () => {

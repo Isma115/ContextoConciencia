@@ -20,8 +20,8 @@ Un archivo puede contener cuatro instrucciones:
 diagram "Flujo de acceso"
 
 node inicio "Inicio" start at 100, 180
-node validar "Validar credenciales" decision at 430, 180
-node panel "Panel principal" end at 760, 180
+node validar "Validar credenciales" decision at 530, 180
+node panel "Panel principal" end at 960, 180
 
 description validar "Comprueba los datos recibidos antes de continuar."
 
@@ -57,7 +57,7 @@ Partes de la instrucción:
 - `identificador`: nombre único, sin espacios. Puede usar letras, números, guiones y guiones bajos, pero debe comenzar por una letra o guion bajo.
 - `Etiqueta visible`: texto que aparecerá dentro de la tarjeta. Debe ir entre comillas.
 - `tipo`: opcional; si se omite, el nodo es un paso normal.
-- `at x, y`: opcional; fija la posición de la tarjeta en el lienzo de 1400 × 900 unidades.
+- `at x, y`: opcional; fija la posición de la tarjeta. El lienzo crece dinámicamente hasta 20000 × 20000, con un mínimo visible de 1400 × 900.
 
 Tipos disponibles:
 
@@ -72,12 +72,12 @@ Ejemplos:
 
 ```text
 node recibir "Recibir solicitud"
-node revisar "¿Está completa?" decision at 430, 260
-node corregir "Pedir corrección" paso at 800, 430
-node terminado "Proceso terminado" fin at 800, 80
+node revisar "¿Está completa?" decision at 530, 260
+node corregir "Pedir corrección" paso at 960, 440
+node terminado "Proceso terminado" fin at 960, 80
 ```
 
-Si no se indica `at`, NexusData coloca los nodos automáticamente en una cuadrícula. Las posiciones negativas o fuera del lienzo se ajustan a sus límites.
+Si no se indica `at`, NexusData coloca los nodos automáticamente en una cuadrícula holgada (al menos 240 unidades horizontales y 180 verticales entre bordes). Las posiciones negativas se ajustan al margen mínimo; el lienzo se amplía solo hasta 20000 × 20000 si el contenido lo necesita.
 
 ## Descripciones de las tarjetas
 
@@ -138,11 +138,11 @@ Las etiquetas pueden incluir tildes, signos y espacios. No pongas un comentario 
 diagram "Registro de usuario"
 
 # Entradas y validaciones
-node formulario "Completar formulario" start at 100, 300
-node validar "Validar datos" decision at 430, 300
-node guardar "Guardar usuario" step at 800, 140
-node error "Mostrar errores" step at 800, 500
-node fin "Cuenta creada" end at 1170, 140
+node formulario "Completar formulario" start at 100, 400
+node validar "Validar datos" decision at 530, 400
+node guardar "Guardar usuario" step at 960, 180
+node error "Mostrar errores" step at 960, 640
+node fin "Cuenta creada" end at 1390, 180
 
 edge formulario -> validar "Enviar" forward
 edge validar -> guardar "Correctos" forward

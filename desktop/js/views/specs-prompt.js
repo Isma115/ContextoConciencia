@@ -1,14 +1,10 @@
 import { showToast } from '../ui/notifications.js';
+import { getPromptOverride, replacePromptVariables } from '../core/prompt-store.js';
 
 export const SDD_PROMPT_INCLUDE_FULL_KEY = 'nexusdata.sdd-prompt-include-full';
+export const SDD_PROMPT_SKIP_TESTS_KEY = 'nexusdata.sdd-prompt-skip-tests';
 
-export function readSddPromptIncludeFull() {
-  try {
-    const checkbox = typeof document !== 'undefined' ? document.querySelector('#sdd-include-full-prompt') : null;
-    if (checkbox instanceof HTMLInputElement) return checkbox.checked === true;
-  } catch {
-    // Sin acceso al DOM: se usa el valor almacenado.
-  }
+export function readStoredSddPromptIncludeFull() {
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
       return window.localStorage.getItem(SDD_PROMPT_INCLUDE_FULL_KEY) === 'true';
@@ -17,6 +13,16 @@ export function readSddPromptIncludeFull() {
     // El almacenamiento local puede no estar disponible.
   }
   return false;
+}
+
+export function readSddPromptIncludeFull() {
+  try {
+    const checkbox = typeof document !== 'undefined' ? document.querySelector('#sdd-include-full-prompt') : null;
+    if (checkbox instanceof HTMLInputElement) return checkbox.checked === true;
+  } catch {
+    // Sin acceso al DOM: se usa el valor almacenado.
+  }
+  return readStoredSddPromptIncludeFull();
 }
 
 export function persistSddPromptIncludeFull(includeFull) {
@@ -28,6 +34,38 @@ export function persistSddPromptIncludeFull(includeFull) {
     // La preferencia del prompt sigue funcionando aunque no se pueda persistir.
   }
   return includeFull === true;
+}
+
+export function readStoredSddPromptSkipTests() {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      return window.localStorage.getItem(SDD_PROMPT_SKIP_TESTS_KEY) === 'true';
+    }
+  } catch {
+    // El almacenamiento local puede no estar disponible.
+  }
+  return false;
+}
+
+export function readSddPromptSkipTests() {
+  try {
+    const checkbox = typeof document !== 'undefined' ? document.querySelector('#sdd-skip-tests-prompt') : null;
+    if (checkbox instanceof HTMLInputElement) return checkbox.checked === true;
+  } catch {
+    // Sin acceso al DOM: se usa el valor almacenado.
+  }
+  return readStoredSddPromptSkipTests();
+}
+
+export function persistSddPromptSkipTests(skipTests) {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(SDD_PROMPT_SKIP_TESTS_KEY, String(skipTests === true));
+    }
+  } catch {
+    // La preferencia del prompt sigue funcionando aunque no se pueda persistir.
+  }
+  return skipTests === true;
 }
 
 function completedSpecsPromptBody(includeFull) {
@@ -110,7 +148,7 @@ Para una referencia de texto, escribe el contenido debajo de sus metadatos. Para
 Reglas adicionales:
 
 - Mantén las cuatro secciones aunque estén vacías.
-- En Specs usa un encabezado "##" por requisito y exactamente el campo "- Estado: ..." con uno de estos valores: Borrador, Activa, Aprobada o Implementada. La categoría es opcional.
+- En Specs usa un encabezado "##" por requisito y exactamente el campo "- Estado: ..." con uno de estos valores: Activa o Implementada. La categoría es opcional; cuando la uses, elige una de estas salvo que ninguna encaje: Funcional, Usabilidad, Base de datos, Seguridad, Rendimiento, Integración.
 - En BBDD usa un encabezado "##" por tabla y una tabla Markdown de columnas; usa "Sí" o "No" en Nulo, "PK" para clave primaria y "—" cuando no haya valor.
 - En UI usa un encabezado "##" por referencia. No inventes rutas ni archivos.
 - En Recursos enumera únicamente archivos reales. No uses encabezados Markdown de nivel 2, 3 o 4 dentro de descripciones, porque S.D.D los interpreta como nuevos elementos.
@@ -121,35 +159,48 @@ Reglas adicionales:
 ${saveSection}`;
 }
 
-const FOLLOW_SPECS_PROMPT = `Actúa como agente de desarrollo y trabaja directamente sobre el proyecto actual.
+const FOLLOW_SPECS_PROMPT = `Trabaja sobre el proyecto actual siguiendo "SDD_specs/specs.md" (pendientes) y "SDD_specs/specs_full.md" (requisitos y estados) como fuente de verdad.
 
-## Fuente de verdad obligatoria
+- Implementa solo lo que describen los documentos; no inventes requisitos, diseños ni recursos.
+- No modifiques el campo "- Estado: ..." de ningún requisito, ni siquiera cuando completes su implementación; conserva los estados existentes en ambos documentos.
+- Ignora por completo el campo "- Color: ..." de cada Spec: es un metadato exclusivamente visual de su tarjeta. No lo trates como un requisito funcional.
+- Respeta la implementación, la arquitectura y las convenciones existentes.
+- Si algo es ambiguo o falta, resuélvelo de forma conservadora y déjalo constatado.`;
 
-Antes de analizar, planificar o modificar código, lee "SDD_specs/specs.md" y "SDD_specs/specs_full.md" dentro del proyecto. Usa "SDD_specs/specs.md" para identificar el trabajo pendiente, "SDD_specs/specs_full.md" para consultar todos los requisitos y sus estados, y recorre todos los archivos de "SDD_specs/specs_resources", incluidas sus subcarpetas. Trata esas fuentes y la implementación existente como la referencia funcional y técnica del trabajo.
-
-## Forma de trabajo
-
-- Sigue los requisitos, tablas, referencias de UI y recursos descritos en los documentos en el orden y con las restricciones que indiquen.
-- Comprueba la implementación existente antes de cambiarla y respeta la arquitectura, las convenciones y los contratos del proyecto.
-- Usa las imágenes, vídeos, audios y textos de "SDD_specs/specs_resources" cuando se referencien; no los sustituyas por contenido inventado ni los elimines o sobrescribas.
-- No inventes requisitos, pantallas, datos, endpoints, recursos ni decisiones de diseño que no estén respaldados por los documentos o la implementación.
-- Si encuentras una contradicción, un dato ambiguo o un recurso ausente, deja constancia y resuélvelo de forma conservadora sin ocultar la discrepancia.
-- Implementa el trabajo completo necesario, incluyendo validaciones, estados vacíos, errores y casos límite relevantes.
-- Mantén los cambios centrados en el objetivo y evita modificar la documentación o los recursos de referencia salvo que el propio documento lo exija.
-
-## Validación y respuesta
-
-Después de implementar, revisa el diff, comprueba que el resultado sigue fielmente a los documentos y que las referencias a "SDD_specs/specs_resources" funcionan desde el proyecto. Ejecuta las pruebas, comprobaciones o validaciones disponibles y corrige los fallos que encuentres. Responde con un resumen breve de los cambios realizados y de las comprobaciones ejecutadas.`;
-
-export function buildCompletedSpecsPrompt(options = {}) {
+export function getDefaultCompletedSpecsPrompt(options = {}) {
   const includeFull = typeof options?.includeFull === 'boolean'
     ? options.includeFull
     : readSddPromptIncludeFull();
   return completedSpecsPromptBody(includeFull === true);
 }
 
-export function buildFollowSpecsPrompt() {
-  return FOLLOW_SPECS_PROMPT;
+export function buildCompletedSpecsPrompt(options = {}) {
+  const includeFull = typeof options?.includeFull === 'boolean'
+    ? options.includeFull
+    : readSddPromptIncludeFull();
+  const custom = getPromptOverride('completed-specs');
+  return custom || getDefaultCompletedSpecsPrompt({ includeFull });
+}
+
+export function getDefaultFollowSpecsPrompt(options = {}) {
+  const skipTests = typeof options?.skipTests === 'boolean'
+    ? options.skipTests
+    : readSddPromptSkipTests();
+  return skipTests
+    ? `${FOLLOW_SPECS_PROMPT}\n- No realices pruebas sobre los cambios aplicados ni ejecutes tests.`
+    : FOLLOW_SPECS_PROMPT;
+}
+
+export function buildFollowSpecsPrompt(options = {}) {
+  const skipTests = typeof options?.skipTests === 'boolean'
+    ? options.skipTests
+    : readSddPromptSkipTests();
+  const custom = getPromptOverride('follow-specs');
+  return custom
+    ? replacePromptVariables(custom, {
+      SIN_TESTS: skipTests ? '- No realices pruebas sobre los cambios aplicados ni ejecutes tests.' : ''
+    })
+    : getDefaultFollowSpecsPrompt({ skipTests });
 }
 
 async function copyTextToClipboard(text) {
@@ -184,8 +235,8 @@ export async function copyCompletedSpecsPrompt() {
 export async function copyFollowSpecsPrompt() {
   try {
     await copyTextToClipboard(buildFollowSpecsPrompt());
-    showToast('Prompt para trabajar con specs.md copiado al portapapeles');
+    showToast('Prompt para trabajar siguiendo specs copiado al portapapeles');
   } catch (error) {
-    showToast(error.message || 'No se pudo copiar el prompt para trabajar con specs.md', true);
+    showToast(error.message || 'No se pudo copiar el prompt para trabajar siguiendo specs', true);
   }
 }
