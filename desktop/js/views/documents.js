@@ -328,13 +328,17 @@ export async function openDocument(id) {
       return;
     }
     const isMarkdown = doc.type === 'markdown';
+    const codeLanguage = window.NexusSyntaxHighlight?.languageFor(doc) || '';
     const content = documentContent(doc);
     const hasPath = Boolean(doc.path);
     const canRevealPath = hasPath && doc.type !== 'rest';
-    const modeButton = isMarkdown ? '<button class="btn btn-secondary markdown-mode-button" id="toggle-markdown-mode" type="button" aria-label="Cambiar al modo de edición">✎ Editar</button>' : '';
+    const hasPreviewMode = isMarkdown || Boolean(codeLanguage);
+    const modeButton = hasPreviewMode ? '<button class="btn btn-secondary document-mode-button" id="toggle-document-mode" type="button" aria-label="Cambiar al modo de edición">✎ Editar</button>' : '';
     const viewer = isMarkdown
-      ? `<div id="markdown-preview" class="markdown-preview" aria-label="Vista del documento Markdown">${window.NexusMarkdown.render(content)}</div><textarea id="document-content" class="document-content markdown-editor" aria-label="Editar contenido Markdown" spellcheck="false" hidden>${escapeHtml(content)}</textarea>`
-      : `<textarea id="document-content" class="document-content" aria-label="Contenido del documento" spellcheck="false">${escapeHtml(content)}</textarea>`;
+      ? `<div id="document-preview" class="markdown-preview" aria-label="Vista del documento Markdown">${window.NexusMarkdown.render(content)}</div><textarea id="document-content" class="document-content markdown-editor" aria-label="Editar contenido Markdown" spellcheck="false" hidden>${escapeHtml(content)}</textarea>`
+      : codeLanguage
+        ? `<pre id="document-preview" class="code-document-preview" aria-label="Vista de código"><code class="language-${escapeHtml(codeLanguage)}">${window.NexusSyntaxHighlight.highlight(content, codeLanguage)}</code></pre><textarea id="document-content" class="document-content code-document-editor" aria-label="Editar código" spellcheck="false" hidden>${escapeHtml(content)}</textarea>`
+        : `<textarea id="document-content" class="document-content" aria-label="Contenido del documento" spellcheck="false">${escapeHtml(content)}</textarea>`;
     const pathLabel = canRevealPath
       ? `<button id="reveal-document-path" class="viewer-path viewer-title-path" type="button" title="Mostrar el archivo en el explorador">↳ ${escapeHtml(doc.path)}</button>`
       : hasPath ? `<span class="viewer-title-path" title="${escapeHtml(doc.path)}">↳ ${escapeHtml(doc.path)}</span>` : '';
@@ -356,14 +360,16 @@ export async function openDocument(id) {
         }
       });
     }
-    if (isMarkdown) {
-      const modeButtonNode = $('#toggle-markdown-mode');
+    if (hasPreviewMode) {
+      const modeButtonNode = $('#toggle-document-mode');
       const editor = $('#document-content');
-      const preview = $('#markdown-preview');
+      const preview = $('#document-preview');
       modeButtonNode.addEventListener('click', () => {
         const editing = !editor.hidden;
         if (editing) {
-          preview.innerHTML = window.NexusMarkdown.render(editor.value);
+          preview.innerHTML = isMarkdown
+            ? window.NexusMarkdown.render(editor.value)
+            : `<code class="language-${escapeHtml(codeLanguage)}">${window.NexusSyntaxHighlight.highlight(editor.value, codeLanguage)}</code>`;
           editor.hidden = true;
           preview.hidden = false;
           modeButtonNode.textContent = '✎ Editar';
