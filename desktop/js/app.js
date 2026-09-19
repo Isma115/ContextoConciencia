@@ -12,7 +12,7 @@ import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/di
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
 import { renderFileExplorer } from './views/file-explorer.js';
-import { bindSddSectionToggle, collapseSddSection, configureSdd, expandSddSection, renderSddHome, renderSddSpecs, renderSddDatabase, renderSddResources, bindSddMenu, bindSddReload, bindSddVersionQuickAdd, bindProjectMenu, restoreLastSddProject } from './views/sdd.js';
+import { bindSddSectionToggle, collapseSddSection, configureSdd, expandSddSection, renderSddHome, renderSddSpecs, renderSddDatabase, renderSddResources, renderSddTerminal, bindSddMenu, bindSddReload, bindSddVersionQuickAdd, bindProjectMenu, restoreLastSddProject } from './views/sdd.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 import { loadDiagramFontSize, loadDiagramLineContrast } from './core/diagram-settings.js';
@@ -39,7 +39,8 @@ const AVAILABLE_VIEWS = new Set([
   'sdd-home',
   'sdd-specs',
   'sdd-database',
-  'sdd-resources'
+  'sdd-resources',
+  'sdd-terminal'
 ]);
 
 function normaliseView(value) {
@@ -155,6 +156,7 @@ function renderView() {
   if (state.view === 'sdd-specs') renderSddSpecs();
   if (state.view === 'sdd-database') renderSddDatabase();
   if (state.view === 'sdd-resources') renderSddResources();
+  if (state.view === 'sdd-terminal') renderSddTerminal();
 }
 
 async function initialiseSession() {

@@ -14,6 +14,7 @@ import {
   readStoredSddProjectPath
 } from '../core/sdd-storage.js';
 import { nextSddVersionName } from '../core/sdd-version.js';
+import { buildFollowSpecsPrompt } from './specs-prompt.js';
 
 const SPEC_STATUS = Object.freeze({ active: 'Activa', implemented: 'Implementada' });
 const SPEC_CATEGORIES = Object.freeze(['Funcional', 'Usabilidad', 'Base de datos', 'Seguridad', 'Rendimiento', 'Integración']);
@@ -77,6 +78,49 @@ const SPECS_RESOURCES_FOLDER_NAME = 'specs_resources';
 const SDD_SPECS_FILTERS_STORAGE_KEY = 'nexusdata.sdd-specs-filters.v1';
 // Solo se guardan los combobox de la vista de Specs: estado, categoría y orden.
 const SDD_SPECS_STORED_SELECT_FIELDS = Object.freeze(['status', 'category', 'sort']);
+const SDD_PI_CONFIG_STORAGE_KEY = 'nexusdata.sdd-pi-config.v1';
+const SDD_PI_TERMINAL_STORAGE_KEY = 'nexusdata.sdd-pi-terminal.v1';
+const SDD_PI_OUTPUT_REFRESH_DEFAULT_MS = 10_000;
+const SDD_PI_OUTPUT_REFRESH_MIN_MS = 1_000;
+const SDD_PI_OUTPUT_REFRESH_MAX_MS = 3_600_000;
+const SDD_PI_DEFAULT_CONFIG = Object.freeze({ provider: 'deepseek', model: 'deepseek-flash', thinking: 'max' });
+const SDD_PI_THINKING_OPTIONS = Object.freeze([
+  { value: 'off', label: 'Off' },
+  { value: 'minimal', label: 'Minimal' },
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'XHigh' },
+  { value: 'max', label: 'Max' }
+]);
+const SDD_PI_FALLBACK_PROVIDERS = Object.freeze([
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    authentication: 'api_key',
+    authenticated: null,
+    models: [
+      { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', reasoning: true },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', reasoning: true }
+    ]
+  },
+  {
+    id: 'openai-codex',
+    label: 'Codex (suscripción)',
+    authentication: 'subscription',
+    authenticated: null,
+    models: [
+      { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark', reasoning: true },
+      { id: 'gpt-5.4', name: 'GPT-5.4', reasoning: true },
+      { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', reasoning: true },
+      { id: 'gpt-5.5', name: 'GPT-5.5', reasoning: true },
+      { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', reasoning: true },
+      { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', reasoning: true },
+      { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', reasoning: true },
+      { id: 'gpt-6-astra', name: 'GPT-6 Astra', reasoning: true }
+    ]
+  }
+]);
 
 function readStoredSddSpecsFilters() {
   const stored = { status: '', category: '', sort: '' };
@@ -130,6 +174,59 @@ let renderRequestId = 0;
 let specStatusRefreshId = 0;
 let navigateToSddView = null;
 let sddActionInProgress = false;
+let piTerminalEventsBound = false;
+let piModelCatalogPromise = null;
+let sddPiProviders = SDD_PI_FALLBACK_PROVIDERS.map((provider) => ({
+  ...provider,
+  models: provider.models.map((model) => ({ ...model }))
+}));
+const piTerminalPendingEvents = new Map();
+const PI_TERMINAL_PENDING_MAX_EVENTS = 500;
+
+function normalisePiOutputRefreshInterval(value) {
+  const intervalMs = Number(value);
+  if (!Number.isFinite(intervalMs)) return SDD_PI_OUTPUT_REFRESH_DEFAULT_MS;
+  return Math.min(Math.max(Math.round(intervalMs), SDD_PI_OUTPUT_REFRESH_MIN_MS), SDD_PI_OUTPUT_REFRESH_MAX_MS);
+}
+
+function readStoredPiOutputRefreshInterval() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return SDD_PI_OUTPUT_REFRESH_DEFAULT_MS;
+    const value = JSON.parse(window.localStorage.getItem(SDD_PI_TERMINAL_STORAGE_KEY) || 'null');
+    return normalisePiOutputRefreshInterval(value?.outputRefreshIntervalMs);
+  } catch {
+    return SDD_PI_OUTPUT_REFRESH_DEFAULT_MS;
+  }
+}
+
+function persistPiOutputRefreshInterval(value) {
+  const outputRefreshIntervalMs = normalisePiOutputRefreshInterval(value);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(SDD_PI_TERMINAL_STORAGE_KEY, JSON.stringify({ version: 1, outputRefreshIntervalMs }));
+    }
+  } catch {
+    // La configuración en memoria sigue siendo válida si localStorage no está disponible.
+  }
+  return outputRefreshIntervalMs;
+}
+
+let piTerminalState = {
+  code: null,
+  cwd: '',
+  error: '',
+  finished: false,
+  model: SDD_PI_DEFAULT_CONFIG.model,
+  output: '',
+  outputRefreshIntervalMs: readStoredPiOutputRefreshInterval(),
+  projectPath: '',
+  provider: SDD_PI_DEFAULT_CONFIG.provider,
+  runId: '',
+  signal: '',
+  stopped: false,
+  thinking: SDD_PI_DEFAULT_CONFIG.thinking,
+  running: false
+};
 
 function normaliseSpecCardColor(value) {
   const color = String(value || '').trim().toLowerCase();
@@ -166,8 +263,439 @@ function bindSpecCardColorPicker(initialColor = '') {
   return () => selectedColor;
 }
 
+function normalisePiConfig(value = {}) {
+  const provider = String(value.provider ?? '').trim();
+  const model = String(value.model ?? '').trim();
+  const thinking = String(value.thinking ?? '').trim().toLowerCase();
+  return {
+    provider: /^[A-Za-z0-9._-]{1,80}$/.test(provider) ? provider : SDD_PI_DEFAULT_CONFIG.provider,
+    model: /^[A-Za-z0-9._:*?+\-/]{1,180}$/.test(model) ? model : SDD_PI_DEFAULT_CONFIG.model,
+    thinking: SDD_PI_THINKING_OPTIONS.some((option) => option.value === thinking) ? thinking : SDD_PI_DEFAULT_CONFIG.thinking
+  };
+}
+
+function readStoredPiConfig() {
+  try {
+    if (typeof window === 'undefined' || !window.localStorage) return { ...SDD_PI_DEFAULT_CONFIG };
+    const value = JSON.parse(window.localStorage.getItem(SDD_PI_CONFIG_STORAGE_KEY) || 'null');
+    return normalisePiConfig(value || {});
+  } catch {
+    return { ...SDD_PI_DEFAULT_CONFIG };
+  }
+}
+
+let sddPiConfig = readStoredPiConfig();
+
+function persistPiConfig(value) {
+  sddPiConfig = normalisePiConfig(value);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(SDD_PI_CONFIG_STORAGE_KEY, JSON.stringify({ version: 1, ...sddPiConfig }));
+    }
+  } catch {
+    // La configuración en memoria sigue siendo válida si localStorage no está disponible.
+  }
+  return sddPiConfig;
+}
+
+function normalisePiProviders(value) {
+  const providers = Array.isArray(value?.providers) ? value.providers : [];
+  const normalised = providers.map((provider) => {
+    const id = String(provider?.id || '').trim();
+    const models = Array.isArray(provider?.models) ? provider.models.map((model) => ({
+      id: String(model?.id || '').trim(),
+      name: String(model?.name || model?.id || '').trim(),
+      reasoning: model?.reasoning === true
+    })).filter((model) => /^[A-Za-z0-9._:*?+\-/]{1,180}$/.test(model.id)) : [];
+    return {
+      id,
+      label: String(provider?.label || id).trim(),
+      authentication: provider?.authentication === 'subscription' ? 'subscription' : 'api_key',
+      authenticated: typeof provider?.authenticated === 'boolean' ? provider.authenticated : null,
+      models
+    };
+  }).filter((provider) => /^[A-Za-z0-9._-]{1,80}$/.test(provider.id) && provider.models.length);
+  return normalised.length ? normalised : SDD_PI_FALLBACK_PROVIDERS;
+}
+
+function piProviderById(providerId) {
+  return sddPiProviders.find((provider) => provider.id === providerId) || null;
+}
+
+function piProvidersForMarkup(selectedProvider = sddPiConfig.provider) {
+  const providers = [...sddPiProviders];
+  if (selectedProvider && !providers.some((provider) => provider.id === selectedProvider)) {
+    providers.push({
+      id: selectedProvider,
+      label: selectedProvider,
+      authentication: 'api_key',
+      authenticated: null,
+      models: [{ id: sddPiConfig.model, name: sddPiConfig.model, reasoning: true }]
+    });
+  }
+  return providers;
+}
+
+function piProviderOptionsMarkup(selectedProvider = sddPiConfig.provider) {
+  return piProvidersForMarkup(selectedProvider).map((provider) => {
+    const disconnected = provider.authentication === 'subscription' && provider.authenticated === false;
+    const label = `${provider.label}${disconnected ? ' · sin iniciar sesión' : ''}`;
+    return `<option value="${escapeHtml(provider.id)}"${provider.id === selectedProvider ? ' selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+}
+
+function piModelsForProvider(providerId) {
+  const provider = piProviderById(providerId);
+  if (provider?.models.length) return provider.models;
+  return [{ id: sddPiConfig.model, name: sddPiConfig.model, reasoning: true }];
+}
+
+function piModelOptionsMarkup(providerId, selectedModel = sddPiConfig.model) {
+  const models = piModelsForProvider(providerId);
+  const selected = models.some((model) => model.id === selectedModel) ? selectedModel : models[0]?.id;
+  return models.map((model) => `<option value="${escapeHtml(model.id)}"${model.id === selected ? ' selected' : ''}>${escapeHtml(model.name)}</option>`).join('');
+}
+
+function syncPiModelSelector({ preserveModel = true } = {}) {
+  const provider = $('#sdd-pi-provider');
+  const model = $('#sdd-pi-model');
+  if (!provider || !model) return;
+  const previousModel = preserveModel ? (model.value || sddPiConfig.model) : '';
+  const models = piModelsForProvider(provider.value);
+  const selectedModel = models.some((item) => item.id === previousModel) ? previousModel : models[0]?.id;
+  model.innerHTML = models.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === selectedModel ? ' selected' : ''}>${escapeHtml(item.name)}</option>`).join('');
+}
+
+function syncPiCatalogControls() {
+  const provider = $('#sdd-pi-provider');
+  if (!provider) return;
+  const selectedProvider = provider.value || sddPiConfig.provider;
+  provider.innerHTML = piProviderOptionsMarkup(selectedProvider);
+  if ([...provider.options].some((option) => option.value === selectedProvider)) provider.value = selectedProvider;
+  syncPiModelSelector();
+  readPiConfigFromEditor();
+}
+
+async function loadPiModelCatalog() {
+  if (!window.nexusData?.getPiModelCatalog) return sddPiProviders;
+  if (!piModelCatalogPromise) {
+    piModelCatalogPromise = window.nexusData.getPiModelCatalog()
+      .then((catalog) => {
+        sddPiProviders = normalisePiProviders(catalog);
+        syncPiCatalogControls();
+        return sddPiProviders;
+      })
+      .catch(() => sddPiProviders);
+  }
+  return piModelCatalogPromise;
+}
+
+function piSpecsControlsMarkup() {
+  const thinkingOptions = SDD_PI_THINKING_OPTIONS.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === sddPiConfig.thinking ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('');
+  return `<div class="sdd-pi-config" aria-label="Configuración de Pi">
+    <label class="sdd-pi-field"><span>Proveedor</span><select id="sdd-pi-provider" class="select" aria-label="Proveedor de Pi">${piProviderOptionsMarkup()}</select></label>
+    <label class="sdd-pi-field"><span>Modelo</span><select id="sdd-pi-model" class="select" aria-label="Modelo de Pi">${piModelOptionsMarkup(sddPiConfig.provider)}</select></label>
+    <label class="sdd-pi-field"><span>Pensamiento</span><select id="sdd-pi-thinking" class="select" aria-label="Nivel de pensamiento">${thinkingOptions}</select></label>
+  </div>`;
+}
+
+function readPiConfigFromEditor() {
+  return persistPiConfig({
+    provider: $('#sdd-pi-provider')?.value || sddPiConfig.provider,
+    model: $('#sdd-pi-model')?.value || sddPiConfig.model,
+    thinking: $('#sdd-pi-thinking')?.value || sddPiConfig.thinking
+  });
+}
+
+function bindPiSpecsControls() {
+  const provider = $('#sdd-pi-provider');
+  const model = $('#sdd-pi-model');
+  const thinking = $('#sdd-pi-thinking');
+  if (!provider || !model || !thinking || provider.dataset.piBound === 'true') return;
+  provider.dataset.piBound = 'true';
+  model.dataset.piBound = 'true';
+  thinking.dataset.piBound = 'true';
+  const save = () => { readPiConfigFromEditor(); };
+  provider.addEventListener('change', () => {
+    syncPiModelSelector({ preserveModel: false });
+    save();
+  });
+  model.addEventListener('change', save);
+  thinking.addEventListener('change', save);
+  void loadPiModelCatalog();
+}
+
+function terminalOutputText(value) {
+  return String(value ?? '')
+    .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, '')
+    .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
+    .replace(/\r/g, '');
+}
+
+function appendPiTerminalOutput(value) {
+  const next = `${piTerminalState.output || ''}${String(value ?? '')}`;
+  piTerminalState.output = next.length > 500000 ? next.slice(-500000) : next;
+  const output = $('#sdd-terminal-output');
+  if (output) {
+    output.textContent = terminalOutputText(piTerminalState.output);
+    output.scrollTop = output.scrollHeight;
+  }
+}
+
+function piTerminalStatus() {
+  if (piTerminalState.running) return { label: 'Ejecutando', className: 'is-running' };
+  if (piTerminalState.error || (piTerminalState.finished && piTerminalState.code !== 0)) return { label: 'Error', className: 'is-error' };
+  if (piTerminalState.stopped) return { label: 'Detenido', className: 'is-stopped' };
+  if (piTerminalState.finished) return { label: 'Finalizado', className: 'is-finished' };
+  return { label: 'Listo', className: '' };
+}
+
+function updatePiTerminalMessageControls() {
+  const input = $('#sdd-terminal-input');
+  const send = $('#sdd-terminal-send');
+  const available = hasSddProject() && !state.sddProject?.legacy;
+  if (input) input.disabled = !available;
+  if (send) send.disabled = !available || !String(input?.value || '').trim();
+}
+
+function updatePiTerminalView() {
+  const output = $('#sdd-terminal-output');
+  if (output) {
+    output.textContent = terminalOutputText(piTerminalState.output) || 'Escribe un mensaje para iniciar Pi o pulsa “▶ Play” en Specs.';
+    output.scrollTop = output.scrollHeight;
+  }
+  const status = piTerminalStatus();
+  const statusNode = $('#sdd-terminal-status');
+  if (statusNode) {
+    statusNode.textContent = status.label;
+    statusNode.className = `sdd-terminal-status ${status.className}`.trim();
+  }
+  const stop = $('#sdd-pi-stop');
+  if (stop) stop.disabled = !piTerminalState.running;
+  updatePiTerminalMessageControls();
+  const project = $('#sdd-terminal-project-path');
+  if (project) project.textContent = piTerminalState.cwd || currentSddProjectPath() || 'Sin proyecto';
+  const model = $('#sdd-terminal-model');
+  if (model) model.textContent = piTerminalState.runId
+    ? `${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`
+    : '—';
+}
+
+function queuePiTerminalEvent(type, payload) {
+  const runId = String(payload?.runId || '');
+  if (!runId) return;
+  const events = piTerminalPendingEvents.get(runId) || [];
+  if (events.length >= PI_TERMINAL_PENDING_MAX_EVENTS) events.shift();
+  events.push({ payload, type });
+  piTerminalPendingEvents.set(runId, events);
+}
+
+function applyPiTerminalOutput(payload) {
+  appendPiTerminalOutput(payload.data);
+}
+
+function applyPiTerminalError(payload) {
+  piTerminalState.error = String(payload.message || 'Error desconocido al ejecutar Pi');
+  piTerminalState.running = false;
+  appendPiTerminalOutput(`\n\n[${piTerminalState.error}]\n`);
+  updatePiTerminalView();
+}
+
+function applyPiTerminalExit(payload) {
+  piTerminalState.code = Number.isInteger(payload.code) ? payload.code : null;
+  piTerminalState.signal = String(payload.signal || '');
+  piTerminalState.stopped = payload.stopped === true;
+  piTerminalState.finished = true;
+  piTerminalState.running = false;
+  const result = piTerminalState.stopped
+    ? 'Pi detenido por el usuario.'
+    : `Pi finalizó${piTerminalState.code === null ? '' : ` con código ${piTerminalState.code}`}.`;
+  appendPiTerminalOutput(`\n\n[${result}]\n`);
+  updatePiTerminalView();
+}
+
+function acceptPiTerminalEvent(type, payload = {}) {
+  if (!payload.runId) return;
+  if (payload.runId !== piTerminalState.runId) {
+    // El proceso puede emitir datos antes de que termine ipcRenderer.invoke().
+    // Se guardan para incorporarlos al terminal cuando ya conocemos el runId.
+    queuePiTerminalEvent(type, payload);
+    return;
+  }
+  if (type === 'output') applyPiTerminalOutput(payload);
+  if (type === 'error') applyPiTerminalError(payload);
+  if (type === 'exit') applyPiTerminalExit(payload);
+}
+
+function drainPiTerminalEvents(runId) {
+  const pending = piTerminalPendingEvents.get(runId) || [];
+  piTerminalPendingEvents.delete(runId);
+  pending.forEach(({ payload, type }) => acceptPiTerminalEvent(type, { ...payload, runId }));
+}
+
+function bindPiTerminalEvents() {
+  if (piTerminalEventsBound || !window.nexusData) return;
+  piTerminalEventsBound = true;
+  window.nexusData.onPiTerminalOutput?.((payload = {}) => {
+    acceptPiTerminalEvent('output', payload);
+  });
+  window.nexusData.onPiTerminalError?.((payload = {}) => {
+    acceptPiTerminalEvent('error', payload);
+  });
+  window.nexusData.onPiTerminalExit?.((payload = {}) => {
+    acceptPiTerminalEvent('exit', payload);
+  });
+}
+
+async function setPiTerminalOutputRefreshInterval(input) {
+  if (!input) return;
+  const previousIntervalMs = piTerminalState.outputRefreshIntervalMs;
+  const requestedIntervalMs = Number(input.value) * 1000;
+  const intervalMs = normalisePiOutputRefreshInterval(requestedIntervalMs);
+  input.value = String(intervalMs / 1000);
+  input.disabled = true;
+  try {
+    const result = await window.nexusData?.setPiTerminalRefreshInterval?.(intervalMs);
+    piTerminalState.outputRefreshIntervalMs = persistPiOutputRefreshInterval(result?.intervalMs ?? intervalMs);
+    input.value = String(piTerminalState.outputRefreshIntervalMs / 1000);
+  } catch (error) {
+    piTerminalState.outputRefreshIntervalMs = previousIntervalMs;
+    input.value = String(previousIntervalMs / 1000);
+    showToast(error.message || 'No se pudo cambiar la frecuencia de actualización de Pi', true);
+  } finally {
+    input.disabled = false;
+  }
+}
+
+async function startPiFromSpecs(button) {
+  if (!hasSddProject() || state.sddProject?.legacy) {
+    showToast('Carga un proyecto S.D.D válido antes de ejecutar Pi', true);
+    return;
+  }
+  bindPiTerminalEvents();
+  const prompt = buildFollowSpecsPrompt();
+  if (!prompt.trim()) {
+    showToast('El prompt de Specs está vacío', true);
+    return;
+  }
+  const config = readPiConfigFromEditor();
+  const provider = piProviderById(config.provider);
+  if (provider?.authentication === 'subscription' && provider.authenticated === false) {
+    showToast('Inicia sesión en Pi con /login y selecciona ChatGPT Plus/Pro (Codex)', true);
+    return;
+  }
+  if (button) {
+    button.disabled = true;
+    button.textContent = '…';
+  }
+  try {
+    const result = await window.nexusData.startPiTerminal({
+      projectPath: currentSddProjectPath(),
+      prompt,
+      provider: config.provider,
+      model: config.model,
+      thinking: config.thinking,
+      outputRefreshIntervalMs: piTerminalState.outputRefreshIntervalMs
+    });
+    piTerminalState = {
+      code: null,
+      cwd: result.cwd || currentSddProjectPath(),
+      error: '',
+      finished: false,
+      model: result.model || config.model,
+      output: `$ pi --provider ${result.provider || config.provider} --model ${result.model || config.model} --thinking ${result.thinking || config.thinking} --approve --mode rpc\n$ cwd: ${result.cwd || currentSddProjectPath()}\n\nPrompt enviado:\n${prompt}\n\n`,
+      outputRefreshIntervalMs: persistPiOutputRefreshInterval(result.outputRefreshIntervalMs),
+      projectPath: currentSddProjectPath(),
+      provider: result.provider || config.provider,
+      runId: result.runId,
+      signal: '',
+      stopped: false,
+      thinking: result.thinking || config.thinking,
+      running: true
+    };
+    goToSddView('sdd-terminal');
+    drainPiTerminalEvents(result.runId);
+    showToast(`Pi iniciado con ${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`);
+  } catch (error) {
+    showToast(error.message || 'No se pudo iniciar Pi', true);
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      button.textContent = '▶ Play';
+    }
+  }
+}
+
+async function stopPiFromTerminal() {
+  if (!piTerminalState.running) return;
+  try {
+    await window.nexusData?.stopPiTerminal?.();
+  } catch (error) {
+    showToast(error.message || 'No se pudo detener Pi', true);
+  }
+}
+
+async function sendPiMessageFromTerminal() {
+  const input = $('#sdd-terminal-input');
+  const send = $('#sdd-terminal-send');
+  const message = String(input?.value || '').trim();
+  if (!message || !hasSddProject() || state.sddProject?.legacy) return;
+  if (input) input.disabled = true;
+  if (send) send.disabled = true;
+  try {
+    if (piTerminalState.running) {
+      if (!window.nexusData?.sendPiTerminalMessage) return;
+      const result = await window.nexusData.sendPiTerminalMessage(message);
+      appendPiTerminalOutput(`\n> ${message}\n${result?.queued ? '[Mensaje en cola]\n' : ''}`);
+    } else {
+      if (!window.nexusData?.startPiTerminal) return;
+      bindPiTerminalEvents();
+      const config = normalisePiConfig(sddPiConfig);
+      const provider = piProviderById(config.provider);
+      if (provider?.authentication === 'subscription' && provider.authenticated === false) {
+        showToast('Inicia sesión en Pi con /login y selecciona ChatGPT Plus/Pro (Codex)', true);
+        return;
+      }
+      const result = await window.nexusData.startPiTerminal({
+        projectPath: currentSddProjectPath(),
+        prompt: message,
+        provider: config.provider,
+        model: config.model,
+        thinking: config.thinking,
+        outputRefreshIntervalMs: piTerminalState.outputRefreshIntervalMs
+      });
+      piTerminalState = {
+        code: null,
+        cwd: result.cwd || currentSddProjectPath(),
+        error: '',
+        finished: false,
+        model: result.model || config.model,
+        output: `$ pi --provider ${result.provider || config.provider} --model ${result.model || config.model} --thinking ${result.thinking || config.thinking} --approve --mode rpc\n$ cwd: ${result.cwd || currentSddProjectPath()}\n\nMensaje enviado:\n${message}\n\n`,
+        outputRefreshIntervalMs: persistPiOutputRefreshInterval(result.outputRefreshIntervalMs),
+        projectPath: currentSddProjectPath(),
+        provider: result.provider || config.provider,
+        runId: result.runId,
+        signal: '',
+        stopped: false,
+        thinking: result.thinking || config.thinking,
+        running: true
+      };
+      drainPiTerminalEvents(result.runId);
+      showToast(`Pi iniciado con ${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`);
+    }
+    if (input) input.value = '';
+  } catch (error) {
+    showToast(error.message || 'No se pudo enviar el mensaje a Pi', true);
+  } finally {
+    updatePiTerminalView();
+    if (!input?.disabled) input?.focus();
+  }
+}
+
 export function configureSdd({ onNavigate } = {}) {
   navigateToSddView = typeof onNavigate === 'function' ? onNavigate : null;
+  bindPiTerminalEvents();
+  void loadPiModelCatalog();
 }
 
 function goToSddView(view) {
@@ -322,7 +850,24 @@ export function setSddProject(project = null, { refresh = false, honorActiveVers
     };
     persistSddActiveVersion(nextProject.path, nextProject.activeVersion);
   }
+  if (previousPath && previousPath !== (nextProject?.path || '')) {
+    if (piTerminalState.running) void window.nexusData?.stopPiTerminal?.();
+    piTerminalState = {
+      ...piTerminalState,
+      code: null,
+      cwd: '',
+      error: '',
+      finished: false,
+      output: '',
+      projectPath: '',
+      runId: '',
+      signal: '',
+      stopped: false,
+      running: false
+    };
+  }
   state.sddProject = nextProject;
+  document.title = nextProject?.path ? `NexusData — ${nextProject.path}` : 'NexusData';
   persistSddProjectPath(nextProject?.path || '');
   persistLastSddProject(nextProject);
   renderSddVersionControl();
@@ -718,6 +1263,7 @@ function renderActiveSddViews() {
   if (isViewActive('view-sdd-specs')) renderSddSpecs();
   if (isViewActive('view-sdd-database')) renderSddDatabase();
   if (isViewActive('view-sdd-resources')) renderSddResources();
+  if (isViewActive('view-sdd-terminal')) renderSddTerminal();
 }
 
 function escapeCssIdentifier(value) {
@@ -1270,11 +1816,12 @@ export function renderSddSpecs() {
   const requestId = ++renderRequestId;
   const filterDefinitions = SDD_FILTER_DEFINITIONS.specs;
   const activeVersion = state.sddProject?.activeVersion || '—';
-  const actions = `<button id="sdd-version-add" class="btn btn-secondary" type="button" title="Crear una versión nueva y vacía (plantilla por defecto)">＋ Nueva versión</button><button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Editar el snapshot ${escapeHtml(activeVersion)}">Editar markdown</button>`;
+  const actions = `<button id="sdd-pi-play" class="btn sdd-pi-play" type="button" aria-label="Ejecutar Pi siguiendo Specs" title="Ejecutar Pi siguiendo el prompt de Trabajar siguiendo specs">▶</button>${piSpecsControlsMarkup()}<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Editar el snapshot ${escapeHtml(activeVersion)}">Editar markdown</button>`;
   container.innerHTML = `${sddHeader('specs', `Specs · ${activeVersion}`)}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', actions)}${sddFilterBar('specs', 'Filtros de requisitos', 'Buscar por título, categoría o descripción…', filterDefinitions)}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
   moveSddToolbarActionsToHeader(container);
   $('#sdd-spec-add').addEventListener('click', () => openSpecModal());
-  $('#sdd-version-add')?.addEventListener('click', openSddVersionModal);
+  bindPiSpecsControls();
+  $('#sdd-pi-play')?.addEventListener('click', (event) => { void startPiFromSpecs(event.currentTarget); });
   const mdEdit = $('#sdd-md-edit');
   if (mdEdit) mdEdit.addEventListener('click', openSpecsMarkdownEditor);
   let specs = null;
@@ -1290,6 +1837,40 @@ export function renderSddSpecs() {
     if (requestId !== renderRequestId || !isViewActive('view-sdd-specs')) return;
     $('#sdd-spec-list').innerHTML = emptyState('No se pudo cargar', error.message);
   });
+}
+
+export function renderSddTerminal() {
+  const container = $('#view-sdd-terminal');
+  if (!container) return;
+  bindPiTerminalEvents();
+  if (renderSddProjectRequired(container, 'terminal', 'Terminal')) return;
+  const status = piTerminalStatus();
+  container.innerHTML = `${sddHeader('terminal', 'Terminal')}<div class="sdd-terminal-shell">
+    <div class="sdd-terminal-toolbar">
+      <div class="sdd-terminal-toolbar-copy"><span class="sdd-terminal-eyebrow">PI / SPECS</span><strong id="sdd-terminal-status" class="sdd-terminal-status ${status.className}">${escapeHtml(status.label)}</strong></div>
+      <div class="sdd-terminal-toolbar-actions"><span id="sdd-terminal-model" class="sdd-terminal-model">${escapeHtml(piTerminalState.runId ? `${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}` : '—')}</span><label class="sdd-terminal-refresh"><span>Actualización</span><input id="sdd-terminal-refresh" class="field" type="number" min="1" max="3600" step="1" value="${escapeHtml(String(piTerminalState.outputRefreshIntervalMs / 1000))}" aria-label="Frecuencia de actualización de la lectura de Pi en segundos"><span>s</span></label><button id="sdd-terminal-clear" class="btn btn-secondary btn-small" type="button">Limpiar</button><button id="sdd-pi-stop" class="btn btn-danger btn-small" type="button"${piTerminalState.running ? '' : ' disabled'}>Detener</button></div>
+    </div>
+    <div class="sdd-terminal-project"><span>Carpeta de trabajo</span><code id="sdd-terminal-project-path">${escapeHtml(piTerminalState.cwd || currentSddProjectPath())}</code></div>
+    <pre id="sdd-terminal-output" class="sdd-terminal-output" tabindex="0">${escapeHtml(terminalOutputText(piTerminalState.output) || 'Escribe un mensaje para iniciar Pi o pulsa “▶ Play” en Specs.')}</pre>
+    <form id="sdd-terminal-message-form" class="sdd-terminal-message-form">
+      <input id="sdd-terminal-input" class="field sdd-terminal-input" type="text" maxlength="102400" autocomplete="off" placeholder="Escribe un mensaje para Pi…" aria-label="Mensaje para Pi">
+      <button id="sdd-terminal-send" class="btn btn-primary btn-small" type="submit" disabled>Enviar</button>
+    </form>
+  </div>`;
+  $('#sdd-terminal-refresh')?.addEventListener('change', (event) => {
+    void setPiTerminalOutputRefreshInterval(event.currentTarget);
+  });
+  $('#sdd-terminal-clear')?.addEventListener('click', () => {
+    piTerminalState.output = '';
+    updatePiTerminalView();
+  });
+  $('#sdd-pi-stop')?.addEventListener('click', () => { void stopPiFromTerminal(); });
+  $('#sdd-terminal-input')?.addEventListener('input', updatePiTerminalMessageControls);
+  $('#sdd-terminal-message-form')?.addEventListener('submit', (event) => {
+    event.preventDefault();
+    void sendPiMessageFromTerminal();
+  });
+  updatePiTerminalView();
 }
 
 /* ----------------------------------------------------------- Base de datos */

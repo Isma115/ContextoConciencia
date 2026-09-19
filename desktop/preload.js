@@ -50,6 +50,29 @@ contextBridge.exposeInMainWorld('nexusData', {
   revealFile: (filePath) => ipcRenderer.invoke('reveal-file', filePath),
   setViewMenu: (view) => ipcRenderer.invoke('set-view-menu', view),
   updatePromptMenu: (items) => ipcRenderer.invoke('update-prompt-menu', items),
+  startPiTerminal: (payload) => ipcRenderer.invoke('start-pi-terminal', payload),
+  stopPiTerminal: () => ipcRenderer.invoke('stop-pi-terminal'),
+  sendPiTerminalMessage: (message) => ipcRenderer.invoke('send-pi-terminal-message', message),
+  setPiTerminalRefreshInterval: (intervalMs) => ipcRenderer.invoke('set-pi-terminal-refresh-interval', intervalMs),
+  getPiModelCatalog: () => ipcRenderer.invoke('get-pi-model-catalog'),
+  onPiTerminalOutput: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('pi-terminal-output', listener);
+    return () => ipcRenderer.removeListener('pi-terminal-output', listener);
+  },
+  onPiTerminalExit: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('pi-terminal-exit', listener);
+    return () => ipcRenderer.removeListener('pi-terminal-exit', listener);
+  },
+  onPiTerminalError: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('pi-terminal-error', listener);
+    return () => ipcRenderer.removeListener('pi-terminal-error', listener);
+  },
   onProjectMenuAction: (callback) => ipcRenderer.on('project-menu-action', (_event, action) => callback(action)),
   onSddMenuAction: (callback) => ipcRenderer.on('sdd-menu-action', (_event, action) => callback(action)),
   onHtmlViewerMenuAction: (callback) => ipcRenderer.on('html-viewer-menu-action', (_event, action) => callback(action)),

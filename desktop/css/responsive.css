@@ -6,6 +6,7 @@
 @media (max-width: 760px) {
   .view { padding: 22px 16px 40px; }
   .section-top { align-items: start; flex-direction: column; }
+  .view#view-sdd-specs.active > .section-top { align-items: start; }
   .form-grid.two { grid-template-columns: 1fr; }
   .result-actions, .source-info { margin-left: 0; }
   .html-viewer-workspace { height: auto; min-height: 0; grid-template-columns: 1fr; }

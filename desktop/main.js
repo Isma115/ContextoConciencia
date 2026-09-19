@@ -1,5 +1,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
+const os = require('node:os');
+const { spawn } = require('node:child_process');
+const { StringDecoder } = require('node:string_decoder');
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell } = require('electron');
 const { startServer } = require('../server/app');
 const { createFileExplorerService } = require('./file-explorer-service');
@@ -32,7 +35,8 @@ const AVAILABLE_VIEWS = new Set([
   'sdd-home',
   'sdd-specs',
   'sdd-database',
-  'sdd-resources'
+  'sdd-resources',
+  'sdd-terminal'
 ]);
 const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DIAGRAM_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
@@ -98,6 +102,7 @@ const SDD_MEDIA_MIME_BY_EXTENSION = Object.freeze({
 const closeConfirmationStates = new WeakMap();
 const applicationMenuViews = new WeakMap();
 const applicationMenuPromptItems = new WeakMap();
+const piProcesses = new WeakMap();
 const fileExplorerService = createFileExplorerService({ app, fs, path, shell });
 
 // Evita un destello blanco y cierres del proceso GPU en equipos Windows sin
@@ -115,6 +120,211 @@ const SDD_SPECS_IMAGE_MAX_BYTES = 20 * 1024 * 1024;
 const SDD_SPECS_VIDEO_MAX_BYTES = 100 * 1024 * 1024;
 const SDD_SPECS_AUDIO_MAX_BYTES = 100 * 1024 * 1024;
 const SDD_SPECS_SKIP_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'out', 'coverage']);
+const PI_DEFAULT_PROVIDER = 'deepseek';
+const PI_DEFAULT_MODEL = 'deepseek-flash';
+const PI_DEFAULT_THINKING = 'max';
+const PI_THINKING_LEVELS = new Set(['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']);
+const PI_MAX_PROMPT_BYTES = 200 * 1024;
+const PI_MAX_MESSAGE_BYTES = 100 * 1024;
+const PI_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
+// Evita saturar IPC y el DOM con un mensaje por cada delta del modelo.
+const PI_OUTPUT_FLUSH_INTERVAL_MS = 10_000;
+const PI_OUTPUT_FLUSH_MIN_INTERVAL_MS = 1_000;
+const PI_OUTPUT_FLUSH_MAX_INTERVAL_MS = 3_600_000;
+const PI_CATALOG_PROVIDERS = Object.freeze([
+  {
+    id: 'deepseek',
+    label: 'DeepSeek',
+    authentication: 'api_key',
+    fallbackModels: [
+      { id: 'deepseek-flash', name: 'DeepSeek V4.1 Flash', reasoning: true },
+      { id: 'deepseek-v4-pro', name: 'DeepSeek V4 Pro', reasoning: true }
+    ]
+  },
+  {
+    id: 'openai-codex',
+    label: 'Codex (suscripción)',
+    authentication: 'subscription',
+    fallbackModels: [
+      { id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Codex Spark', reasoning: true },
+      { id: 'gpt-5.4', name: 'GPT-5.4', reasoning: true },
+      { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', reasoning: true },
+      { id: 'gpt-5.5', name: 'GPT-5.5', reasoning: true },
+      { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', reasoning: true },
+      { id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', reasoning: true },
+      { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', reasoning: true },
+      { id: 'gpt-6-astra', name: 'GPT-6 Astra', reasoning: true }
+    ]
+  }
+]);
+
+function readPiJsonFile(filePath) {
+  try {
+    const value = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  } catch {
+    return {};
+  }
+}
+
+function piAgentDirectory() {
+  const configured = String(process.env.PI_CODING_AGENT_DIR || '').trim();
+  return configured ? path.resolve(configured) : path.join(os.homedir(), '.pi', 'agent');
+}
+
+function readPiCliModelIds() {
+  return new Promise((resolve) => {
+    let output = '';
+    let settled = false;
+    let timeout = null;
+    const finish = (models = []) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      resolve(models);
+    };
+    let child;
+    try {
+      child = spawn(piCommand(), ['--offline', '--list-models'], {
+        env: piEnvironment(),
+        stdio: ['ignore', 'pipe', 'ignore'],
+        windowsHide: true
+      });
+    } catch {
+      finish();
+      return;
+    }
+    timeout = setTimeout(() => {
+      try { child.kill(process.platform === 'win32' ? undefined : 'SIGTERM'); } catch { /* El proceso ya terminó. */ }
+      finish();
+    }, 15_000);
+    timeout.unref?.();
+    child.stdout?.on('data', (data) => {
+      if (output.length < 1024 * 1024) output += data.toString('utf8');
+    });
+    child.once('error', () => finish());
+    child.once('close', () => {
+      const providerIds = new Set(PI_CATALOG_PROVIDERS.map((provider) => provider.id));
+      const models = Object.fromEntries([...providerIds].map((providerId) => [providerId, []]));
+      output.split(/\r?\n/).map((line) => line.trim().split(/\s+/)).forEach((columns) => {
+        if (!providerIds.has(columns[0]) || !/^[A-Za-z0-9._:*?+\-/]{1,180}$/.test(columns[1] || '')) return;
+        if (!models[columns[0]].includes(columns[1])) models[columns[0]].push(columns[1]);
+      });
+      finish(models);
+    });
+  });
+}
+
+async function piModelCatalog() {
+  const agentDirectory = piAgentDirectory();
+  const modelStore = readPiJsonFile(path.join(agentDirectory, 'models-store.json'));
+  const authStore = readPiJsonFile(path.join(agentDirectory, 'auth.json'));
+  const cliModelIds = await readPiCliModelIds();
+  return {
+    providers: PI_CATALOG_PROVIDERS.map((provider) => {
+      const storedModels = Array.isArray(modelStore[provider.id]?.models) ? modelStore[provider.id].models : [];
+      const knownModels = [...provider.fallbackModels, ...storedModels.map((model) => ({
+        id: String(model?.id || '').trim(),
+        name: String(model?.name || model?.id || '').trim(),
+        reasoning: model?.reasoning === true
+      }))].filter((model) => /^[A-Za-z0-9._:*?+\-/]{1,180}$/.test(model.id));
+      const knownById = new Map(knownModels.map((model) => [model.id, model]));
+      const providerCliModelIds = Array.isArray(cliModelIds[provider.id]) ? cliModelIds[provider.id] : [];
+      const selectedIds = providerCliModelIds.length
+        ? providerCliModelIds
+        : storedModels.map((model) => String(model?.id || '').trim()).filter(Boolean);
+      const models = (selectedIds.length ? selectedIds : provider.fallbackModels.map((model) => model.id))
+        .map((id) => knownById.get(id) || { id, name: id, reasoning: true });
+      const environmentAuthenticated = provider.id === 'deepseek' && Boolean(process.env.DEEPSEEK_API_KEY);
+      return {
+        id: provider.id,
+        label: provider.label,
+        authentication: provider.authentication,
+        authenticated: Boolean(authStore[provider.id]) || environmentAuthenticated,
+        models: models.length ? models : provider.fallbackModels
+      };
+    })
+  };
+}
+
+function piReadableValue(value) {
+  if (value === null || value === undefined) return '';
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map((item) => piReadableValue(item)).join('');
+  if (typeof value !== 'object') return String(value);
+  if (typeof value.text === 'string') return value.text;
+  if (Object.prototype.hasOwnProperty.call(value, 'content')) return piReadableValue(value.content);
+  if (Object.prototype.hasOwnProperty.call(value, 'output')) return piReadableValue(value.output);
+  if (typeof value.stdout === 'string' || typeof value.stderr === 'string') {
+    return [value.stdout, value.stderr].filter(Boolean).join('');
+  }
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function piJsonEventText(event) {
+  if (!event || typeof event !== 'object') return '';
+  if (event.type === 'response' && ['prompt', 'follow_up'].includes(event.command) && event.success === false) {
+    return `\n[Pi rechazó el mensaje: ${event.error || 'error desconocido'}]\n`;
+  }
+  if (event.type === 'message_update') {
+    const messageEvent = event.assistantMessageEvent;
+    if (!messageEvent) return '';
+    if (messageEvent.type === 'text_delta' || messageEvent.type === 'thinking_delta') {
+      return String(messageEvent.delta || '');
+    }
+    if (messageEvent.type === 'toolcall_start') {
+      return `\n\n[Pi preparando ${messageEvent.toolName || 'una herramienta'}]\n`;
+    }
+    return '';
+  }
+  if (event.type === 'agent_start') return '[Pi iniciado]\n';
+  if (event.type === 'turn_start') return '\n[Pi trabajando]\n';
+  if (event.type === 'tool_execution_start') {
+    return `\n\n[Pi ejecutando ${event.toolName || 'una herramienta'}]\n`;
+  }
+  if (event.type === 'tool_execution_update') {
+    const partial = piReadableValue(event.partialResult);
+    return partial ? `${partial}${partial.endsWith('\n') ? '' : '\n'}` : '';
+  }
+  if (event.type === 'tool_execution_end') {
+    const result = piReadableValue(event.result);
+    if (result) return `${result}${result.endsWith('\n') ? '' : '\n'}`;
+    return `\n[Pi terminó ${event.toolName || 'la herramienta'}]\n`;
+  }
+  if (event.type === 'message_end' && event.message?.stopReason === 'error') {
+    return `\n[Pi error: ${event.message.errorMessage || 'la respuesta terminó con error'}]\n`;
+  }
+  if (event.type === 'agent_end') return '\n[Pi terminó la respuesta]\n';
+  if (event.type === 'agent_settled') return '\n[Pi listo para nuevos mensajes]\n';
+  if (event.type === 'auto_retry_start') {
+    return `\n[Pi reintentando (${event.attempt}/${event.maxAttempts})]\n`;
+  }
+  if (event.type === 'auto_retry_end' && event.success === false) {
+    return `\n[Pi no pudo completar el reintento: ${event.finalError || 'error desconocido'}]\n`;
+  }
+  return '';
+}
+
+function consumePiJsonOutput(record, data, flush = false) {
+  record.stdoutBuffer += Buffer.isBuffer(data) ? record.stdoutDecoder.write(data) : String(data ?? '');
+  if (flush) record.stdoutBuffer += record.stdoutDecoder.end();
+  const lines = record.stdoutBuffer.split(/\r?\n/);
+  record.stdoutBuffer = flush ? '' : (lines.pop() || '');
+  return lines.filter((line) => line.trim()).map((line) => {
+    try {
+      const event = JSON.parse(line);
+      if (event?.type === 'agent_start') record.agentStreaming = true;
+      if (event?.type === 'agent_settled') record.agentStreaming = false;
+      return piJsonEventText(event);
+    } catch {
+      return `${line}\n`;
+    }
+  }).filter(Boolean);
+}
 
 function sddDirectoryFor(directoryPath) {
   const selectedPath = path.normalize(String(directoryPath || ''));
@@ -358,6 +568,264 @@ async function showOpenDialogFor(event, options) {
 async function showSaveDialogFor(event, options) {
   const parent = windowFromEvent(event);
   return parent ? dialog.showSaveDialog(parent, options) : dialog.showSaveDialog(options);
+}
+
+function piEnvironment() {
+  const userBinDirectories = process.platform === 'win32'
+    ? []
+    : [
+      path.join(os.homedir(), '.local', 'bin'),
+      path.join(os.homedir(), '.npm-global', 'bin'),
+      '/opt/homebrew/bin',
+      '/usr/local/bin'
+    ];
+  const currentPath = String(process.env.PATH || '');
+  const pathEntries = [...new Set([...userBinDirectories, ...currentPath.split(path.delimiter).filter(Boolean)])];
+  return {
+    ...process.env,
+    PATH: pathEntries.join(path.delimiter),
+    TERM: process.env.TERM || 'xterm-256color',
+    COLORTERM: process.env.COLORTERM || 'truecolor',
+    // The terminal view renders text output itself, so avoid cursor control
+    // sequences intended for a native TTY.
+    FORCE_COLOR: '0'
+  };
+}
+
+function piCommand() {
+  const configured = String(process.env.PI_COMMAND || '').trim();
+  return configured || 'pi';
+}
+
+function validPiProvider(value) {
+  const provider = String(value || PI_DEFAULT_PROVIDER).trim();
+  if (!/^[A-Za-z0-9._-]{1,80}$/.test(provider)) throw new Error('El proveedor de Pi no es válido');
+  return provider;
+}
+
+function validPiModel(value) {
+  const model = String(value || PI_DEFAULT_MODEL).trim();
+  // Pi admite patrones y el formato provider/model[:thinking]. Se pasan como
+  // argumentos separados, nunca por un shell, para evitar interpolación.
+  if (!/^[A-Za-z0-9._:*?+\-/]{1,180}$/.test(model)) throw new Error('El modelo de Pi no es válido');
+  return model;
+}
+
+function validPiThinking(value) {
+  const thinking = String(value || PI_DEFAULT_THINKING).trim().toLowerCase();
+  if (!PI_THINKING_LEVELS.has(thinking)) throw new Error('El nivel de razonamiento de Pi no es válido');
+  return thinking;
+}
+
+function validPiOutputFlushInterval(value) {
+  const interval = Number(value ?? PI_OUTPUT_FLUSH_INTERVAL_MS);
+  if (!Number.isFinite(interval)) throw new Error('La frecuencia de actualización de Pi no es válida');
+  return Math.min(Math.max(Math.round(interval), PI_OUTPUT_FLUSH_MIN_INTERVAL_MS), PI_OUTPUT_FLUSH_MAX_INTERVAL_MS);
+}
+
+function validPiProjectPath(value) {
+  const requestedPath = String(value || '').trim();
+  if (!requestedPath) throw new Error('Carga un proyecto S.D.D antes de ejecutar Pi');
+  const projectPath = path.resolve(requestedPath);
+  if (!projectPath || !fs.existsSync(projectPath) || !fs.statSync(projectPath).isDirectory()) {
+    throw new Error('La raíz del proyecto S.D.D no es válida o ya no existe');
+  }
+  return projectPath;
+}
+
+function sendPiTerminalEvent(window, channel, payload) {
+  if (!window || window.isDestroyed()) return false;
+  try {
+    const contents = window.webContents;
+    if (!contents || contents.isDestroyed() || contents.isLoadingMainFrame()) return false;
+    const frame = contents.mainFrame;
+    if (!frame || frame.isDestroyed() || frame.detached) return false;
+    frame.send(channel, payload);
+    return true;
+  } catch {
+    // La ventana puede estar cerrándose mientras termina el proceso.
+    return false;
+  }
+}
+
+function stopPiProcessForWindow(window) {
+  const record = window ? piProcesses.get(window) : null;
+  if (!record || !record.child || record.child.killed) return false;
+  record.stopRequested = true;
+  try {
+    record.child.kill(process.platform === 'win32' ? undefined : 'SIGTERM');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function setPiOutputRefreshIntervalForWindow(window, value) {
+  const intervalMs = validPiOutputFlushInterval(value);
+  const record = window ? piProcesses.get(window) : null;
+  if (!record || record.finished) return { intervalMs, running: false };
+  record.outputFlushIntervalMs = intervalMs;
+  if (record.outputFlushTimer) clearTimeout(record.outputFlushTimer);
+  record.outputFlushTimer = null;
+  if (record.outputPending) record.scheduleOutputFlush?.();
+  return { intervalMs, running: true };
+}
+
+function writePiRpcCommand(record, command) {
+  const input = record?.child?.stdin;
+  if (!input || input.destroyed || !input.writable) throw new Error('La sesión de Pi ya no acepta mensajes');
+  input.write(`${JSON.stringify(command)}\n`, 'utf8');
+}
+
+function sendPiMessageForWindow(window, value) {
+  const record = window ? piProcesses.get(window) : null;
+  if (!record || record.finished || !record.child || record.child.killed) {
+    throw new Error('No hay una sesión de Pi activa');
+  }
+  const message = typeof value === 'string' ? value.trim() : '';
+  if (!message) throw new Error('Escribe un mensaje para Pi');
+  if (Buffer.byteLength(message, 'utf8') > PI_MAX_MESSAGE_BYTES) {
+    throw new Error('El mensaje para Pi supera el límite de 100 KB');
+  }
+  const queued = record.agentStreaming === true;
+  const command = {
+    id: `${record.runId}-message-${++record.rpcRequestNumber}`,
+    type: queued ? 'follow_up' : 'prompt',
+    message
+  };
+  writePiRpcCommand(record, command);
+  // Evita que dos envíos inmediatos intenten iniciar dos respuestas simultáneas.
+  record.agentStreaming = true;
+  return { queued };
+}
+
+function startPiProcess(event, payload = {}) {
+  const window = windowFromEvent(event);
+  if (!window) throw new Error('La ventana de NexusData ya no está disponible');
+  const previous = piProcesses.get(window);
+  if (previous && !previous.finished) throw new Error('Ya hay una ejecución de Pi en curso');
+
+  const projectPath = validPiProjectPath(payload.projectPath);
+  const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+  if (!prompt.trim()) throw new Error('El prompt de Specs está vacío');
+  if (Buffer.byteLength(prompt, 'utf8') > PI_MAX_PROMPT_BYTES) throw new Error('El prompt de Specs supera el límite permitido');
+  const provider = validPiProvider(payload.provider);
+  const model = validPiModel(payload.model);
+  const thinking = validPiThinking(payload.thinking);
+  const outputFlushIntervalMs = validPiOutputFlushInterval(payload.outputRefreshIntervalMs);
+  const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const command = piCommand();
+  const args = [
+    '--provider', provider,
+    '--model', model,
+    '--thinking', thinking,
+    '--approve',
+    '--mode', 'rpc'
+  ];
+  const record = {
+    agentStreaming: true,
+    child: null,
+    finished: false,
+    outputBytes: 0,
+    outputFlushIntervalMs,
+    outputFlushTimer: null,
+    outputPending: '',
+    outputTruncated: false,
+    rpcRequestNumber: 0,
+    runId,
+    stopRequested: false,
+    stdoutBuffer: '',
+    stdoutDecoder: new StringDecoder('utf8')
+  };
+
+  try {
+    record.child = spawn(command, args, {
+      cwd: projectPath,
+      env: piEnvironment(),
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    piProcesses.set(window, record);
+  } catch (error) {
+    throw new Error(`No se pudo iniciar pi: ${error.message}`);
+  }
+
+  const flushOutput = () => {
+    if (!record.outputPending) return true;
+    const data = record.outputPending;
+    if (!sendPiTerminalEvent(window, 'pi-terminal-output', { runId, stream: 'stdout', data })) return false;
+    record.outputPending = '';
+    return true;
+  };
+  const scheduleOutputFlush = () => {
+    if (record.finished || record.outputFlushTimer) return;
+    record.outputFlushTimer = setTimeout(() => {
+      record.outputFlushTimer = null;
+      flushOutput();
+      if (record.outputPending) scheduleOutputFlush();
+    }, record.outputFlushIntervalMs);
+    record.outputFlushTimer.unref?.();
+  };
+  record.scheduleOutputFlush = scheduleOutputFlush;
+  const queueOutput = (data) => {
+    if (record.outputTruncated) return;
+    const text = Buffer.isBuffer(data) ? data.toString('utf8') : String(data ?? '');
+    record.outputBytes += Buffer.byteLength(text, 'utf8');
+    if (record.outputBytes > PI_MAX_OUTPUT_BYTES) {
+      record.outputTruncated = true;
+      record.outputPending += '\n[Salida de Pi truncada al superar 10 MB.]\n';
+      scheduleOutputFlush();
+      return;
+    }
+    record.outputPending += text;
+    scheduleOutputFlush();
+  };
+  record.child.stdout?.on('data', (data) => {
+    consumePiJsonOutput(record, data).forEach((text) => queueOutput(text));
+  });
+  record.child.stderr?.on('data', (data) => queueOutput(data));
+  record.child.stdin?.on('error', (error) => {
+    if (!record.finished) {
+      sendPiTerminalEvent(window, 'pi-terminal-error', { runId, message: `No se pudo enviar un mensaje a Pi: ${error.message}` });
+    }
+  });
+  record.child.once('error', (error) => {
+    sendPiTerminalEvent(window, 'pi-terminal-error', { runId, message: `No se pudo ejecutar pi: ${error.message}` });
+  });
+  record.child.once('close', (code, signal) => {
+    record.finished = true;
+    record.agentStreaming = false;
+    consumePiJsonOutput(record, '', true).forEach((text) => queueOutput(text));
+    if (record.outputFlushTimer) clearTimeout(record.outputFlushTimer);
+    record.outputFlushTimer = null;
+    flushOutput();
+    if (piProcesses.get(window) === record) piProcesses.delete(window);
+    sendPiTerminalEvent(window, 'pi-terminal-exit', {
+      runId,
+      code: Number.isInteger(code) ? code : null,
+      signal: signal || null,
+      stopped: record.stopRequested === true
+    });
+  });
+
+  try {
+    writePiRpcCommand(record, {
+      id: `${runId}-follow-up-mode`,
+      type: 'set_follow_up_mode',
+      mode: 'one-at-a-time'
+    });
+    writePiRpcCommand(record, {
+      id: `${runId}-initial`,
+      type: 'prompt',
+      message: prompt
+    });
+  } catch (error) {
+    record.stopRequested = true;
+    try { record.child.kill(process.platform === 'win32' ? undefined : 'SIGTERM'); } catch { /* El proceso ya terminó. */ }
+    throw new Error(`No se pudo enviar el prompt inicial a Pi: ${error.message}`);
+  }
+
+  return { runId, cwd: projectPath, provider, model, thinking, outputRefreshIntervalMs: outputFlushIntervalMs };
 }
 
 // Menú nativo de edición: los roles de Electron habilitan Ctrl/Cmd+C y Ctrl/Cmd+X
@@ -611,7 +1079,10 @@ function bindCloseConfirmation(window) {
     closeState.pending = true;
     window.webContents.send('close-confirmation-request');
   });
-  window.on('closed', () => closeConfirmationStates.delete(window));
+  window.on('closed', () => {
+    stopPiProcessForWindow(window);
+    closeConfirmationStates.delete(window);
+  });
 }
 
 function createWindow(apiBase) {
@@ -633,6 +1104,7 @@ function createWindow(apiBase) {
     }
   });
   bindCloseConfirmation(window);
+  window.webContents.on('render-process-gone', () => stopPiProcessForWindow(window));
   setApplicationMenuForView(window, null);
   const revealWindow = () => {
     window.maximize();
@@ -668,6 +1140,12 @@ app.whenReady().then(async () => {
     setApplicationMenuForView(window, applicationMenuViews.get(window) || null);
     return true;
   });
+
+  ipcMain.handle('start-pi-terminal', (event, payload = {}) => startPiProcess(event, payload));
+  ipcMain.handle('stop-pi-terminal', (event) => stopPiProcessForWindow(windowFromEvent(event)));
+  ipcMain.handle('send-pi-terminal-message', (event, message) => sendPiMessageForWindow(windowFromEvent(event), message));
+  ipcMain.handle('set-pi-terminal-refresh-interval', (event, intervalMs) => setPiOutputRefreshIntervalForWindow(windowFromEvent(event), intervalMs));
+  ipcMain.handle('get-pi-model-catalog', () => piModelCatalog());
 
   ipcMain.on('close-confirmation-result', (event, confirmed) => {
     const window = BrowserWindow.fromWebContents(event.sender);
@@ -947,6 +1425,7 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', async () => {
+  for (const window of BrowserWindow.getAllWindows()) stopPiProcessForWindow(window);
   if (apiServer) {
     const server = apiServer;
     apiServer = null;
