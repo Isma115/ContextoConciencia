@@ -1,3 +1,5 @@
+import { isPromptGlobalVariable, resolvePromptGlobalVariable } from './prompt-variables.js';
+
 const PROMPT_STORE_KEY = 'nexusdata.prompt-library.v1';
 const PROMPT_STORE_VERSION = 1;
 const MAX_PROMPT_NAME_LENGTH = 120;
@@ -172,10 +174,19 @@ export function getCustomPrompt(id) {
   return prompt ? { ...prompt } : null;
 }
 
+// Los tokens admiten mayúsculas, minúsculas y guion bajo: [FUNCIONALIDAD] y
+// [version_specs_actual] se resuelven con el mismo mecanismo. Primero se buscan en
+// las variables propias del prompt y, si no están, en las variables globales de la
+// aplicación (versión de specs activa, rutas del proyecto, etc.). Los tokens que no
+// se pueden resolver se conservan tal cual.
 export function replacePromptVariables(content, variables = {}) {
-  return String(content ?? '').replace(/\[([A-Z0-9_]+)\]/g, (token, name) => (
-    Object.prototype.hasOwnProperty.call(variables, name) ? String(variables[name] ?? '') : token
-  ));
+  const owned = variables && typeof variables === 'object' ? variables : {};
+  return String(content ?? '').replace(/\[([A-Za-z0-9_]+)\]/g, (token, name) => {
+    if (Object.prototype.hasOwnProperty.call(owned, name)) return String(owned[name] ?? '');
+    const key = Object.keys(owned).find((candidate) => candidate.toLowerCase() === name.toLowerCase());
+    if (key !== undefined) return String(owned[key] ?? '');
+    return isPromptGlobalVariable(name) ? resolvePromptGlobalVariable(name) : token;
+  });
 }
 
 export function promptMenuItems() {

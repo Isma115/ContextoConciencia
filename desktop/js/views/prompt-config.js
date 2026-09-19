@@ -11,6 +11,7 @@ import {
   saveCustomPrompt,
   savePromptOverride
 } from '../core/prompt-store.js';
+import { getPromptGlobalVariables } from '../core/prompt-variables.js';
 import { showToast } from '../ui/notifications.js';
 import {
   getDefaultDiagramPromptTemplate,
@@ -60,6 +61,21 @@ function promptKindLabel(prompt) {
   return 'Nuevo';
 }
 
+// Una variable global sin valor todavía (por ejemplo la versión de specs cuando no
+// hay proyecto S.D.D. cargado) se sustituye por vacío al copiar el prompt.
+function variableValueLabel(variable) {
+  return variable.available ? variable.value : 'Sin valor todavía';
+}
+
+function promptVariablesPanelMarkup() {
+  const variables = getPromptGlobalVariables();
+  const items = variables.map((variable) => `<button class="prompt-config-variable" type="button" data-prompt-variable="${escapeHtml(variable.tokenName)}" title="${escapeHtml(variable.description)}" aria-label="Insertar ${escapeHtml(variable.token)}"><code>${escapeHtml(variable.token)}</code><span class="prompt-config-variable-label">${escapeHtml(variable.label)}</span><span class="prompt-config-variable-value${variable.available ? '' : ' is-empty'}">${escapeHtml(variableValueLabel(variable))}</span></button>`).join('');
+  return `<details class="prompt-config-variables" id="prompt-config-variables">
+    <summary>Variables globales <span class="prompt-config-variables-count">${variables.length}</span></summary>
+    <div class="prompt-config-variable-list">${items}</div>
+  </details>`;
+}
+
 function promptListItem(prompt) {
   return `<button class="prompt-config-item${prompt.id === selectedPromptId && editorMode === 'selected' ? ' is-selected' : ''}" type="button" data-prompt-select="${escapeHtml(prompt.id)}" aria-pressed="${String(prompt.id === selectedPromptId && editorMode === 'selected')}"><span class="prompt-config-item-copy"><strong>${escapeHtml(prompt.name)}</strong><small>${escapeHtml(promptKindLabel(prompt))}</small></span></button>`;
 }
@@ -71,6 +87,7 @@ function editorMarkup(prompt) {
       <form id="prompt-config-editor-form" class="prompt-config-editor-form" data-prompt-kind="custom">
         <label class="form-label" for="prompt-config-name">Nombre<input id="prompt-config-name" class="field" name="name" maxlength="120" placeholder="Ej. Revisar una API" required></label>
         <label class="form-label prompt-config-content-label" for="prompt-config-content">Contenido<textarea id="prompt-config-content" class="textarea prompt-config-content" name="content" maxlength="200000" placeholder="Escribe aquí las instrucciones del prompt…" required></textarea></label>
+        ${promptVariablesPanelMarkup()}
         <div class="prompt-config-actions"><button class="btn btn-secondary" type="button" data-prompt-action="cancel-new">Cancelar</button><button class="btn btn-primary" type="submit">Guardar prompt</button></div>
       </form>
     </section>`;
@@ -86,7 +103,7 @@ function editorMarkup(prompt) {
     <form id="prompt-config-editor-form" class="prompt-config-editor-form" data-prompt-kind="${customForm ? 'custom' : 'builtin'}" data-prompt-id="${escapeHtml(prompt.id)}">
       ${customForm ? `<label class="form-label" for="prompt-config-name">Nombre<input id="prompt-config-name" class="field" name="name" maxlength="120" value="${escapeHtml(prompt.name)}" required></label>` : ''}
       <label class="form-label prompt-config-content-label" for="prompt-config-content">Contenido<textarea id="prompt-config-content" class="textarea prompt-config-content" name="content" maxlength="200000" required>${escapeHtml(prompt.content)}</textarea></label>
-      ${prompt.id === 'new-diagram' ? '<p class="prompt-config-help">Usa [FUNCIONALIDAD] para insertar la descripción del diagrama.</p>' : ''}
+      ${promptVariablesPanelMarkup()}
       <div class="prompt-config-actions"><button class="btn btn-secondary" type="button" data-prompt-action="copy" data-prompt-id="${escapeHtml(prompt.id)}">Copiar</button>${prompt.builtIn && prompt.customized ? `<button class="btn btn-danger" type="button" data-prompt-action="reset" data-prompt-id="${escapeHtml(prompt.id)}">Restablecer</button>` : ''}${customForm ? `<button class="btn btn-danger" type="button" data-prompt-action="delete" data-prompt-id="${escapeHtml(prompt.id)}">Eliminar</button>` : ''}<button class="btn btn-primary" type="submit">${prompt.builtIn ? 'Guardar cambios' : 'Guardar prompt'}</button></div>
     </form>
   </section>`;
@@ -99,7 +116,7 @@ function renderPromptConfigMarkup() {
   const custom = entries.filter((prompt) => !prompt.builtIn);
   const prompt = selectedEntry();
   return `<div class="prompt-config-shell">
-    <div class="prompt-config-header"><div><h1>Configurar prompts</h1><p class="lead">Edita un prompt o crea uno nuevo.</p></div><button class="btn btn-primary" type="button" data-prompt-action="add">＋ Nuevo prompt</button></div>
+    <div class="prompt-config-header"><div><h1>Configurar prompts</h1><p class="lead">Edita un prompt o crea uno nuevo. Todos admiten variables globales, como la versión de specs activa.</p></div><button class="btn btn-primary" type="button" data-prompt-action="add">＋ Nuevo prompt</button></div>
     <div class="prompt-config-layout">
       <section class="panel prompt-config-library" aria-label="Lista de prompts"><div class="prompt-config-group"><span class="prompt-config-group-label">Del programa</span><div class="prompt-config-list">${builtIns.map(promptListItem).join('')}</div></div>${custom.length ? `<div class="prompt-config-group"><span class="prompt-config-group-label">Mis prompts</span><div class="prompt-config-list">${custom.map(promptListItem).join('')}</div></div>` : ''}</section>
       ${editorMarkup(prompt)}
@@ -133,16 +150,34 @@ async function copyTextToClipboard(text) {
   if (!copied) throw new Error('El portapapeles no está disponible');
 }
 
+// Contenido que se copia desde la biblioteca: resuelve las variables globales
+// (versión de specs activa, rutas del proyecto…) y conserva los tokens que se
+// piden al usuario al usar el prompt, como [FUNCIONALIDAD].
 function promptContentForCopy(id) {
   const custom = getCustomPrompt(id);
-  if (custom) return custom.content;
+  if (custom) return replacePromptVariables(custom.content);
   const definition = BUILTIN_PROMPT_DEFINITIONS.find((item) => item.id === id);
   if (!definition) return '';
-  if (id === 'new-diagram') return replacePromptVariables(getPromptOverride(id) || defaultPromptContent(id), { FUNCIONALIDAD: '[FUNCIONALIDAD]' });
-  if (id === 'follow-specs') {
-    return replacePromptVariables(getPromptOverride(id) || defaultPromptContent(id), { SIN_TESTS: '' });
+  if (id === 'new-diagram') {
+    return replacePromptVariables(getPromptOverride(id) || defaultPromptContent(id), { FUNCIONALIDAD: '[FUNCIONALIDAD]' });
   }
-  return getPromptOverride(id) || defaultPromptContent(id);
+  return replacePromptVariables(getPromptOverride(id) || defaultPromptContent(id));
+}
+
+function insertPromptVariable(name) {
+  const textarea = $('#prompt-config-content');
+  if (!textarea) return;
+  const token = `[${name}]`;
+  const start = typeof textarea.selectionStart === 'number' ? textarea.selectionStart : textarea.value.length;
+  const end = typeof textarea.selectionEnd === 'number' ? textarea.selectionEnd : start;
+  textarea.value = `${textarea.value.slice(0, start)}${token}${textarea.value.slice(end)}`;
+  textarea.focus();
+  const caret = start + token.length;
+  try {
+    textarea.setSelectionRange(caret, caret);
+  } catch {
+    // El foco y el valor ya se han actualizado; la selección es opcional.
+  }
 }
 
 export async function copyPromptById(id) {
@@ -166,10 +201,15 @@ function bindPromptConfigEvents() {
   root.addEventListener('click', (event) => {
     const actionButton = event.target.closest('[data-prompt-action]');
     const selectButton = event.target.closest('[data-prompt-select]');
+    const variableButton = event.target.closest('[data-prompt-variable]');
     if (selectButton) {
       selectedPromptId = selectButton.dataset.promptSelect || null;
       editorMode = 'selected';
       renderPromptConfig();
+      return;
+    }
+    if (variableButton) {
+      insertPromptVariable(variableButton.dataset.promptVariable || '');
       return;
     }
     if (!actionButton) return;

@@ -109,7 +109,7 @@ async function copyTextToClipboard(text) {
 
 export async function copyGitDiffPrompt() {
   try {
-    await copyTextToClipboard(getPromptOverride('git-diff') || GIT_DIFF_PROMPT);
+    await copyTextToClipboard(replacePromptVariables(getPromptOverride('git-diff') || GIT_DIFF_PROMPT));
     showToast('Prompt copiado al portapapeles');
   } catch (error) {
     showToast(error.message || 'No se pudo copiar el prompt', true);

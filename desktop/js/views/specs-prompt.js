@@ -1,5 +1,6 @@
 import { showToast } from '../ui/notifications.js';
 import { getPromptOverride, replacePromptVariables } from '../core/prompt-store.js';
+import { findPromptGlobalTokens, resolvePromptGlobalVariable } from '../core/prompt-variables.js';
 
 export const SDD_PROMPT_INCLUDE_FULL_KEY = 'nexusdata.sdd-prompt-include-full';
 
@@ -126,8 +127,12 @@ Reglas adicionales:
 ${saveSection}`;
 }
 
+const VERSION_TOKEN = '[version_specs_actual]';
+
 const FOLLOW_SPECS_PROMPT = `Trabaja sobre el proyecto actual siguiendo "SDD_specs/specs.md" (pendientes) y "SDD_specs/specs_full.md" (requisitos y estados) como fuente de verdad.
 
+- La versión de specs que se está editando ahora mismo es la ${VERSION_TOKEN}: ten en cuenta solamente el fichero "SDD_specs/specs/${VERSION_TOKEN}.md".
+- No abras ni uses otras versiones de "SDD_specs/specs" distintas de la versión actual; son históricas y no describen el trabajo pendiente.
 - Implementa solo lo que describen los documentos; no inventes requisitos, diseños ni recursos.
 - No modifiques el campo "- Estado: ..." de ningún requisito, ni siquiera cuando completes su implementación; conserva los estados existentes en ambos documentos.
 - Ignora por completo el campo "- Color: ..." de cada Spec: es un metadato exclusivamente visual de su tarjeta. No lo trates como un requisito funcional.
@@ -153,10 +158,15 @@ export function getDefaultFollowSpecsPrompt() {
   return FOLLOW_SPECS_PROMPT;
 }
 
+// Prompt listo para usar: resuelve las variables globales (versión de specs activa,
+// rutas del proyecto…) y conserva los tokens propios del prompt.
 export function buildFollowSpecsPrompt() {
-  const custom = getPromptOverride('follow-specs');
-  // [SIN_TESTS] se resuelve a vacío: la opción de omitir tests ya no existe.
-  return custom ? replacePromptVariables(custom, { SIN_TESTS: '' }) : getDefaultFollowSpecsPrompt();
+  return replacePromptVariables(getPromptOverride('follow-specs') || getDefaultFollowSpecsPrompt());
+}
+
+// Tokens de variable global que usa el prompt para trabajar siguiendo specs.
+export function getFollowSpecsVersionTokens() {
+  return findPromptGlobalTokens(FOLLOW_SPECS_PROMPT);
 }
 
 async function copyTextToClipboard(text) {
@@ -179,7 +189,7 @@ async function copyTextToClipboard(text) {
 export async function copyCompletedSpecsPrompt() {
   try {
     const includeFull = readSddPromptIncludeFull();
-    await copyTextToClipboard(buildCompletedSpecsPrompt({ includeFull }));
+    await copyTextToClipboard(replacePromptVariables(buildCompletedSpecsPrompt({ includeFull })));
     showToast(includeFull
       ? 'Prompt de specs.md copiado al portapapeles (contexto: specs.md y specs_full.md)'
       : 'Prompt de specs.md copiado al portapapeles (contexto: solo pendientes)');
@@ -191,7 +201,10 @@ export async function copyCompletedSpecsPrompt() {
 export async function copyFollowSpecsPrompt() {
   try {
     await copyTextToClipboard(buildFollowSpecsPrompt());
-    showToast('Prompt para trabajar siguiendo specs copiado al portapapeles');
+    const version = resolvePromptGlobalVariable('version_specs_actual');
+    showToast(version
+      ? `Prompt copiado al portapapeles (versión de specs: ${version})`
+      : 'Prompt para trabajar siguiendo specs copiado al portapapeles');
   } catch (error) {
     showToast(error.message || 'No se pudo copiar el prompt para trabajar siguiendo specs', true);
   }

@@ -28,6 +28,18 @@ Permite que se pueda hacer Ctrl+C o Ctrl+X en los campos de la aplicación para 
 
 Los combobox de la vista de Specs se tiene que guardar, para el combobox de ESTADO, CATEGORÍA, ORDENAR POR
 
+## Variables globales en los prompts configurables
+- Estado: Activa
+- Categoría: Funcional
+
+Los prompts configurables pueden recibir variables globales de la aplicación. Una de ellas es la versión actual de Specs que se está editando, así que en el prompt de "Trabajar siguiendo specs" se puede añadir la instrucción de tener en cuenta solamente el fichero [version_specs_actual].md
+
+## Fix: Prompt duplicado en Configurar prompts
+- Estado: Activa
+- Categoría: Fix
+
+En la configuración de Prompts el prompt aparece dos veces: el editor de área de texto y además la previsualización. Debe quedar solo el editor de área de texto.
+
 # BBDD
 
 No hay tablas definidas.
