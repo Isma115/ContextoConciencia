@@ -678,6 +678,12 @@ body.is-code-map-resizing, body.is-code-map-resizing * { cursor: col-resize !imp
 .sdd-terminal-project code { min-width: 0; overflow: hidden; color: var(--accent-text-soft); text-overflow: ellipsis; white-space: nowrap; }
 .sdd-terminal-output { min-height: 0; flex: 1 1 auto; overflow: auto; margin: 0; padding: 14px; color: var(--text); background: var(--surface-code); font-family: var(--mono); font-size: 10px; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; }
 .sdd-terminal-output:focus { outline: 0; box-shadow: inset 0 0 0 1px var(--blue); }
+.sdd-terminal-queue { flex: 0 0 auto; max-height: 150px; overflow-y: auto; padding: 8px 11px; border-top: 1px solid var(--line); background: var(--surface-raised); }
+.sdd-terminal-queue[hidden] { display: none; }
+.sdd-terminal-queue-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 6px; color: var(--muted-2); font-family: var(--mono); font-size: 8px; letter-spacing: .5px; text-transform: uppercase; }
+.sdd-terminal-queue-head strong { color: var(--accent-text); font-size: 9px; }
+.sdd-terminal-queue ol { display: grid; gap: 4px; margin: 0; padding-left: 22px; }
+.sdd-terminal-queue li { padding: 4px 6px; color: var(--text); background: var(--surface); font-family: var(--mono); font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
 .sdd-terminal-message-form { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding: 9px 11px; border-top: 1px solid var(--line); background: var(--surface); }
 .sdd-terminal-input { min-width: 0; flex: 1 1 auto; font-family: var(--mono); }
 .sdd-terminal-message-form .btn { flex: 0 0 auto; min-height: 31px; }

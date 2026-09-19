@@ -317,8 +317,14 @@ function consumePiJsonOutput(record, data, flush = false) {
   return lines.filter((line) => line.trim()).map((line) => {
     try {
       const event = JSON.parse(line);
-      if (event?.type === 'agent_start') record.agentStreaming = true;
-      if (event?.type === 'agent_settled') record.agentStreaming = false;
+      if (event?.type === 'agent_start') {
+        record.agentStreaming = true;
+        record.onAgentStart?.();
+      }
+      if (event?.type === 'agent_settled') {
+        record.agentStreaming = false;
+        record.onAgentSettled?.();
+      }
       return piJsonEventText(event);
     } catch {
       return `${line}\n`;
@@ -687,15 +693,19 @@ function sendPiMessageForWindow(window, value) {
   if (Buffer.byteLength(message, 'utf8') > PI_MAX_MESSAGE_BYTES) {
     throw new Error('El mensaje para Pi supera el límite de 100 KB');
   }
-  const queued = record.agentStreaming === true;
-  const command = {
+  const queued = record.agentStreaming === true || record.pendingMessages.length > 0;
+  const pendingMessage = {
     id: `${record.runId}-message-${++record.rpcRequestNumber}`,
-    type: queued ? 'follow_up' : 'prompt',
     message
   };
-  writePiRpcCommand(record, command);
-  // Evita que dos envíos inmediatos intenten iniciar dos respuestas simultáneas.
-  record.agentStreaming = true;
+  if (queued) {
+    record.pendingMessages.push(pendingMessage);
+    record.notifyQueue?.();
+  } else {
+    writePiRpcCommand(record, { ...pendingMessage, type: 'prompt' });
+    record.agentStreaming = true;
+    record.notifyQueue?.();
+  }
   return { queued };
 }
 
@@ -731,6 +741,7 @@ function startPiProcess(event, payload = {}) {
     outputFlushTimer: null,
     outputPending: '',
     outputTruncated: false,
+    pendingMessages: [],
     rpcRequestNumber: 0,
     runId,
     stopRequested: false,
@@ -767,6 +778,30 @@ function startPiProcess(event, payload = {}) {
     record.outputFlushTimer.unref?.();
   };
   record.scheduleOutputFlush = scheduleOutputFlush;
+  const notifyQueue = () => {
+    sendPiTerminalEvent(window, 'pi-terminal-queue', {
+      runId,
+      messages: record.pendingMessages.map(({ id, message }) => ({ id, message })),
+      willQueue: record.agentStreaming === true || record.pendingMessages.length > 0
+    });
+  };
+  const dispatchNextMessage = () => {
+    if (record.finished || record.agentStreaming || !record.pendingMessages.length) return;
+    const nextMessage = record.pendingMessages.shift();
+    try {
+      writePiRpcCommand(record, { ...nextMessage, type: 'prompt' });
+      record.agentStreaming = true;
+    } catch (error) {
+      record.pendingMessages.unshift(nextMessage);
+      sendPiTerminalEvent(window, 'pi-terminal-error', { runId, message: `No se pudo enviar un mensaje a Pi: ${error.message}` });
+    }
+  };
+  record.notifyQueue = notifyQueue;
+  record.onAgentStart = notifyQueue;
+  record.onAgentSettled = () => {
+    dispatchNextMessage();
+    notifyQueue();
+  };
   const queueOutput = (data) => {
     if (record.outputTruncated) return;
     const text = Buffer.isBuffer(data) ? data.toString('utf8') : String(data ?? '');
@@ -795,6 +830,8 @@ function startPiProcess(event, payload = {}) {
   record.child.once('close', (code, signal) => {
     record.finished = true;
     record.agentStreaming = false;
+    record.pendingMessages = [];
+    notifyQueue();
     consumePiJsonOutput(record, '', true).forEach((text) => queueOutput(text));
     if (record.outputFlushTimer) clearTimeout(record.outputFlushTimer);
     record.outputFlushTimer = null;
@@ -810,15 +847,11 @@ function startPiProcess(event, payload = {}) {
 
   try {
     writePiRpcCommand(record, {
-      id: `${runId}-follow-up-mode`,
-      type: 'set_follow_up_mode',
-      mode: 'one-at-a-time'
-    });
-    writePiRpcCommand(record, {
       id: `${runId}-initial`,
       type: 'prompt',
       message: prompt
     });
+    notifyQueue();
   } catch (error) {
     record.stopRequested = true;
     try { record.child.kill(process.platform === 'win32' ? undefined : 'SIGTERM'); } catch { /* El proceso ya terminó. */ }

@@ -73,6 +73,12 @@ contextBridge.exposeInMainWorld('nexusData', {
     ipcRenderer.on('pi-terminal-error', listener);
     return () => ipcRenderer.removeListener('pi-terminal-error', listener);
   },
+  onPiTerminalQueue: (callback) => {
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('pi-terminal-queue', listener);
+    return () => ipcRenderer.removeListener('pi-terminal-queue', listener);
+  },
   onProjectMenuAction: (callback) => ipcRenderer.on('project-menu-action', (_event, action) => callback(action)),
   onSddMenuAction: (callback) => ipcRenderer.on('sdd-menu-action', (_event, action) => callback(action)),
   onHtmlViewerMenuAction: (callback) => ipcRenderer.on('html-viewer-menu-action', (_event, action) => callback(action)),

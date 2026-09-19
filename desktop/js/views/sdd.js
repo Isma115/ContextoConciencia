@@ -220,6 +220,8 @@ let piTerminalState = {
   output: '',
   outputRefreshIntervalMs: readStoredPiOutputRefreshInterval(),
   projectPath: '',
+  messageWillQueue: false,
+  queuedMessages: [],
   provider: SDD_PI_DEFAULT_CONFIG.provider,
   runId: '',
   signal: '',
@@ -454,8 +456,19 @@ function updatePiTerminalMessageControls() {
   const input = $('#sdd-terminal-input');
   const send = $('#sdd-terminal-send');
   const available = hasSddProject() && !state.sddProject?.legacy;
-  if (input) input.disabled = !available;
+  if (input) {
+    input.disabled = !available;
+    input.placeholder = `${piTerminalState.messageWillQueue ? '(Cola) ' : ''}Escribe un mensaje para Pi…`;
+  }
   if (send) send.disabled = !available || !String(input?.value || '').trim();
+}
+
+function updatePiTerminalQueue() {
+  const queue = $('#sdd-terminal-queue');
+  if (!queue) return;
+  const messages = Array.isArray(piTerminalState.queuedMessages) ? piTerminalState.queuedMessages : [];
+  queue.hidden = messages.length === 0;
+  queue.innerHTML = messages.length ? `<div class="sdd-terminal-queue-head"><span>Mensajes en cola</span><strong>${messages.length}</strong></div><ol>${messages.map((item) => `<li>${escapeHtml(item.message)}</li>`).join('')}</ol>` : '';
 }
 
 function updatePiTerminalView() {
@@ -472,6 +485,7 @@ function updatePiTerminalView() {
   }
   const stop = $('#sdd-pi-stop');
   if (stop) stop.disabled = !piTerminalState.running;
+  updatePiTerminalQueue();
   updatePiTerminalMessageControls();
   const project = $('#sdd-terminal-project-path');
   if (project) project.textContent = piTerminalState.cwd || currentSddProjectPath() || 'Sin proyecto';
@@ -497,6 +511,7 @@ function applyPiTerminalOutput(payload) {
 function applyPiTerminalError(payload) {
   piTerminalState.error = String(payload.message || 'Error desconocido al ejecutar Pi');
   piTerminalState.running = false;
+  piTerminalState.messageWillQueue = false;
   appendPiTerminalOutput(`\n\n[${piTerminalState.error}]\n`);
   updatePiTerminalView();
 }
@@ -507,11 +522,24 @@ function applyPiTerminalExit(payload) {
   piTerminalState.stopped = payload.stopped === true;
   piTerminalState.finished = true;
   piTerminalState.running = false;
+  piTerminalState.messageWillQueue = false;
+  piTerminalState.queuedMessages = [];
   const result = piTerminalState.stopped
     ? 'Pi detenido por el usuario.'
     : `Pi finalizó${piTerminalState.code === null ? '' : ` con código ${piTerminalState.code}`}.`;
   appendPiTerminalOutput(`\n\n[${result}]\n`);
   updatePiTerminalView();
+}
+
+function applyPiTerminalQueue(payload) {
+  const messages = Array.isArray(payload.messages) ? payload.messages : [];
+  piTerminalState.messageWillQueue = payload.willQueue === true;
+  piTerminalState.queuedMessages = messages.map((item) => ({
+    id: String(item?.id || ''),
+    message: String(item?.message || '')
+  })).filter((item) => item.id && item.message);
+  updatePiTerminalQueue();
+  updatePiTerminalMessageControls();
 }
 
 function acceptPiTerminalEvent(type, payload = {}) {
@@ -525,6 +553,7 @@ function acceptPiTerminalEvent(type, payload = {}) {
   if (type === 'output') applyPiTerminalOutput(payload);
   if (type === 'error') applyPiTerminalError(payload);
   if (type === 'exit') applyPiTerminalExit(payload);
+  if (type === 'queue') applyPiTerminalQueue(payload);
 }
 
 function drainPiTerminalEvents(runId) {
@@ -544,6 +573,9 @@ function bindPiTerminalEvents() {
   });
   window.nexusData.onPiTerminalExit?.((payload = {}) => {
     acceptPiTerminalEvent('exit', payload);
+  });
+  window.nexusData.onPiTerminalQueue?.((payload = {}) => {
+    acceptPiTerminalEvent('queue', payload);
   });
 }
 
@@ -606,6 +638,8 @@ async function startPiFromSpecs(button) {
       output: `$ pi --provider ${result.provider || config.provider} --model ${result.model || config.model} --thinking ${result.thinking || config.thinking} --approve --mode rpc\n$ cwd: ${result.cwd || currentSddProjectPath()}\n\nPrompt enviado:\n${prompt}\n\n`,
       outputRefreshIntervalMs: persistPiOutputRefreshInterval(result.outputRefreshIntervalMs),
       projectPath: currentSddProjectPath(),
+      messageWillQueue: true,
+      queuedMessages: [],
       provider: result.provider || config.provider,
       runId: result.runId,
       signal: '',
@@ -673,6 +707,8 @@ async function sendPiMessageFromTerminal() {
         output: `$ pi --provider ${result.provider || config.provider} --model ${result.model || config.model} --thinking ${result.thinking || config.thinking} --approve --mode rpc\n$ cwd: ${result.cwd || currentSddProjectPath()}\n\nMensaje enviado:\n${message}\n\n`,
         outputRefreshIntervalMs: persistPiOutputRefreshInterval(result.outputRefreshIntervalMs),
         projectPath: currentSddProjectPath(),
+        messageWillQueue: true,
+        queuedMessages: [],
         provider: result.provider || config.provider,
         runId: result.runId,
         signal: '',
@@ -860,6 +896,8 @@ export function setSddProject(project = null, { refresh = false, honorActiveVers
       finished: false,
       output: '',
       projectPath: '',
+      messageWillQueue: false,
+      queuedMessages: [],
       runId: '',
       signal: '',
       stopped: false,
@@ -1852,6 +1890,7 @@ export function renderSddTerminal() {
     </div>
     <div class="sdd-terminal-project"><span>Carpeta de trabajo</span><code id="sdd-terminal-project-path">${escapeHtml(piTerminalState.cwd || currentSddProjectPath())}</code></div>
     <pre id="sdd-terminal-output" class="sdd-terminal-output" tabindex="0">${escapeHtml(terminalOutputText(piTerminalState.output) || 'Escribe un mensaje para iniciar Pi o pulsa “▶ Play” en Specs.')}</pre>
+    <div id="sdd-terminal-queue" class="sdd-terminal-queue" aria-live="polite" hidden></div>
     <form id="sdd-terminal-message-form" class="sdd-terminal-message-form">
       <input id="sdd-terminal-input" class="field sdd-terminal-input" type="text" maxlength="102400" autocomplete="off" placeholder="Escribe un mensaje para Pi…" aria-label="Mensaje para Pi">
       <button id="sdd-terminal-send" class="btn btn-primary btn-small" type="submit" disabled>Enviar</button>
