@@ -5,6 +5,15 @@ import { showToast } from '../ui/notifications.js';
 import { closeModal, bindModalClose } from '../ui/modals.js';
 import { shortDate } from '../core/format.js';
 import { state } from '../core/state.js';
+import {
+  persistStoredSddActiveVersion,
+  persistStoredSddLastProject,
+  persistStoredSddProjectPath,
+  readStoredSddActiveVersion,
+  readStoredSddLastProject,
+  readStoredSddProjectPath
+} from '../core/sdd-storage.js';
+import { nextSddVersionName } from '../core/sdd-version.js';
 
 const SPEC_STATUS = Object.freeze({ active: 'Activa', implemented: 'Implementada' });
 const SPEC_CATEGORIES = Object.freeze(['Funcional', 'Usabilidad', 'Base de datos', 'Seguridad', 'Rendimiento', 'Integración']);
@@ -65,9 +74,6 @@ const SPECS_DIRECTORY_NAME = 'specs';
 const SPECS_FULL_FILE_NAME = 'specs_full.md';
 const SPECS_DATABASE_FILE_NAME = 'bbdd.md';
 const SPECS_RESOURCES_FOLDER_NAME = 'specs_resources';
-const SDD_PROJECT_PATH_STORAGE_KEY = 'nexusdata.sdd-project-path.v1';
-const SDD_LAST_PROJECT_STORAGE_KEY = 'nexusdata.sdd-last-project';
-const SDD_ACTIVE_VERSION_STORAGE_KEY = 'nexusdata.sdd-active-version.v1';
 const SDD_SPECS_FILTERS_STORAGE_KEY = 'nexusdata.sdd-specs-filters.v1';
 // Solo se guardan los combobox de la vista de Specs: estado, categoría y orden.
 const SDD_SPECS_STORED_SELECT_FIELDS = Object.freeze(['status', 'category', 'sort']);
@@ -197,43 +203,19 @@ export function bindSddSectionToggle() {
 }
 
 function storedSddProjectPath() {
-  try {
-    return typeof window !== 'undefined' && window.localStorage
-      ? window.localStorage.getItem(SDD_PROJECT_PATH_STORAGE_KEY) || ''
-      : '';
-  } catch {
-    return '';
-  }
+  return readStoredSddProjectPath();
 }
 
 function persistSddProjectPath(projectPath) {
-  try {
-    if (typeof window === 'undefined' || !window.localStorage) return;
-    if (projectPath) window.localStorage.setItem(SDD_PROJECT_PATH_STORAGE_KEY, projectPath);
-    else window.localStorage.removeItem(SDD_PROJECT_PATH_STORAGE_KEY);
-  } catch {
-    // El proyecto sigue disponible durante la sesión aunque no se pueda guardar la ruta.
-  }
+  persistStoredSddProjectPath(projectPath);
 }
 
 function storedSddActiveVersion(projectPath) {
-  try {
-    if (!projectPath || typeof window === 'undefined' || !window.localStorage) return '';
-    return String(window.localStorage.getItem(`${SDD_ACTIVE_VERSION_STORAGE_KEY}:${projectPath}`) || '').trim();
-  } catch {
-    return '';
-  }
+  return readStoredSddActiveVersion(projectPath);
 }
 
 function persistSddActiveVersion(projectPath, version) {
-  try {
-    if (!projectPath || typeof window === 'undefined' || !window.localStorage) return;
-    const key = `${SDD_ACTIVE_VERSION_STORAGE_KEY}:${projectPath}`;
-    if (version) window.localStorage.setItem(key, version);
-    else window.localStorage.removeItem(key);
-  } catch {
-    // La versión sigue activa durante la sesión aunque no se pueda persistir.
-  }
+  persistStoredSddActiveVersion(projectPath, version);
 }
 
 function normaliseSddVersions(versions) {
@@ -247,12 +229,36 @@ function normaliseSddVersions(versions) {
   }).filter(Boolean);
 }
 
+// Opciones del combobox de versiones. No añadimos el `<button>` con
+// `<selectedcontent>` del select personalizable: Chromium no rellena ese clon
+// cuando las opciones y el valor se asignan por JavaScript, y el control
+// aparecía vacío. El texto lo pinta el render por defecto.
+function versionOptionsMarkup(versions) {
+  return normaliseSddVersions(versions)
+    .map((version) => `<option value="${escapeHtml(version.name)}">${escapeHtml(version.name)}</option>`)
+    .join('');
+}
+
 function activeSddVersion(project, preferred = '') {
   const versions = normaliseSddVersions(project?.versions);
   if (!versions.length) return '';
   const candidates = [preferred, storedSddActiveVersion(project?.path), project?.activeVersion];
   const selected = candidates.map((value) => String(value || '').trim()).find((name) => versions.some((version) => version.name === name));
   return selected || versions.at(-1).name;
+}
+
+function suggestedSddVersion(project = state.sddProject) {
+  return nextSddVersionName(project?.versions, activeSddVersion(project));
+}
+
+function syncSddVersionQuickAdd(project = state.sddProject) {
+  const button = $('#sdd-version-quick-add');
+  if (!button) return;
+  const suggestion = suggestedSddVersion(project);
+  button.disabled = !suggestion;
+  const label = suggestion ? `Crear la siguiente versión (${suggestion})` : 'Crear una versión nueva';
+  button.title = label;
+  button.setAttribute('aria-label', label);
 }
 
 function renderSddVersionControl() {
@@ -262,11 +268,12 @@ function renderSddVersionControl() {
   const project = state.sddProject;
   const versions = project?.legacy ? [] : normaliseSddVersions(project?.versions);
   control.hidden = !versions.length;
+  syncSddVersionQuickAdd(project);
   if (!versions.length) {
     select.innerHTML = '';
     return;
   }
-  select.innerHTML = versions.map((version) => `<option value="${escapeHtml(version.name)}">${escapeHtml(version.name)}</option>`).join('');
+  select.innerHTML = versionOptionsMarkup(versions);
   select.value = activeSddVersion(project);
   if (select.dataset.sddVersionBound === 'true') return;
   select.dataset.sddVersionBound = 'true';
@@ -283,16 +290,35 @@ function renderSddVersionControl() {
   });
 }
 
-export function setSddProject(project = null, { refresh = false } = {}) {
+// Botón rápido «＋» del selector de versión: abre la ventana de nueva versión
+// con la siguiente versión ya sugerida (0.0.1 → 0.0.2).
+export function bindSddVersionQuickAdd() {
+  const button = $('#sdd-version-quick-add');
+  if (!button || button.dataset.sddVersionBound === 'true') return;
+  button.dataset.sddVersionBound = 'true';
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    openSddVersionModal();
+  });
+  syncSddVersionQuickAdd();
+}
+
+// `honorActiveVersion` hace que se respete la versión activa que llega en el
+// proyecto en lugar de conservar la que ya estaba seleccionada. Lo usan los
+// flujos que crean una versión nueva: al terminar debe quedar seleccionada.
+export function setSddProject(project = null, { refresh = false, honorActiveVersion = false } = {}) {
   const previousPath = state.sddProject?.path || '';
   const previousVersion = state.sddProject?.activeVersion || '';
   let nextProject = project && typeof project.path === 'string' && project.path.trim()
     ? { ...project, path: project.path.trim(), versions: normaliseSddVersions(project.versions) }
     : null;
   if (nextProject && !nextProject.legacy) {
+    const preferredVersion = honorActiveVersion
+      ? String(nextProject.activeVersion || '').trim()
+      : (previousPath === nextProject.path ? previousVersion : '');
     nextProject = {
       ...nextProject,
-      activeVersion: activeSddVersion(nextProject, previousPath === nextProject.path ? previousVersion : '')
+      activeVersion: activeSddVersion(nextProject, preferredVersion)
     };
     persistSddActiveVersion(nextProject.path, nextProject.activeVersion);
   }
@@ -339,10 +365,7 @@ function persistLastSddProject(project) {
     // El recuerdo del proyecto no debe impedir su uso en la sesión actual.
   }
   try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      if (payload) window.localStorage.setItem(SDD_LAST_PROJECT_STORAGE_KEY, JSON.stringify(payload));
-      else window.localStorage.removeItem(SDD_LAST_PROJECT_STORAGE_KEY);
-    }
+    persistStoredSddLastProject(payload);
   } catch {
     // Si el almacenamiento local no está disponible, se conserva el fichero del proceso principal.
   }
@@ -358,15 +381,7 @@ async function readLastSddProjectReference() {
   } catch {
     // Se intenta el almacenamiento local como alternativa.
   }
-  try {
-    if (typeof window !== 'undefined' && window.localStorage) {
-      const stored = JSON.parse(window.localStorage.getItem(SDD_LAST_PROJECT_STORAGE_KEY) || 'null');
-      if (stored && typeof stored.path === 'string' && stored.path.trim()) return stored;
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  return readStoredSddLastProject();
 }
 
 export async function restoreLastSddProject() {
@@ -1188,13 +1203,32 @@ function openSpecModal(existing = null) {
 }
 
 function openSddVersionModal() {
-  const sourceVersion = state.sddProject?.activeVersion || '';
-  if (!sourceVersion) {
+  const project = state.sddProject;
+  const versions = normaliseSddVersions(project?.versions);
+  const sourceVersion = activeSddVersion(project) || String(project?.activeVersion || '').trim();
+  if (!versions.length && !sourceVersion) {
     showToast('Selecciona una versión activa antes de crear otra', true);
     return;
   }
-  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-version-modal-title"><div class="modal-head"><div><h2 id="sdd-version-modal-title">Nueva versión de especificaciones</h2><p>Se creará un snapshot independiente a partir de ${escapeHtml(sourceVersion)}.</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><label class="form-label">Nombre de versión<input id="sdd-version-name" class="field" type="text" value="" placeholder="Ej. 1.1.0" maxlength="120" autocomplete="off" autofocus /></label><p class="form-note">Se permiten letras, números, punto, guion y guion bajo. No escribas la extensión .md.</p></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="sdd-version-save" class="btn btn-primary" type="button">Crear versión</button></div></div></div>`;
+  const suggestedVersion = nextSddVersionName(versions, sourceVersion);
+  const sourceNote = sourceVersion
+    ? `Se creará una versión vacía con la plantilla por defecto. Las specs de ${escapeHtml(sourceVersion)} no se copian.`
+    : 'Se creará una versión vacía con la plantilla por defecto.';
+  const nameNote = suggestedVersion
+    ? `Versión sugerida: <strong>${escapeHtml(suggestedVersion)}</strong>. Se permiten letras, números, punto, guion y guion bajo; no escribas la extensión .md. Pulsa Intro para crearla.`
+    : 'Se permiten letras, números, punto, guion y guion bajo. No escribas la extensión .md.';
+  $('#modal-root').innerHTML = `<div class="modal-backdrop"><div class="modal" role="dialog" aria-modal="true" aria-labelledby="sdd-version-modal-title"><div class="modal-head"><div><h2 id="sdd-version-modal-title">Nueva versión de especificaciones</h2><p>${sourceNote}</p></div><button class="modal-close" data-close-modal aria-label="Cerrar">×</button></div><div class="modal-body"><label class="form-label">Nombre de versión<input id="sdd-version-name" class="field" type="text" value="${escapeHtml(suggestedVersion)}" placeholder="Ej. 1.1.0" maxlength="120" autocomplete="off" autofocus /></label><p class="form-note">${nameNote}</p></div><div class="modal-actions"><button class="btn btn-secondary" data-close-modal type="button">Cancelar</button><button id="sdd-version-save" class="btn btn-primary" type="button">Crear versión</button></div></div></div>`;
   bindModalClose();
+  const nameInput = $('#sdd-version-name');
+  if (nameInput) {
+    nameInput.focus();
+    nameInput.select();
+    nameInput.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      $('#sdd-version-save')?.click();
+    });
+  }
   $('#sdd-version-save').addEventListener('click', async () => {
     const button = $('#sdd-version-save');
     const version = $('#sdd-version-name').value.trim();
@@ -1206,16 +1240,21 @@ function openSddVersionModal() {
     try {
       const result = await sddApi('/sdd/versions', {
         method: 'POST',
-        body: JSON.stringify({ version, sourceVersion })
+        body: JSON.stringify({ version })
       });
       const current = state.sddProject || {};
+      const nextVersion = result.activeVersion || version;
+      // La versión recién creada pasa a ser la activa: `honorActiveVersion`
+      // evita que setSddProject conserve la versión anterior en el selector.
+      const nextVersions = normaliseSddVersions(result.versions || current.versions);
+      if (!nextVersions.some((item) => item.name === nextVersion)) nextVersions.push({ name: nextVersion });
       setSddProject({
         ...current,
-        versions: result.versions || current.versions,
-        activeVersion: result.activeVersion || version
-      }, { refresh: true });
+        versions: nextVersions,
+        activeVersion: nextVersion
+      }, { refresh: true, honorActiveVersion: true });
       closeModal();
-      showToast(`Versión ${state.sddProject?.activeVersion || version} creada`);
+      showToast(`Versión ${state.sddProject?.activeVersion || nextVersion} creada y seleccionada`);
       renderActiveSddViews();
     } catch (error) {
       showToast(error.message || 'No se pudo crear la versión', true);
@@ -1231,7 +1270,7 @@ export function renderSddSpecs() {
   const requestId = ++renderRequestId;
   const filterDefinitions = SDD_FILTER_DEFINITIONS.specs;
   const activeVersion = state.sddProject?.activeVersion || '—';
-  const actions = `<button id="sdd-version-add" class="btn btn-secondary" type="button" title="Crear un snapshot independiente desde la versión activa">＋ Nueva versión</button><button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Editar el snapshot ${escapeHtml(activeVersion)}">Editar markdown</button>`;
+  const actions = `<button id="sdd-version-add" class="btn btn-secondary" type="button" title="Crear una versión nueva y vacía (plantilla por defecto)">＋ Nueva versión</button><button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Editar el snapshot ${escapeHtml(activeVersion)}">Editar markdown</button>`;
   container.innerHTML = `${sddHeader('specs', `Specs · ${activeVersion}`)}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', actions)}${sddFilterBar('specs', 'Filtros de requisitos', 'Buscar por título, categoría o descripción…', filterDefinitions)}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
   moveSddToolbarActionsToHeader(container);
   $('#sdd-spec-add').addEventListener('click', () => openSpecModal());

@@ -12,7 +12,7 @@ import { bindDiagramMenu, openDiagramDocument, renderDiagrams } from './views/di
 import { configureCodeMap, renderCodeMap } from './views/code-map.js';
 import { renderFavorites, renderRecentDocuments } from './views/document-collections.js';
 import { renderFileExplorer } from './views/file-explorer.js';
-import { bindSddSectionToggle, collapseSddSection, configureSdd, expandSddSection, renderSddHome, renderSddSpecs, renderSddDatabase, renderSddResources, bindSddMenu, bindSddReload, bindProjectMenu, restoreLastSddProject } from './views/sdd.js';
+import { bindSddSectionToggle, collapseSddSection, configureSdd, expandSddSection, renderSddHome, renderSddSpecs, renderSddDatabase, renderSddResources, bindSddMenu, bindSddReload, bindSddVersionQuickAdd, bindProjectMenu, restoreLastSddProject } from './views/sdd.js';
 import { bindPreferencesMenu } from './views/settings.js';
 import { loadPalettePreference } from './core/theme.js';
 import { loadDiagramFontSize, loadDiagramLineContrast } from './core/diagram-settings.js';
@@ -261,6 +261,7 @@ bindSidebarSearch();
 bindCloseConfirmation();
 bindSddMenu();
 bindSddReload();
+bindSddVersionQuickAdd();
 bindSddSectionToggle();
 bindProjectMenu();
 loadPalettePreference();

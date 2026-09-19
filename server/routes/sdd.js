@@ -677,8 +677,13 @@ function pendingSddSpecs(specs) {
   return (Array.isArray(specs) ? specs : []).filter((spec) => !isCompletedSpecStatus(spec?.status));
 }
 
+// Plantilla por defecto de una versión recién creada: sin specs.
+function emptySddSpecsMarkdown() {
+  return '# Specs\n';
+}
+
 function sddSpecsToMarkdown(specs) {
-  if (!specs.length) return '# Specs\n';
+  if (!specs.length) return emptySddSpecsMarkdown();
   const blocks = specs.map((spec) => {
     const status = normalizeSpecStatus(spec.status);
     const lines = [`## ${markdownHeadingText(spec.title, 200)}`, `- Estado: ${SPEC_STATUS_LABELS[status]}`];
@@ -1509,11 +1514,11 @@ function installSddRoutes(app) {
       if (versions.some((item) => item.name.toLocaleLowerCase() === name.toLocaleLowerCase())) {
         return res.status(409).json({ error: `La versión “${name}” ya existe` });
       }
-      const sourceVersion = asText(req.body?.sourceVersion) || req.get('x-sdd-spec-version') || req.query?.sourceVersion || '';
-      const source = resolveSddVersion(projectPath, sourceVersion).version;
-      const sourceSpecs = parseSddSpecsMarkdown(fs.readFileSync(source.path, 'utf8'));
+      // La versión nueva nace vacía con la plantilla por defecto: las specs de
+      // la versión activa no se copian. `sourceVersion` se acepta por
+      // compatibilidad con clientes antiguos, pero ya no se usa.
       const destination = path.join(paths.specsDirectoryPath, `${name}.md`);
-      fs.writeFileSync(destination, sddSpecsToMarkdown(sourceSpecs), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      fs.writeFileSync(destination, emptySddSpecsMarkdown(), { encoding: 'utf8', mode: 0o600, flag: 'wx' });
       syncFullSpecsMarkdown(projectPath);
       const version = resolveSddVersion(projectPath, name).version;
       return res.status(201).json({ version, activeVersion: name, versions: listSddVersions(projectPath) });

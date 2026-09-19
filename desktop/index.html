@@ -47,8 +47,12 @@
               <button id="sdd-reload" class="sidebar-inject-button sidebar-reload-button" type="button" title="Recargar versiones, specs_full.md, bbdd.md y recursos desde disco" aria-label="Recargar">⟳</button>
             </div>
             <label id="sdd-version-control" class="sidebar-prompt-option sdd-version-control" hidden>
-              <span>Versión activa</span>
-              <select id="sdd-active-version" class="select" aria-label="Versión activa"></select>
+              <span class="sdd-version-label">Versión activa</span>
+              <span class="sdd-version-row">
+                <select id="sdd-active-version" class="select" aria-label="Versión activa"></select>
+                <span class="sdd-version-chevron" aria-hidden="true"></span>
+                <button id="sdd-version-quick-add" class="sdd-version-quick-add" type="button" title="Crear una versión nueva" aria-label="Crear una versión nueva">＋</button>
+              </span>
             </label>
             <div class="sidebar-section-heading sidebar-resources-heading"><span>RECURSOS</span></div>
             <nav class="main-nav" aria-label="Navegación S.D.D">

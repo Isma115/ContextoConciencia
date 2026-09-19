@@ -34,6 +34,46 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-prompt-option { display: flex; align-items: center; gap: 9px; min-width: 0; margin: 12px 10px 0; color: var(--muted); font-size: 12px; cursor: pointer; }
 .sidebar-prompt-option input { width: 19px; height: 19px; margin: 0; flex: 0 0 auto; accent-color: var(--blue); }
 .sidebar-prompt-option span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Selector de versión de S.D.D.: rótulo en mayúsculas y combobox a lo ancho del
+   panel, en monoespaciada y con el botón rápido de crear versión pegado a él. */
+.sdd-version-control { flex-direction: column; align-items: stretch; gap: 6px; margin: 10px 8px 0; }
+.sdd-version-control[hidden] { display: none; }
+.sdd-version-label { color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: 1.2px; text-transform: uppercase; }
+/* El rótulo base recorta el overflow de los span: la fila no debe recortar el
+   anillo de foco del combobox. */
+.sidebar-prompt-option .sdd-version-row { --sdd-version-add: 30px; position: relative; display: flex; align-items: stretch; min-width: 0; overflow: visible; }
+/* El alto de la caja sale del padding simétrico (7+14+7+2 bordes = 30px, igual
+   que el botón «＋»). Con `min-height` el contenido se quedaba pegado arriba. */
+.sdd-version-control #sdd-active-version { min-width: 0; flex: 1 1 auto; border: 1px solid var(--line); border-radius: 0; padding: 7px 26px 7px 10px; line-height: 14px; color: var(--accent-text); background-color: var(--surface-overlay); background-image: none; font-family: var(--mono); font-size: 11px; letter-spacing: .4px; transition: background-color .12s, border-color .12s, box-shadow .12s, color .12s; }
+.sdd-version-control #sdd-active-version:hover:not(:disabled) { border-color: var(--hover-border); background-color: var(--hover-surface); box-shadow: 0 0 0 1px var(--blue-soft); }
+.sdd-version-control #sdd-active-version:focus, .sdd-version-control #sdd-active-version:focus-visible { outline: 0; border-color: var(--blue); background-color: var(--surface-overlay); box-shadow: 0 0 0 2px var(--blue-soft); }
+/* Desplegable de versiones. `appearance: base-select` (Chromium 135+) saca las
+   opciones del menú nativo del sistema —que ignora el CSS— y las convierte en
+   elementos normales que sí se pueden estilar. Si el motor no lo soporta, la
+   regla se descarta entera y el combobox conserva el aspecto clásico. */
+.sdd-version-control #sdd-active-version,
+.sdd-version-control #sdd-active-version::picker(select) { appearance: base-select; }
+/* La flecha la dibuja `.sdd-version-chevron`: ocultamos la del navegador. */
+.sdd-version-control #sdd-active-version::picker-icon { display: none; }
+.sdd-version-control #sdd-active-version::picker(select) { margin: 4px 0 0; min-width: anchor-size(width); max-height: 260px; border: 1px solid var(--accent-border); border-radius: 0; padding: 4px; color: var(--text); background: var(--surface-raised); box-shadow: 0 16px 34px rgba(0, 0, 0, .5); font-family: var(--mono); font-size: 11px; }
+.sdd-version-control #sdd-active-version option { color: var(--text); font-family: var(--mono); font-size: 11px; letter-spacing: .4px; }
+.sdd-version-control #sdd-active-version option:hover:not(:checked) { color: var(--strong); background: var(--hover-surface); }
+/* La opción marcada se distingue por color y marca, sin fondo: su contenido se
+   clona dentro del botón cerrado del combobox. */
+.sdd-version-control #sdd-active-version option:checked { color: var(--accent-text); background: transparent; }
+.sdd-version-control #sdd-active-version option::checkmark { color: var(--accent-text); }
+/* Flecha dibujada con bordes (hereda el color del tema) en lugar del triángulo
+   de dos gradientes de `.select`. */
+.sdd-version-row .sdd-version-chevron { position: absolute; top: 50%; right: calc(var(--sdd-version-add) + 8px); width: 7px; height: 7px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: translateY(calc(-50% - 2px)) rotate(45deg); pointer-events: none; transition: border-color .12s; }
+.sdd-version-row:hover .sdd-version-chevron { border-color: var(--strong); }
+/* Con el desplegable abierto (solo con `base-select`) la flecha gira y el
+   combobox mantiene el borde de foco. */
+.sdd-version-control #sdd-active-version:open { border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); }
+.sdd-version-row:has(#sdd-active-version:open) .sdd-version-chevron { border-color: var(--strong); transform: translateY(calc(-50% + 2px)) rotate(225deg); }
+.sdd-version-quick-add { width: var(--sdd-version-add); min-height: var(--sdd-version-add); flex: 0 0 var(--sdd-version-add); display: grid; place-items: center; margin-left: -1px; border: 1px solid var(--line); border-radius: 0; padding: 0; color: var(--muted); background: var(--surface-overlay); font-size: 13px; line-height: 1; transition: background .12s, border-color .12s, box-shadow .12s, color .12s; }
+.sdd-version-quick-add:hover:not(:disabled) { border-color: var(--hover-border); color: var(--strong); background: var(--hover-surface); }
+.sdd-version-quick-add:focus-visible { outline: 0; border-color: var(--blue); box-shadow: 0 0 0 2px var(--blue-soft); }
+.sdd-version-quick-add:disabled { cursor: not-allowed; opacity: .55; }
 .main-nav { display: grid; gap: 3px; }
 .sidebar-section { margin-top: 24px; padding-top: 0; border-top: 0; }
 .sidebar-project-heading { margin-bottom: 12px; }
