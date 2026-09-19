@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Icono de NexusData">
+  <defs>
+    <linearGradient id="background" x1="128" y1="96" x2="896" y2="928" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#132A52"/>
+      <stop offset="0.52" stop-color="#09172E"/>
+      <stop offset="1" stop-color="#050B17"/>
+    </linearGradient>
+    <linearGradient id="nexus" x1="258" y1="742" x2="766" y2="282" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#48E0C2"/>
+      <stop offset="0.52" stop-color="#4CB8FF"/>
+      <stop offset="1" stop-color="#8B7CFF"/>
+    </linearGradient>
+    <filter id="shadow" x="-25%" y="-25%" width="150%" height="150%">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="22" result="blur"/>
+      <feOffset dy="18" result="offset"/>
+      <feColorMatrix in="offset" values="0 0 0 0 0 0 0 0 0 0.05 0 0 0 0 0.12 0 0 0 .55 0"/>
+      <feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+  <rect x="64" y="64" width="896" height="896" rx="216" fill="url(#background)" filter="url(#shadow)"/>
+  <rect x="82" y="82" width="860" height="860" rx="198" fill="none" stroke="#78C7FF" stroke-opacity=".16" stroke-width="12"/>
+  <path d="M284 724V300L512 620 740 300V724" fill="none" stroke="url(#nexus)" stroke-width="88" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M284 724 512 620 740 724" fill="none" stroke="#72D9F4" stroke-opacity=".38" stroke-width="24" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#E7FAFF" stroke="#4CB8FF" stroke-width="18">
+    <circle cx="284" cy="300" r="45"/>
+    <circle cx="284" cy="724" r="45"/>
+    <circle cx="512" cy="620" r="45"/>
+    <circle cx="740" cy="300" r="45"/>
+    <circle cx="740" cy="724" r="45"/>
+  </g>
+</svg>

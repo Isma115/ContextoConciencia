@@ -58,9 +58,11 @@
     "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
     "mac": {
       "category": "public.app-category.productivity",
-      "identity": null
+      "identity": null,
+      "icon": "build/icon.icns"
     },
     "win": {
+      "icon": "build/icon.ico",
       "target": [
         "nsis"
       ]

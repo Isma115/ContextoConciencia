@@ -42,6 +42,7 @@ const DIAGRAM_MAX_FILE_BYTES = 2 * 1024 * 1024;
 const DIAGRAM_MAX_IMAGE_BYTES = 50 * 1024 * 1024;
 const WORKSPACE_MAX_FILE_BYTES = 50 * 1024 * 1024;
 const DESKTOP_PORT = Number(process.env.PORT) || 3000;
+const APP_ICON_PATH = path.join(__dirname, 'assets', 'icon.png');
 const OFFLINE_ONLY = true;
 const SDD_MEDIA_MIME_BY_EXTENSION = Object.freeze({
   png: 'image/png',
@@ -131,6 +132,7 @@ const PI_MAX_OUTPUT_BYTES = 10 * 1024 * 1024;
 const PI_OUTPUT_FLUSH_INTERVAL_MS = 10_000;
 const PI_OUTPUT_FLUSH_MIN_INTERVAL_MS = 1_000;
 const PI_OUTPUT_FLUSH_MAX_INTERVAL_MS = 3_600_000;
+const THIRD_PARTIES = new Set(['pi', 'opencode']);
 const PI_CATALOG_PROVIDERS = Object.freeze([
   {
     id: 'deepseek',
@@ -603,6 +605,17 @@ function piCommand() {
   return configured || 'pi';
 }
 
+function openCodeCommand() {
+  const configured = String(process.env.OPENCODE_COMMAND || '').trim();
+  return configured || 'opencode';
+}
+
+function validThirdParty(value) {
+  const thirdParty = String(value || 'pi').trim().toLowerCase();
+  if (!THIRD_PARTIES.has(thirdParty)) throw new Error('El tercero seleccionado no es válido');
+  return thirdParty;
+}
+
 function validPiProvider(value) {
   const provider = String(value || PI_DEFAULT_PROVIDER).trim();
   if (!/^[A-Za-z0-9._-]{1,80}$/.test(provider)) throw new Error('El proveedor de Pi no es válido');
@@ -656,8 +669,13 @@ function sendPiTerminalEvent(window, channel, payload) {
 
 function stopPiProcessForWindow(window) {
   const record = window ? piProcesses.get(window) : null;
-  if (!record || !record.child || record.child.killed) return false;
+  if (!record || record.finished) return false;
   record.stopRequested = true;
+  if (record.thirdParty === 'opencode' && (!record.child || record.child.killed)) {
+    record.finish?.(null, null);
+    return true;
+  }
+  if (!record.child || record.child.killed) return false;
   try {
     record.child.kill(process.platform === 'win32' ? undefined : 'SIGTERM');
     return true;
@@ -685,23 +703,26 @@ function writePiRpcCommand(record, command) {
 
 function sendPiMessageForWindow(window, value) {
   const record = window ? piProcesses.get(window) : null;
-  if (!record || record.finished || !record.child || record.child.killed) {
-    throw new Error('No hay una sesión de Pi activa');
-  }
+  if (!record || record.finished) throw new Error('No hay una sesión del tercero activa');
   const message = typeof value === 'string' ? value.trim() : '';
-  if (!message) throw new Error('Escribe un mensaje para Pi');
+  if (!message) throw new Error('Escribe un mensaje');
   if (Buffer.byteLength(message, 'utf8') > PI_MAX_MESSAGE_BYTES) {
-    throw new Error('El mensaje para Pi supera el límite de 100 KB');
+    throw new Error('El mensaje supera el límite de 100 KB');
   }
   const queued = record.agentStreaming === true || record.pendingMessages.length > 0;
   const pendingMessage = {
     id: `${record.runId}-message-${++record.rpcRequestNumber}`,
     message
   };
-  if (queued) {
+  if (record.thirdParty === 'opencode') {
+    record.pendingMessages.push(pendingMessage);
+    record.dispatchNextMessage?.();
+    record.notifyQueue?.();
+  } else if (queued) {
     record.pendingMessages.push(pendingMessage);
     record.notifyQueue?.();
   } else {
+    if (!record.child || record.child.killed) throw new Error('La sesión de Pi ya no acepta mensajes');
     writePiRpcCommand(record, { ...pendingMessage, type: 'prompt' });
     record.agentStreaming = true;
     record.notifyQueue?.();
@@ -709,13 +730,172 @@ function sendPiMessageForWindow(window, value) {
   return { queued };
 }
 
+function startOpenCodeProcess(window, payload, projectPath) {
+  const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+  if (!prompt.trim()) throw new Error('El prompt de Specs está vacío');
+  if (Buffer.byteLength(prompt, 'utf8') > PI_MAX_PROMPT_BYTES) throw new Error('El prompt de Specs supera el límite permitido');
+  const outputFlushIntervalMs = validPiOutputFlushInterval(payload.outputRefreshIntervalMs);
+  const runId = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  const record = {
+    agentStreaming: false,
+    child: null,
+    finished: false,
+    outputBytes: 0,
+    outputFlushIntervalMs,
+    outputFlushTimer: null,
+    outputPending: '',
+    outputTruncated: false,
+    pendingMessages: [],
+    rpcRequestNumber: 0,
+    runId,
+    sessionId: '',
+    stopRequested: false,
+    thirdParty: 'opencode'
+  };
+  piProcesses.set(window, record);
+
+  const flushOutput = () => {
+    if (!record.outputPending) return true;
+    const data = record.outputPending;
+    if (!sendPiTerminalEvent(window, 'pi-terminal-output', { runId, stream: 'stdout', data })) return false;
+    record.outputPending = '';
+    return true;
+  };
+  const scheduleOutputFlush = () => {
+    if (record.finished || record.outputFlushTimer) return;
+    record.outputFlushTimer = setTimeout(() => {
+      record.outputFlushTimer = null;
+      flushOutput();
+      if (record.outputPending) scheduleOutputFlush();
+    }, record.outputFlushIntervalMs);
+    record.outputFlushTimer.unref?.();
+  };
+  const queueOutput = (value) => {
+    if (record.outputTruncated) return;
+    const text = String(value ?? '');
+    record.outputBytes += Buffer.byteLength(text, 'utf8');
+    if (record.outputBytes > PI_MAX_OUTPUT_BYTES) {
+      record.outputTruncated = true;
+      record.outputPending += '\n[Salida de OpenCode truncada al superar 10 MB.]\n';
+    } else {
+      record.outputPending += text;
+    }
+    scheduleOutputFlush();
+  };
+  const notifyQueue = () => {
+    sendPiTerminalEvent(window, 'pi-terminal-queue', {
+      runId,
+      messages: record.pendingMessages.map(({ id, message }) => ({ id, message })),
+      willQueue: record.agentStreaming || record.pendingMessages.length > 0
+    });
+  };
+  const finish = (code, signal) => {
+    if (record.finished) return;
+    record.finished = true;
+    record.agentStreaming = false;
+    record.pendingMessages = [];
+    notifyQueue();
+    if (record.outputFlushTimer) clearTimeout(record.outputFlushTimer);
+    record.outputFlushTimer = null;
+    flushOutput();
+    if (piProcesses.get(window) === record) piProcesses.delete(window);
+    sendPiTerminalEvent(window, 'pi-terminal-exit', {
+      runId,
+      code: Number.isInteger(code) ? code : null,
+      signal: signal || null,
+      stopped: record.stopRequested === true
+    });
+  };
+  const eventText = (event) => {
+    if (!event || typeof event !== 'object') return '';
+    const sessionId = String(event.sessionID || event.sessionId || event.session_id || '').trim();
+    if (sessionId) record.sessionId = sessionId;
+    if (event.type === 'text' && typeof event.text === 'string') return event.text;
+    if (event.part?.type === 'text' && typeof event.part.text === 'string') return event.part.text;
+    if (event.type === 'error') return `\n[OpenCode error: ${event.error?.message || event.message || 'error desconocido'}]\n`;
+    return '';
+  };
+  const spawnRun = (message, continuation = false) => {
+    if (record.finished || record.stopRequested) return;
+    const args = ['run', '--format', 'json'];
+    if (continuation) args.push(record.sessionId ? '--session' : '--continue', ...(record.sessionId ? [record.sessionId] : []));
+    const decoder = new StringDecoder('utf8');
+    let stdoutBuffer = '';
+    let commandSettled = false;
+    const consume = (data, flush = false) => {
+      stdoutBuffer += Buffer.isBuffer(data) ? decoder.write(data) : String(data ?? '');
+      if (flush) stdoutBuffer += decoder.end();
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = flush ? '' : (lines.pop() || '');
+      lines.filter((line) => line.trim()).forEach((line) => {
+        try {
+          const text = eventText(JSON.parse(line));
+          if (text) queueOutput(text);
+        } catch {
+          queueOutput(`${line}\n`);
+        }
+      });
+    };
+    try {
+      record.child = spawn(openCodeCommand(), args, {
+        cwd: projectPath,
+        env: piEnvironment(),
+        stdio: ['pipe', 'pipe', 'pipe'],
+        windowsHide: true
+      });
+    } catch (error) {
+      sendPiTerminalEvent(window, 'pi-terminal-error', { runId, message: `No se pudo iniciar OpenCode: ${error.message}` });
+      finish(null, null);
+      return;
+    }
+    record.agentStreaming = true;
+    notifyQueue();
+    record.child.stdout?.on('data', (data) => consume(data));
+    record.child.stderr?.on('data', (data) => queueOutput(data.toString('utf8')));
+    record.child.once('error', (error) => {
+      sendPiTerminalEvent(window, 'pi-terminal-error', { runId, message: `No se pudo ejecutar OpenCode: ${error.message}` });
+    });
+    record.child.once('close', (code, signal) => {
+      if (commandSettled) return;
+      commandSettled = true;
+      consume('', true);
+      record.child = null;
+      record.agentStreaming = false;
+      if (record.stopRequested || code !== 0) {
+        finish(code, signal);
+        return;
+      }
+      queueOutput('\n[OpenCode listo para nuevos mensajes]\n');
+      record.dispatchNextMessage?.();
+      notifyQueue();
+    });
+    record.child.stdin?.once('error', (error) => {
+      if (!commandSettled) sendPiTerminalEvent(window, 'pi-terminal-error', { runId, message: `No se pudo enviar un mensaje a OpenCode: ${error.message}` });
+    });
+    record.child.stdin?.end(message, 'utf8');
+  };
+  record.scheduleOutputFlush = scheduleOutputFlush;
+  record.notifyQueue = notifyQueue;
+  record.finish = finish;
+  record.dispatchNextMessage = () => {
+    if (record.finished || record.agentStreaming || !record.pendingMessages.length) return;
+    const next = record.pendingMessages.shift();
+    spawnRun(next.message, true);
+  };
+
+  spawnRun(prompt, false);
+  return { runId, cwd: projectPath, thirdParty: 'opencode', outputRefreshIntervalMs };
+}
+
 function startPiProcess(event, payload = {}) {
   const window = windowFromEvent(event);
   if (!window) throw new Error('La ventana de NexusData ya no está disponible');
   const previous = piProcesses.get(window);
-  if (previous && !previous.finished) throw new Error('Ya hay una ejecución de Pi en curso');
+  if (previous && !previous.finished) throw new Error('Ya hay una ejecución de un tercero en curso');
 
   const projectPath = validPiProjectPath(payload.projectPath);
+  const thirdParty = validThirdParty(payload.thirdParty);
+  if (thirdParty === 'opencode') return startOpenCodeProcess(window, payload, projectPath);
   const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
   if (!prompt.trim()) throw new Error('El prompt de Specs está vacío');
   if (Buffer.byteLength(prompt, 'utf8') > PI_MAX_PROMPT_BYTES) throw new Error('El prompt de Specs supera el límite permitido');
@@ -746,7 +926,8 @@ function startPiProcess(event, payload = {}) {
     runId,
     stopRequested: false,
     stdoutBuffer: '',
-    stdoutDecoder: new StringDecoder('utf8')
+    stdoutDecoder: new StringDecoder('utf8'),
+    thirdParty: 'pi'
   };
 
   try {
@@ -858,7 +1039,7 @@ function startPiProcess(event, payload = {}) {
     throw new Error(`No se pudo enviar el prompt inicial a Pi: ${error.message}`);
   }
 
-  return { runId, cwd: projectPath, provider, model, thinking, outputRefreshIntervalMs: outputFlushIntervalMs };
+  return { runId, cwd: projectPath, thirdParty: 'pi', provider, model, thinking, outputRefreshIntervalMs: outputFlushIntervalMs };
 }
 
 // Menú nativo de edición: los roles de Electron habilitan Ctrl/Cmd+C y Ctrl/Cmd+X
@@ -1128,6 +1309,7 @@ function createWindow(apiBase) {
     show: false,
     opacity: process.platform === 'win32' ? 0 : 1,
     paintWhenInitiallyHidden: false,
+    icon: APP_ICON_PATH,
     title: 'NexusData',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1151,6 +1333,7 @@ function createWindow(apiBase) {
 
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null);
+  if (process.platform === 'darwin' && app.dock) app.dock.setIcon(APP_ICON_PATH);
 
   ipcMain.handle('set-view-menu', (event, view) => {
     const window = BrowserWindow.fromWebContents(event.sender);

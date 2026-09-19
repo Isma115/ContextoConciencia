@@ -58,14 +58,31 @@ Los popups verdes que aparecen arriba a la derecha impiden que pueda hacer click
 En la vista de Terminal permite especificar la frecuencia de actualización de la lectura del proceso de Pi (actualmente son 10 segundos)
 
 ## Carpeta de trabajo
-- Estado: Activa
+- Estado: Implementada
 - Categoría: Diseño
 - Color: Amarillo
 
 La carpeta de trabajo actual de S.D.D se mostrará en el título de la ventana electron junto al texto NexusData
 
 ## Enviar mensajes a Pi
-- Estado: Activa
+- Estado: Implementada
 - Categoría: Funcional
 
 Se podrán enviar mensajes a Pi desde el campo de texto de Terminal sin necesidad de pulsar el botón de Play de las Specs
+
+## Versión 0.0.2
+
+## Visualización de ficheros
+- Estado: Implementada
+- Categoría: Diseño
+- Color: Amarillo
+
+El aspecto de ficheros de código exclusivamente en el visor de Documentos el texto se tiene que ver coloreado de tal manera que siga un formato de color similar al de Visual Studio code
+
+## Versión 0.0.3
+
+## Integración con OpenCode
+- Estado: Activa
+- Categoría: Funcional
+
+De forma similar a Pi, quiero que se integre la consola de OpenCode (habrá una nueva opción combobox llamado "Tercero" en el que ahora se listará OpenCode también

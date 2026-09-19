@@ -83,7 +83,7 @@ const SDD_PI_TERMINAL_STORAGE_KEY = 'nexusdata.sdd-pi-terminal.v1';
 const SDD_PI_OUTPUT_REFRESH_DEFAULT_MS = 10_000;
 const SDD_PI_OUTPUT_REFRESH_MIN_MS = 1_000;
 const SDD_PI_OUTPUT_REFRESH_MAX_MS = 3_600_000;
-const SDD_PI_DEFAULT_CONFIG = Object.freeze({ provider: 'deepseek', model: 'deepseek-flash', thinking: 'max' });
+const SDD_PI_DEFAULT_CONFIG = Object.freeze({ thirdParty: 'pi', provider: 'deepseek', model: 'deepseek-flash', thinking: 'max' });
 const SDD_PI_THINKING_OPTIONS = Object.freeze([
   { value: 'off', label: 'Off' },
   { value: 'minimal', label: 'Minimal' },
@@ -224,6 +224,7 @@ let piTerminalState = {
   queuedMessages: [],
   provider: SDD_PI_DEFAULT_CONFIG.provider,
   runId: '',
+  thirdParty: SDD_PI_DEFAULT_CONFIG.thirdParty,
   signal: '',
   stopped: false,
   thinking: SDD_PI_DEFAULT_CONFIG.thinking,
@@ -266,10 +267,12 @@ function bindSpecCardColorPicker(initialColor = '') {
 }
 
 function normalisePiConfig(value = {}) {
+  const thirdParty = String(value.thirdParty ?? '').trim().toLowerCase();
   const provider = String(value.provider ?? '').trim();
   const model = String(value.model ?? '').trim();
   const thinking = String(value.thinking ?? '').trim().toLowerCase();
   return {
+    thirdParty: ['pi', 'opencode'].includes(thirdParty) ? thirdParty : SDD_PI_DEFAULT_CONFIG.thirdParty,
     provider: /^[A-Za-z0-9._-]{1,80}$/.test(provider) ? provider : SDD_PI_DEFAULT_CONFIG.provider,
     model: /^[A-Za-z0-9._:*?+\-/]{1,180}$/.test(model) ? model : SDD_PI_DEFAULT_CONFIG.model,
     thinking: SDD_PI_THINKING_OPTIONS.some((option) => option.value === thinking) ? thinking : SDD_PI_DEFAULT_CONFIG.thinking
@@ -394,15 +397,18 @@ async function loadPiModelCatalog() {
 
 function piSpecsControlsMarkup() {
   const thinkingOptions = SDD_PI_THINKING_OPTIONS.map((option) => `<option value="${escapeHtml(option.value)}"${option.value === sddPiConfig.thinking ? ' selected' : ''}>${escapeHtml(option.label)}</option>`).join('');
-  return `<div class="sdd-pi-config" aria-label="Configuración de Pi">
-    <label class="sdd-pi-field"><span>Proveedor</span><select id="sdd-pi-provider" class="select" aria-label="Proveedor de Pi">${piProviderOptionsMarkup()}</select></label>
-    <label class="sdd-pi-field"><span>Modelo</span><select id="sdd-pi-model" class="select" aria-label="Modelo de Pi">${piModelOptionsMarkup(sddPiConfig.provider)}</select></label>
-    <label class="sdd-pi-field"><span>Pensamiento</span><select id="sdd-pi-thinking" class="select" aria-label="Nivel de pensamiento">${thinkingOptions}</select></label>
+  const piDisabled = sddPiConfig.thirdParty === 'opencode' ? ' disabled' : '';
+  return `<div class="sdd-pi-config" aria-label="Configuración del tercero">
+    <label class="sdd-pi-field"><span>Tercero</span><select id="sdd-third-party" class="select" aria-label="Tercero"><option value="pi"${sddPiConfig.thirdParty === 'pi' ? ' selected' : ''}>Pi</option><option value="opencode"${sddPiConfig.thirdParty === 'opencode' ? ' selected' : ''}>OpenCode</option></select></label>
+    <label class="sdd-pi-field"><span>Proveedor</span><select id="sdd-pi-provider" class="select" aria-label="Proveedor de Pi"${piDisabled}>${piProviderOptionsMarkup()}</select></label>
+    <label class="sdd-pi-field"><span>Modelo</span><select id="sdd-pi-model" class="select" aria-label="Modelo de Pi"${piDisabled}>${piModelOptionsMarkup(sddPiConfig.provider)}</select></label>
+    <label class="sdd-pi-field"><span>Pensamiento</span><select id="sdd-pi-thinking" class="select" aria-label="Nivel de pensamiento"${piDisabled}>${thinkingOptions}</select></label>
   </div>`;
 }
 
 function readPiConfigFromEditor() {
   return persistPiConfig({
+    thirdParty: $('#sdd-third-party')?.value || sddPiConfig.thirdParty,
     provider: $('#sdd-pi-provider')?.value || sddPiConfig.provider,
     model: $('#sdd-pi-model')?.value || sddPiConfig.model,
     thinking: $('#sdd-pi-thinking')?.value || sddPiConfig.thinking
@@ -410,20 +416,31 @@ function readPiConfigFromEditor() {
 }
 
 function bindPiSpecsControls() {
+  const thirdParty = $('#sdd-third-party');
   const provider = $('#sdd-pi-provider');
   const model = $('#sdd-pi-model');
   const thinking = $('#sdd-pi-thinking');
-  if (!provider || !model || !thinking || provider.dataset.piBound === 'true') return;
+  if (!thirdParty || !provider || !model || !thinking || provider.dataset.piBound === 'true') return;
+  thirdParty.dataset.piBound = 'true';
   provider.dataset.piBound = 'true';
   model.dataset.piBound = 'true';
   thinking.dataset.piBound = 'true';
   const save = () => { readPiConfigFromEditor(); };
+  const syncThirdParty = () => {
+    const disabled = thirdParty.value === 'opencode';
+    provider.disabled = disabled;
+    model.disabled = disabled;
+    thinking.disabled = disabled;
+    save();
+  };
+  thirdParty.addEventListener('change', syncThirdParty);
   provider.addEventListener('change', () => {
     syncPiModelSelector({ preserveModel: false });
     save();
   });
   model.addEventListener('change', save);
   thinking.addEventListener('change', save);
+  syncThirdParty();
   void loadPiModelCatalog();
 }
 
@@ -432,6 +449,16 @@ function terminalOutputText(value) {
     .replace(/\u001B\][^\u0007]*(?:\u0007|\u001B\\)/g, '')
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/g, '')
     .replace(/\r/g, '');
+}
+
+function thirdPartyName(value = piTerminalState.thirdParty) {
+  return value === 'opencode' ? 'OpenCode' : 'Pi';
+}
+
+function terminalModelLabel() {
+  return piTerminalState.thirdParty === 'opencode'
+    ? 'OpenCode'
+    : `${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`;
 }
 
 function appendPiTerminalOutput(value) {
@@ -458,7 +485,7 @@ function updatePiTerminalMessageControls() {
   const available = hasSddProject() && !state.sddProject?.legacy;
   if (input) {
     input.disabled = !available;
-    input.placeholder = `${piTerminalState.messageWillQueue ? '(Cola) ' : ''}Escribe un mensaje para Pi…`;
+    input.placeholder = `${piTerminalState.messageWillQueue ? '(Cola) ' : ''}Escribe un mensaje para ${thirdPartyName()}…`;
   }
   if (send) send.disabled = !available || !String(input?.value || '').trim();
 }
@@ -474,7 +501,7 @@ function updatePiTerminalQueue() {
 function updatePiTerminalView() {
   const output = $('#sdd-terminal-output');
   if (output) {
-    output.textContent = terminalOutputText(piTerminalState.output) || 'Escribe un mensaje para iniciar Pi o pulsa “▶ Play” en Specs.';
+    output.textContent = terminalOutputText(piTerminalState.output) || 'Escribe un mensaje para iniciar el tercero seleccionado o pulsa “▶ Play” en Specs.';
     output.scrollTop = output.scrollHeight;
   }
   const status = piTerminalStatus();
@@ -490,9 +517,7 @@ function updatePiTerminalView() {
   const project = $('#sdd-terminal-project-path');
   if (project) project.textContent = piTerminalState.cwd || currentSddProjectPath() || 'Sin proyecto';
   const model = $('#sdd-terminal-model');
-  if (model) model.textContent = piTerminalState.runId
-    ? `${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`
-    : '—';
+  if (model) model.textContent = piTerminalState.runId ? terminalModelLabel() : '—';
 }
 
 function queuePiTerminalEvent(type, payload) {
@@ -509,7 +534,7 @@ function applyPiTerminalOutput(payload) {
 }
 
 function applyPiTerminalError(payload) {
-  piTerminalState.error = String(payload.message || 'Error desconocido al ejecutar Pi');
+  piTerminalState.error = String(payload.message || `Error desconocido al ejecutar ${thirdPartyName()}`);
   piTerminalState.running = false;
   piTerminalState.messageWillQueue = false;
   appendPiTerminalOutput(`\n\n[${piTerminalState.error}]\n`);
@@ -524,9 +549,10 @@ function applyPiTerminalExit(payload) {
   piTerminalState.running = false;
   piTerminalState.messageWillQueue = false;
   piTerminalState.queuedMessages = [];
+  const name = thirdPartyName();
   const result = piTerminalState.stopped
-    ? 'Pi detenido por el usuario.'
-    : `Pi finalizó${piTerminalState.code === null ? '' : ` con código ${piTerminalState.code}`}.`;
+    ? `${name} detenido por el usuario.`
+    : `${name} finalizó${piTerminalState.code === null ? '' : ` con código ${piTerminalState.code}`}.`;
   appendPiTerminalOutput(`\n\n[${result}]\n`);
   updatePiTerminalView();
 }
@@ -593,7 +619,7 @@ async function setPiTerminalOutputRefreshInterval(input) {
   } catch (error) {
     piTerminalState.outputRefreshIntervalMs = previousIntervalMs;
     input.value = String(previousIntervalMs / 1000);
-    showToast(error.message || 'No se pudo cambiar la frecuencia de actualización de Pi', true);
+    showToast(error.message || 'No se pudo cambiar la frecuencia de actualización del tercero', true);
   } finally {
     input.disabled = false;
   }
@@ -601,7 +627,7 @@ async function setPiTerminalOutputRefreshInterval(input) {
 
 async function startPiFromSpecs(button) {
   if (!hasSddProject() || state.sddProject?.legacy) {
-    showToast('Carga un proyecto S.D.D válido antes de ejecutar Pi', true);
+    showToast('Carga un proyecto S.D.D válido antes de ejecutar el tercero', true);
     return;
   }
   bindPiTerminalEvents();
@@ -612,7 +638,7 @@ async function startPiFromSpecs(button) {
   }
   const config = readPiConfigFromEditor();
   const provider = piProviderById(config.provider);
-  if (provider?.authentication === 'subscription' && provider.authenticated === false) {
+  if (config.thirdParty === 'pi' && provider?.authentication === 'subscription' && provider.authenticated === false) {
     showToast('Inicia sesión en Pi con /login y selecciona ChatGPT Plus/Pro (Codex)', true);
     return;
   }
@@ -624,6 +650,7 @@ async function startPiFromSpecs(button) {
     const result = await window.nexusData.startPiTerminal({
       projectPath: currentSddProjectPath(),
       prompt,
+      thirdParty: config.thirdParty,
       provider: config.provider,
       model: config.model,
       thinking: config.thinking,
@@ -635,7 +662,7 @@ async function startPiFromSpecs(button) {
       error: '',
       finished: false,
       model: result.model || config.model,
-      output: `$ pi --provider ${result.provider || config.provider} --model ${result.model || config.model} --thinking ${result.thinking || config.thinking} --approve --mode rpc\n$ cwd: ${result.cwd || currentSddProjectPath()}\n\nPrompt enviado:\n${prompt}\n\n`,
+      output: `${config.thirdParty === 'opencode' ? '$ opencode run --format json' : `$ pi --provider ${result.provider || config.provider} --model ${result.model || config.model} --thinking ${result.thinking || config.thinking} --approve --mode rpc`}\n$ cwd: ${result.cwd || currentSddProjectPath()}\n\nPrompt enviado:\n${prompt}\n\n`,
       outputRefreshIntervalMs: persistPiOutputRefreshInterval(result.outputRefreshIntervalMs),
       projectPath: currentSddProjectPath(),
       messageWillQueue: true,
@@ -644,14 +671,15 @@ async function startPiFromSpecs(button) {
       runId: result.runId,
       signal: '',
       stopped: false,
+      thirdParty: result.thirdParty || config.thirdParty,
       thinking: result.thinking || config.thinking,
       running: true
     };
     goToSddView('sdd-terminal');
     drainPiTerminalEvents(result.runId);
-    showToast(`Pi iniciado con ${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`);
+    showToast(config.thirdParty === 'opencode' ? 'OpenCode iniciado' : `Pi iniciado con ${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`);
   } catch (error) {
-    showToast(error.message || 'No se pudo iniciar Pi', true);
+    showToast(error.message || 'No se pudo iniciar el tercero', true);
   } finally {
     if (button?.isConnected) {
       button.disabled = false;
@@ -665,7 +693,7 @@ async function stopPiFromTerminal() {
   try {
     await window.nexusData?.stopPiTerminal?.();
   } catch (error) {
-    showToast(error.message || 'No se pudo detener Pi', true);
+    showToast(error.message || 'No se pudo detener el tercero', true);
   }
 }
 
@@ -686,13 +714,14 @@ async function sendPiMessageFromTerminal() {
       bindPiTerminalEvents();
       const config = normalisePiConfig(sddPiConfig);
       const provider = piProviderById(config.provider);
-      if (provider?.authentication === 'subscription' && provider.authenticated === false) {
+      if (config.thirdParty === 'pi' && provider?.authentication === 'subscription' && provider.authenticated === false) {
         showToast('Inicia sesión en Pi con /login y selecciona ChatGPT Plus/Pro (Codex)', true);
         return;
       }
       const result = await window.nexusData.startPiTerminal({
         projectPath: currentSddProjectPath(),
         prompt: message,
+        thirdParty: config.thirdParty,
         provider: config.provider,
         model: config.model,
         thinking: config.thinking,
@@ -704,7 +733,7 @@ async function sendPiMessageFromTerminal() {
         error: '',
         finished: false,
         model: result.model || config.model,
-        output: `$ pi --provider ${result.provider || config.provider} --model ${result.model || config.model} --thinking ${result.thinking || config.thinking} --approve --mode rpc\n$ cwd: ${result.cwd || currentSddProjectPath()}\n\nMensaje enviado:\n${message}\n\n`,
+        output: `${config.thirdParty === 'opencode' ? '$ opencode run --format json' : `$ pi --provider ${result.provider || config.provider} --model ${result.model || config.model} --thinking ${result.thinking || config.thinking} --approve --mode rpc`}\n$ cwd: ${result.cwd || currentSddProjectPath()}\n\nMensaje enviado:\n${message}\n\n`,
         outputRefreshIntervalMs: persistPiOutputRefreshInterval(result.outputRefreshIntervalMs),
         projectPath: currentSddProjectPath(),
         messageWillQueue: true,
@@ -713,15 +742,16 @@ async function sendPiMessageFromTerminal() {
         runId: result.runId,
         signal: '',
         stopped: false,
+        thirdParty: result.thirdParty || config.thirdParty,
         thinking: result.thinking || config.thinking,
         running: true
       };
       drainPiTerminalEvents(result.runId);
-      showToast(`Pi iniciado con ${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`);
+      showToast(config.thirdParty === 'opencode' ? 'OpenCode iniciado' : `Pi iniciado con ${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}`);
     }
     if (input) input.value = '';
   } catch (error) {
-    showToast(error.message || 'No se pudo enviar el mensaje a Pi', true);
+    showToast(error.message || 'No se pudo enviar el mensaje al tercero', true);
   } finally {
     updatePiTerminalView();
     if (!input?.disabled) input?.focus();
@@ -1854,7 +1884,7 @@ export function renderSddSpecs() {
   const requestId = ++renderRequestId;
   const filterDefinitions = SDD_FILTER_DEFINITIONS.specs;
   const activeVersion = state.sddProject?.activeVersion || '—';
-  const actions = `<button id="sdd-pi-play" class="btn sdd-pi-play" type="button" aria-label="Ejecutar Pi siguiendo Specs" title="Ejecutar Pi siguiendo el prompt de Trabajar siguiendo specs">▶</button>${piSpecsControlsMarkup()}<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Editar el snapshot ${escapeHtml(activeVersion)}">Editar markdown</button>`;
+  const actions = `<button id="sdd-pi-play" class="btn sdd-pi-play" type="button" aria-label="Ejecutar el tercero siguiendo Specs" title="Ejecutar el tercero siguiendo el prompt de Trabajar siguiendo specs">▶</button>${piSpecsControlsMarkup()}<button id="sdd-md-edit" class="btn btn-secondary" type="button" title="Editar el snapshot ${escapeHtml(activeVersion)}">Editar markdown</button>`;
   container.innerHTML = `${sddHeader('specs', `Specs · ${activeVersion}`)}${sddToolbar('', '', 'sdd-spec-add', '＋ Añadir spec', actions)}${sddFilterBar('specs', 'Filtros de requisitos', 'Buscar por título, categoría o descripción…', filterDefinitions)}<div class="sdd-list" id="sdd-spec-list"><div class="empty">Cargando especificaciones…</div></div>`;
   moveSddToolbarActionsToHeader(container);
   $('#sdd-spec-add').addEventListener('click', () => openSpecModal());
@@ -1885,14 +1915,14 @@ export function renderSddTerminal() {
   const status = piTerminalStatus();
   container.innerHTML = `${sddHeader('terminal', 'Terminal')}<div class="sdd-terminal-shell">
     <div class="sdd-terminal-toolbar">
-      <div class="sdd-terminal-toolbar-copy"><span class="sdd-terminal-eyebrow">PI / SPECS</span><strong id="sdd-terminal-status" class="sdd-terminal-status ${status.className}">${escapeHtml(status.label)}</strong></div>
-      <div class="sdd-terminal-toolbar-actions"><span id="sdd-terminal-model" class="sdd-terminal-model">${escapeHtml(piTerminalState.runId ? `${piTerminalState.provider}/${piTerminalState.model} · ${piTerminalState.thinking}` : '—')}</span><label class="sdd-terminal-refresh"><span>Actualización</span><input id="sdd-terminal-refresh" class="field" type="number" min="1" max="3600" step="1" value="${escapeHtml(String(piTerminalState.outputRefreshIntervalMs / 1000))}" aria-label="Frecuencia de actualización de la lectura de Pi en segundos"><span>s</span></label><button id="sdd-terminal-clear" class="btn btn-secondary btn-small" type="button">Limpiar</button><button id="sdd-pi-stop" class="btn btn-danger btn-small" type="button"${piTerminalState.running ? '' : ' disabled'}>Detener</button></div>
+      <div class="sdd-terminal-toolbar-copy"><span class="sdd-terminal-eyebrow">TERCERO / SPECS</span><strong id="sdd-terminal-status" class="sdd-terminal-status ${status.className}">${escapeHtml(status.label)}</strong></div>
+      <div class="sdd-terminal-toolbar-actions"><span id="sdd-terminal-model" class="sdd-terminal-model">${escapeHtml(piTerminalState.runId ? terminalModelLabel() : '—')}</span><label class="sdd-terminal-refresh"><span>Actualización</span><input id="sdd-terminal-refresh" class="field" type="number" min="1" max="3600" step="1" value="${escapeHtml(String(piTerminalState.outputRefreshIntervalMs / 1000))}" aria-label="Frecuencia de actualización de la lectura del tercero en segundos"><span>s</span></label><button id="sdd-terminal-clear" class="btn btn-secondary btn-small" type="button">Limpiar</button><button id="sdd-pi-stop" class="btn btn-danger btn-small" type="button"${piTerminalState.running ? '' : ' disabled'}>Detener</button></div>
     </div>
     <div class="sdd-terminal-project"><span>Carpeta de trabajo</span><code id="sdd-terminal-project-path">${escapeHtml(piTerminalState.cwd || currentSddProjectPath())}</code></div>
-    <pre id="sdd-terminal-output" class="sdd-terminal-output" tabindex="0">${escapeHtml(terminalOutputText(piTerminalState.output) || 'Escribe un mensaje para iniciar Pi o pulsa “▶ Play” en Specs.')}</pre>
+    <pre id="sdd-terminal-output" class="sdd-terminal-output" tabindex="0">${escapeHtml(terminalOutputText(piTerminalState.output) || 'Escribe un mensaje para iniciar el tercero seleccionado o pulsa “▶ Play” en Specs.')}</pre>
     <div id="sdd-terminal-queue" class="sdd-terminal-queue" aria-live="polite" hidden></div>
     <form id="sdd-terminal-message-form" class="sdd-terminal-message-form">
-      <input id="sdd-terminal-input" class="field sdd-terminal-input" type="text" maxlength="102400" autocomplete="off" placeholder="Escribe un mensaje para Pi…" aria-label="Mensaje para Pi">
+      <input id="sdd-terminal-input" class="field sdd-terminal-input" type="text" maxlength="102400" autocomplete="off" placeholder="Escribe un mensaje para ${escapeHtml(thirdPartyName())}…" aria-label="Mensaje para el tercero">
       <button id="sdd-terminal-send" class="btn btn-primary btn-small" type="submit" disabled>Enviar</button>
     </form>
   </div>`;

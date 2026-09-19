@@ -655,9 +655,10 @@ body.is-code-map-resizing, body.is-code-map-resizing * { cursor: col-resize !imp
 .sdd-pi-config { display: flex; align-items: end; flex-wrap: wrap; gap: 6px; }
 .sdd-pi-field { min-width: 92px; display: grid; gap: 3px; color: var(--muted-2); font-family: var(--mono); font-size: 8px; letter-spacing: .4px; text-transform: uppercase; }
 .sdd-pi-field .field, .sdd-pi-field .select { width: 100%; min-height: 31px; box-sizing: border-box; }
-.sdd-pi-field:nth-of-type(1) { min-width: 160px; }
-.sdd-pi-field:nth-of-type(2) { min-width: 185px; }
-.sdd-pi-field:nth-of-type(3) { min-width: 100px; }
+.sdd-pi-field:nth-of-type(1) { min-width: 100px; }
+.sdd-pi-field:nth-of-type(2) { min-width: 160px; }
+.sdd-pi-field:nth-of-type(3) { min-width: 185px; }
+.sdd-pi-field:nth-of-type(4) { min-width: 100px; }
 .sdd-pi-play { width: 38px; min-width: 38px; min-height: 31px; display: inline-flex; align-items: center; justify-content: center; padding: 0; border-color: var(--success-border); color: var(--surface-deep); background: var(--green); font-size: 14px; line-height: 1; }
 .sdd-pi-play:hover:not(:disabled) { border-color: var(--success-text); color: var(--surface-deep); background: var(--success-text); box-shadow: 0 0 0 2px var(--success-surface); }
 .sdd-pi-config + .btn { min-height: 31px; }
